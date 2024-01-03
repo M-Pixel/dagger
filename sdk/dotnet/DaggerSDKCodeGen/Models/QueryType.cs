@@ -1,13 +1,14 @@
-﻿namespace DaggerSDKCodeGen.Models;
+﻿using System.Collections.Immutable;
 
-public class QueryType
-{
-    public string? Description { get; set; }
-    public EnumType[]? EnumValues { get; set; }
-    public QueryField[]? Fields { get; set; }
-    public InputField[]? InputFields { get; set; }
-    public string[]? Interfaces { get; set; }
-    public string? Kind { get; set; }
-    public string? Name { get; set; }
-    public string[]? PossibleTypes { get; set; }
-}
+namespace DaggerSDKCodeGen.Models;
+
+record QueryType(
+	string? Description,
+	ImmutableArray<EnumType>? EnumValues,
+	ImmutableArray<QueryField>? Fields,
+	ImmutableArray<InputField>? InputFields,
+	ImmutableArray<string>? Interfaces,
+	string? Kind,
+	string? Name,
+	ImmutableArray<string>? PossibleTypes
+);
