@@ -1,6 +1,5 @@
 ﻿using System.Collections.Immutable;
 using DaggerSDK.GraphQL;
-using DaggerSDKCodeGen;
 using DaggerSDKCodeGen.Models;
 using System.Text.Json;
 
@@ -11,7 +10,7 @@ JsonSerializerOptions jsonSerializerOptions = new()
 };
 
 GraphQLClient client = new();
-HttpResponseMessage introspectionResponse = await client.RequestAsync(IntrospectionQuery.Query);
+HttpResponseMessage introspectionResponse = await client.RequestAsync(File.ReadAllText("../../../cmd/codegen/introspection/introspection.graphql"));
 string introspectionResponseBody = await introspectionResponse.Content.ReadAsStringAsync();
 var doc = JsonDocument.Parse(introspectionResponseBody);
 JsonElement schema = doc.RootElement.GetProperty("data").GetProperty("__schema");
