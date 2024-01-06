@@ -17,7 +17,10 @@ JsonElement schema = doc.RootElement.GetProperty("data").GetProperty("__schema")
 
 var directives = schema.GetProperty("directives").Deserialize<ImmutableList<QueryDirective>>(jsonSerializerOptions)
 	?? throw new Exception("Failed to deserialize directives");
-var types = schema.GetProperty("types").Deserialize<ImmutableList<QueryType>>(jsonSerializerOptions)
+var types = schema.GetProperty("types").Deserialize<ImmutableList<RawQueryType>>(jsonSerializerOptions)?
+	.Select(raw => new QueryType(raw))
+	.OrderBy(queryType => queryType.Name)
+	.ToImmutableList()
 	?? throw new Exception("Failed to deserialize types");
 
 Console.WriteLine("Writing introspect-api.json");
