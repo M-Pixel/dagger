@@ -3,7 +3,9 @@ using DaggerSDKCodeGen.Models;
 using System.Text.Json;
 using DaggerSDK;
 using GraphQL;
-using GraphQL.Client.Abstractions.Websocket;
+using GraphQL.Client.Abstractions;
+using static System.Environment;
+using static DaggerSDK.CodeGen.Statics;
 
 JsonSerializerOptions jsonSerializerOptions = new()
 {
@@ -11,9 +13,8 @@ JsonSerializerOptions jsonSerializerOptions = new()
 	WriteIndented = true
 };
 
-if (GraphQLClientFactory.TryGetParentSession(out EngineConnectionParameters? clientConfiguration) == false)
-	throw new Exception("Codegen must be launched via the Dagger CLI.  Check the readmes.");
-IGraphQLWebSocketClient client = GraphQLClientFactory.Create(clientConfiguration);
+(IGraphQLClient client, IEngineConnection? connection) = await CreateGraphQLClient();
+
 GraphQLResponse<JsonDocument> introspectionResponse = await client.SendQueryAsync<JsonDocument>
 (
 	new GraphQLRequest(File.ReadAllText("../../../cmd/codegen/introspection/introspection.graphql"))
@@ -44,3 +45,5 @@ File.WriteAllText("introspect-parsed.json", JsonSerializer.Serialize(new
 
 Console.WriteLine("Directives extracted: {0}", directives.Count);
 Console.WriteLine("Types extracted: {0}", types.Count);
+
+connection?.Dispose();

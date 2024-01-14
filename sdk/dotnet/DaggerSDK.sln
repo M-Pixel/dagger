@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DaggerSDKCodeGen", "DaggerS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EngineConnection", "EngineConnection\EngineConnection.csproj", "{9A7E7FB6-D0F0-4D23-9A70-2DF91264E92B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Errors", "Errors\Errors.csproj", "{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -35,6 +37,10 @@ Global
 		{9A7E7FB6-D0F0-4D23-9A70-2DF91264E92B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9A7E7FB6-D0F0-4D23-9A70-2DF91264E92B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9A7E7FB6-D0F0-4D23-9A70-2DF91264E92B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

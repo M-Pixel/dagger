@@ -4,17 +4,12 @@
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <AssemblyName>DaggerSDK.Errors</AssemblyName>
         <RootNamespace>DaggerSDK</RootNamespace>
-        <AssemblyName>DaggerSDK.EngineConnection</AssemblyName>
     </PropertyGroup>
 
     <ItemGroup>
       <PackageReference Include="GraphQL.Client" Version="6.0.2" />
-      <PackageReference Include="GraphQL.Client.Serializer.SystemTextJson" Version="6.0.2" />
-    </ItemGroup>
-
-    <ItemGroup>
-      <ProjectReference Include="..\Errors\Errors.csproj" />
     </ItemGroup>
 
 </Project>
