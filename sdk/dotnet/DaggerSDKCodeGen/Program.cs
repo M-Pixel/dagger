@@ -1,7 +1,9 @@
 ﻿using System.Collections.Immutable;
-using DaggerSDK.GraphQL;
 using DaggerSDKCodeGen.Models;
 using System.Text.Json;
+using DaggerSDK;
+using GraphQL;
+using GraphQL.Client.Abstractions.Websocket;
 
 JsonSerializerOptions jsonSerializerOptions = new()
 {
@@ -9,11 +11,15 @@ JsonSerializerOptions jsonSerializerOptions = new()
 	WriteIndented = true
 };
 
-GraphQLClient client = new();
-HttpResponseMessage introspectionResponse = await client.RequestAsync(File.ReadAllText("../../../cmd/codegen/introspection/introspection.graphql"));
-string introspectionResponseBody = await introspectionResponse.Content.ReadAsStringAsync();
-var doc = JsonDocument.Parse(introspectionResponseBody);
-JsonElement schema = doc.RootElement.GetProperty("data").GetProperty("__schema");
+if (GraphQLClientFactory.TryGetParentSession(out EngineConnectionParameters? clientConfiguration) == false)
+	throw new Exception("Codegen must be launched via the Dagger CLI.  Check the readmes.");
+IGraphQLWebSocketClient client = GraphQLClientFactory.Create(clientConfiguration);
+GraphQLResponse<JsonDocument> introspectionResponse = await client.SendQueryAsync<JsonDocument>
+(
+	new GraphQLRequest(File.ReadAllText("../../../cmd/codegen/introspection/introspection.graphql"))
+);
+JsonDocument doc = introspectionResponse.Data;
+JsonElement schema = doc.RootElement.GetProperty("__schema");
 
 var directives = schema.GetProperty("directives").Deserialize<ImmutableList<QueryDirective>>(jsonSerializerOptions)
 	?? throw new Exception("Failed to deserialize directives");
