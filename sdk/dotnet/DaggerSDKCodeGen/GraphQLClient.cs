@@ -2,9 +2,9 @@ using System.Reflection;
 using GraphQL.Client.Abstractions;
 using static System.Environment;
 
-namespace DaggerSDK.CodeGen;
+namespace DaggerSDK;
 
-static class Statics
+static class Bootstrap
 {
 	public static async Task<(IGraphQLClient, IEngineConnection?)> CreateGraphQLClient()
 	{

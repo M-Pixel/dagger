@@ -1,6 +1,10 @@
-﻿using DaggerSDK.GraphQL;
+﻿using System.Text.Json;
+using DaggerSDK;
+using GraphQL;
+using GraphQL.Client.Abstractions;
 using IntegrationTests.TestData;
 using Newtonsoft.Json;
+using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace IntegrationTests;
 
@@ -9,33 +13,27 @@ public class BasicTests
     [Test]
     public async Task BasicConnectAsync()
     {
-        var query = LaravelExample.RuntimeQuery;
-        var client = new GraphQLClient();
-        var response = await client.RequestAsync(query);
-        var body = await response.Content.ReadAsStringAsync();
-        var json = JsonConvert.DeserializeObject(body);
-        Console.WriteLine(JsonConvert.SerializeObject(json, Formatting.Indented));
-        Assert.That((int)response.StatusCode, Is.EqualTo(200));
+        string query = LaravelExample.RuntimeQuery;
+        IGraphQLClient client = await new Context().Connection();
+        GraphQLResponse<JsonDocument> response = await client.SendQueryAsync<JsonDocument>(query);
+        Console.WriteLine(JsonConvert.SerializeObject(response.Data.ToString(), Formatting.Indented));
+        Assert.That(response.Errors == null || response.Errors.Length == 0);
     }
 
     [Test]
-    public void CreateQuery()
+    public async Task ContainerBuilder()
     {
-        var e = LaravelExample.RuntimeQueryElement;
-        var q = Serializer.Serialize(e).Replace("\\u0027", "'");
-        Console.WriteLine(q);
-        Assert.That(q, Is.EqualTo(LaravelExample.RuntimeQuery.Replace("\r\n", "\n").Replace("    ", "  ")));
-    }
-
-    [Test]
-    public void ContainerBuilder()
-    {
-        var builder = LaravelExample.ContainerBuilder;
-        var builderQuery = Serializer.Serialize(builder.GetQuery());
-
-        var compare = LaravelExample.RuntimeQueryElement;
-        var expectedResult = Serializer.Serialize(compare);
-
-        Assert.That(builderQuery, Is.EqualTo(expectedResult));
+        string? query = null;
+        GraphQLClientMock mockClient = new()
+        {
+            SendQueryAsyncOverride = async (Type type, GraphQLRequest request, CancellationToken token) =>
+            {
+                query = request.Query;
+                return new GraphQLResponse<object> { Data = JsonSerializer.Deserialize<JsonDocument>("{\"x\":\"12345\"}")! };
+            }
+        };
+        Client client = new() { Context = new Context(new ContextConfiguration(mockClient)) };
+        await LaravelExample.ContainerBuilder(client);
+        Assert.That(query, Is.EqualTo(LaravelExample.RuntimeQuery.Replace("\n", "")));
     }
 }

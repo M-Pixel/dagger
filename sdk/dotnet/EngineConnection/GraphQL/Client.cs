@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using GraphQL.Client.Abstractions.Websocket;
 using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.SystemTextJson;
@@ -32,7 +34,13 @@ public static class GraphQLClientFactory
 		GraphQLHttpClient result = new
 		(
 			$"http://127.0.0.1:{configuration.Port}/query",
-			new SystemTextJsonSerializer()
+			new SystemTextJsonSerializer
+			(
+				new JsonSerializerOptions
+				{
+					Converters = { new ImmutableArrayConverterFactory(), new JsonStringEnumConverter() }
+				}
+			)
 		);
 		result.HttpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue
 		(

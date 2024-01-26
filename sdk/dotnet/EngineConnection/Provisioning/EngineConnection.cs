@@ -22,8 +22,8 @@ public record AdvancedConnectionOptions : ConnectionOptions
 		this.TimeoutMs = TimeoutMs;
 	}
 
-	public AdvancedConnectionOptions(ConnectionOptions connectionOptions)
-		: base(connectionOptions)
+	public AdvancedConnectionOptions(ConnectionOptions? connectionOptions = null)
+		: base(connectionOptions?.WorkingDirectory, connectionOptions?.LogOutput)
 	{}
 }
 
