@@ -52,16 +52,8 @@ static class APIUtils
 			{
 				queryOut.Append('[');
 				ParameterSerialization parameterSerialization = arguments[argumentIndex].HowToSerialize;
-				IEnumerable arrayContents;
-				if (parameterSerialization == ParameterSerialization.Reference)
-				{
-					arrayContents = await (Task<IList<string>>)arguments[argumentIndex].Value!;
-					parameterSerialization = ParameterSerialization.String;
-				}
-				else
-					arrayContents = (IEnumerable)arguments[argumentIndex].Value!;
 
-				foreach (object element in arrayContents)
+				foreach (object element in (IEnumerable)arguments[argumentIndex].Value!)
 				{
 					await serializeValue(parameterSerialization, element);
 					queryOut.Append(',');
@@ -87,30 +79,27 @@ static class APIUtils
 	/// <summary>
 	/// Find QueryTree, convert them into GraphQl query then compute and return the result to the appropriate field.
 	/// </summary>
-	static async Task ComputeNestedQuery(IReadOnlyList<Operation> query, IGraphQLClient queryClient)
+	static void ComputeNestedQuery(IReadOnlyList<Operation> query, IGraphQLClient queryClient)
 	{
 		// Prepare query tree for final query by computing nested queries and building it with their results.
 		async Task<string> computeQueryTree(BaseClient value)
 		{
 			// Resolve sub queries if operation's args is a subquery
-			foreach (Operation operation in value.QueryTree)
-				await ComputeNestedQuery(ImmutableList.Create(operation), queryClient);
+			ComputeNestedQuery(value.QueryTree, queryClient);
 
 			// push an id that will be used by the container
 			StringBuilder queryStringBuilder = new();
 			await BuildQuery(queryStringBuilder, value.QueryTree.Add(new Operation("id")));
 			return queryStringBuilder.ToString();
 		}
-		async Task<IList<string>> computeMany(IEnumerable<BaseClient> clientObjects)
+		IList<Task<string>> computeMany(IEnumerable<BaseClient> clientObjects)
 		{
-			IList<string> result = clientObjects is ICollection<BaseClient> list
-				? new List<string>(list.Count)
-				: ImmutableList.CreateBuilder<string>();
+			// Allocate different list implementation depending on whether we know total count ahead of time
+			IList<Task<string>> result = clientObjects is ICollection<BaseClient> list
+				? new List<Task<string>>(list.Count)
+				: ImmutableList.CreateBuilder<Task<string>>();
 			foreach (BaseClient clientObject in clientObjects)
-			{
-				string clientIdQuery = await computeQueryTree(clientObject);
-				result.Add((await Compute(clientIdQuery, queryClient)).Deserialize<string>()!);
-			}
+				result.Add(compute(clientObject));
 
 			return result;
 		}
@@ -122,8 +111,6 @@ static class APIUtils
 
 		foreach (Operation queryTree in query.Where(tree => tree.Arguments.Length != 0))
 		{
-			List<Task> tasks = new();
-
 			for (int argumentIndex = 0; argumentIndex < queryTree.Arguments.Length; argumentIndex++)
 			{
 				if (queryTree.Arguments[argumentIndex].HowToSerialize == ParameterSerialization.Reference)
@@ -134,16 +121,13 @@ static class APIUtils
 						{
 							switch (queryTree.Arguments[argumentIndex].Value)
 							{
-								case Task<IList<string>> task:
+								case Task<IList<string>>:
 									// Already computed, or already started by another thread
-									tasks.Add(task);
 									continue;
 								case IEnumerable<BaseClient> clientObjects:
-									Task<IList<string>> newTask = computeMany(clientObjects);
-									tasks.Add(newTask);
 									queryTree.Arguments[argumentIndex] = queryTree.Arguments[argumentIndex] with
 									{
-										Value = newTask
+										Value = computeMany(clientObjects)
 									};
 									break;
 								default:
@@ -159,12 +143,9 @@ static class APIUtils
 					{
 						lock (queryTree.Arguments)
 						{
-							if (queryTree.Arguments[argumentIndex].Value is Task<string> task)
-								tasks.Add(task);
-							else
+							if (queryTree.Arguments[argumentIndex].Value is not Task<string>)
 							{
 								Task<string> newTask = compute((BaseClient)queryTree.Arguments[argumentIndex].Value!);
-								tasks.Add(newTask);
 								queryTree.Arguments[argumentIndex] = queryTree.Arguments[argumentIndex] with
 								{
 									Value = newTask
@@ -174,8 +155,6 @@ static class APIUtils
 					}
 				}
 			}
-
-			await Task.WhenAll(tasks);
 		}
 	}
 
@@ -202,7 +181,7 @@ static class APIUtils
 	/// <summary>Convert querytree into a Graphql query then compute it.</summary>
 	public static async Task<JsonElement> ComputeQuery(ImmutableList<Operation> queryTree, IGraphQLClient client)
 	{
-		await ComputeNestedQuery(queryTree, client);
+		ComputeNestedQuery(queryTree, client);
 		StringBuilder queryStringBuilder = new();
 		await BuildQuery(queryStringBuilder, queryTree);
 		return await Compute(queryStringBuilder.ToString(), client);
