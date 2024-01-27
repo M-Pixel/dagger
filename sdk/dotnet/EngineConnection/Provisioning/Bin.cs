@@ -8,8 +8,11 @@ namespace DaggerSDK;
 public class LocalExecutable : IEngineConnection
 {
 	private Process? _subProcess;
+	private Task<IGraphQLClient>? _client;
+	private bool _disposed;
+	private readonly object _criticalSection = new();
 
-	private string _binPath;
+	private readonly string _binPath;
 
 
 	public LocalExecutable(string binPath)
@@ -17,18 +20,46 @@ public class LocalExecutable : IEngineConnection
 		_binPath = binPath;
 	}
 
-	public void Dispose() => _subProcess?.Dispose();
+	public void Dispose()
+	{
+		lock (_criticalSection)
+		{
+			_disposed = true;
+			_subProcess?.Dispose();
+			_subProcess = null;
+			_client = null;
+		}
+	}
 
 
 	public string Address => "http://dagger";
 
-	public Process? SubProcess => _subProcess;
+	public Process? SubProcess
+	{
+		get
+		{
+			lock (_criticalSection)
+			{
+				ObjectDisposedException.ThrowIf(_disposed, this);
+				return _subProcess;
+			}
+		}
+	}
 
 
-	public async Task<IGraphQLClient> Connect(AdvancedConnectionOptions connectionOptions)
-		=> await RunEngineSession(_binPath, connectionOptions);
+	// TODO: This is poorly encapsulated - semantics of parameterized Connect & parameterless Close disagree - should be factory, not method
+	public Task<IGraphQLClient> Connect(AdvancedConnectionOptions connectionOptions)
+		=> _client ??= RunEngineSession(_binPath, connectionOptions);
 
-	public void Close() => _subProcess?.Kill();
+	public void Close()
+	{
+		lock (_criticalSection)
+		{
+			_subProcess?.Kill();
+			_subProcess = null;
+			_client = null;
+		}
+	}
 
 
 	/// <summary>Execute the engine binary and set up a GraphQL client that target this engine.</summary>
@@ -55,7 +86,7 @@ public class LocalExecutable : IEngineConnection
 
 		connectionOptions.LogOutput?.WriteAsync("Creating new Engine session... ");
 
-		_subProcess = Process.Start
+		var subProcess = Process.Start
 		(
 			new ProcessStartInfo
 			(
@@ -68,6 +99,9 @@ public class LocalExecutable : IEngineConnection
 			}
 		)!;
 
+		lock (_criticalSection)
+			_subProcess = subProcess;
+
 #pragma warning disable CS4014 // Because this call is not awaited, execution of the current method continues before the call is completed
 		// Log the output if the user wants to.
 		if (connectionOptions.LogOutput != null)
@@ -78,25 +112,33 @@ public class LocalExecutable : IEngineConnection
 
 		connectionOptions.LogOutput?.WriteAsync("OK!\nEstablishing connection to Engine... ");
 
-		EngineConnectionParameters connectionParameters = await await Task.WhenAny<EngineConnectionParameters?>
+		EngineConnectionParameters connectionParameters =
 		(
-			ReadConnectionParameters(_subProcess.StandardOutput)!,
-			Task.Delay(timeOutDurationMs).ContinueWith(_ => (EngineConnectionParameters?)null)
-		)
-			?? throw new EngineSessionConnectionTimeout
+			await Task.WhenAny<EngineConnectionParameters?>
 			(
-				"Engine connection timeout",
-				new EngineSessionConnectionTimeoutExceptionOptions(TimeOutDurationMs: timeOutDurationMs)
-			);
+				ReadConnectionParameters(subProcess)!,
+				Task.Delay(timeOutDurationMs).ContinueWith(_ => (EngineConnectionParameters?)null)
+			)
+		)
+			.Result ?? throw new EngineSessionConnectionTimeout
+				(
+					"Engine connection timeout",
+					new EngineSessionConnectionTimeoutExceptionOptions(TimeOutDurationMs: timeOutDurationMs)
+				);
+		lock (_criticalSection)
+			if (_disposed)
+				throw new TaskCanceledException("Executable Disposed");
+			else if (_subProcess == null)
+				throw new TaskCanceledException("Executable closed");
 
 		connectionOptions.LogOutput?.WriteLineAsync("OK!");
 
 		return GraphQLClientFactory.Create(connectionParameters);
 	}
 
-	private async Task<EngineConnectionParameters> ReadConnectionParameters(StreamReader stdoutReader)
+	private async Task<EngineConnectionParameters> ReadConnectionParameters(Process subProcess)
 	{
-		if (await stdoutReader.ReadLineAsync() is string line)
+		if (await subProcess.StandardOutput.ReadLineAsync() is string line)
 		{
 			// parse the the line as json-encoded connect params
 			try
@@ -123,11 +165,11 @@ public class LocalExecutable : IEngineConnection
 		// the error.
 		try
 		{
-			await _subProcess!.WaitForExitAsync();
+			await subProcess.WaitForExitAsync();
 		}
 		finally
 		{
-			throw new EngineSessionException(_subProcess?.ExitCode.ToString() ?? "null sub-process");
+			throw new EngineSessionException(subProcess.ExitCode.ToString());
 		}
 	}
 }

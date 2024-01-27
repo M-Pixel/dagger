@@ -30,7 +30,7 @@ enum ParameterSerialization : byte
 ///		doing so is substantially more complicated, and less efficient.  The efficiency hardly matters, but that's
 ///		exactly why eliminating a few bytes isn't worth the resulting addition in complexity and ambiguity elsewhere.
 /// </remarks>
-readonly record struct OperationArgument
+record struct OperationArgument
 (
 	string Name,
 	object? Value,

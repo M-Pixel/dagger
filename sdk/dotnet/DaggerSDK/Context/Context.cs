@@ -23,36 +23,46 @@ public record ContextConfiguration
 public sealed partial class Context : IDisposable
 {
 	public static Context Default { get; } = new();
-	private IGraphQLClient? _client;
+
+	private Task<IGraphQLClient>? _client;
+	private readonly object _clientCriticalSection = new();
+
 	private Process? _subProcess;
+	private bool _disposed;
+	private readonly object _disposableCriticalSection = new();
 
 
 	public Context() {}
 
 	public Context(ContextConfiguration? config)
 	{
-		if (config != null)
-			(_client, _subProcess) = config;
+		if (config?.Client != null)
+			_client = Task.FromResult(config.Client);
+		_subProcess = config?.SubProcess;
 	}
 
 	public void Dispose()
 	{
-		_subProcess?.Dispose();
+		lock (_disposableCriticalSection)
+		{
+			_disposed = true;
+			_subProcess?.Dispose();
+			_subProcess = null;
+			_client = null;
+		}
 	}
 
 
 	/// <summary>Returns a GraphQL client connected to the engine.</summary>
 	/// <remarks>If no client is set, it will create one.</remarks>
-	public async Task<IGraphQLClient> Connection(ConnectionOptions? connectionOptions = null)
+	public Task<IGraphQLClient> Connection(ConnectionOptions? connectionOptions = null)
 	{
-		if (_client == null)
+		lock (_disposableCriticalSection)
 		{
-			Context defaultContext = await InitializeDefault(connectionOptions);
-			_client = defaultContext._client!;
-			_subProcess = defaultContext._subProcess;
+			ObjectDisposedException.ThrowIf(_disposed, this);
+			lock (_clientCriticalSection)
+				return _client ??= MakeConnection(connectionOptions);
 		}
-
-		return _client;
 	}
 
 	/// <summary>Close the connection and the engine if this one was started by the C# SDK.</summary>
@@ -62,5 +72,20 @@ public sealed partial class Context : IDisposable
 
 		// Reset client, so it can restart a new connection if necessary
 		_client = null;
+	}
+
+	private async Task<IGraphQLClient> MakeConnection(ConnectionOptions? connectionOptions)
+	{
+		Context defaultContext = await InitializeDefault(connectionOptions);
+		lock (_disposableCriticalSection)
+		{
+			if (_disposed)
+			{
+				defaultContext._subProcess?.Dispose();
+				throw new TaskCanceledException("Context disposed");
+			}
+			_subProcess = defaultContext._subProcess;
+		}
+		return await defaultContext._client!;
 	}
 }

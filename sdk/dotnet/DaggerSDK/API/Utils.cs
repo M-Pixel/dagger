@@ -125,10 +125,7 @@ static class APIUtils
 									// Already computed, or already started by another thread
 									continue;
 								case IEnumerable<BaseClient> clientObjects:
-									queryTree.Arguments[argumentIndex] = queryTree.Arguments[argumentIndex] with
-									{
-										Value = computeMany(clientObjects)
-									};
+									queryTree.Arguments[argumentIndex].Value = computeMany(clientObjects);
 									break;
 								default:
 									throw new Exception
@@ -146,10 +143,7 @@ static class APIUtils
 							if (queryTree.Arguments[argumentIndex].Value is not Task<string>)
 							{
 								Task<string> newTask = compute((BaseClient)queryTree.Arguments[argumentIndex].Value!);
-								queryTree.Arguments[argumentIndex] = queryTree.Arguments[argumentIndex] with
-								{
-									Value = newTask
-								};
+								queryTree.Arguments[argumentIndex].Value = newTask;
 							}
 						}
 					}
