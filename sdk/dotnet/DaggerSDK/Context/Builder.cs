@@ -8,7 +8,7 @@ public sealed partial class Context
 	/// <summary>Initialize a default client context from environment.</summary>
 	internal static async Task<Context> InitializeDefault(ConnectionOptions? connectionOptions = null)
 	{
-		Context context = new();
+		Context context;
 
 		// Prefer DAGGER_SESSION_PORT if set
 		if (GraphQLClientFactory.TryGetParentSession(out EngineConnectionParameters? clientConfiguration))
