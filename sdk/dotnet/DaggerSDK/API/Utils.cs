@@ -81,17 +81,6 @@ static class APIUtils
 	/// </summary>
 	static void ComputeNestedQuery(IReadOnlyList<Operation> query, IGraphQLClient queryClient)
 	{
-		// Prepare query tree for final query by computing nested queries and building it with their results.
-		async Task<string> computeQueryTree(BaseClient value)
-		{
-			// Resolve sub queries if operation's args is a subquery
-			ComputeNestedQuery(value.QueryTree, queryClient);
-
-			// push an id that will be used by the container
-			StringBuilder queryStringBuilder = new();
-			await BuildQuery(queryStringBuilder, value.QueryTree.Add(new Operation("id")));
-			return queryStringBuilder.ToString();
-		}
 		IList<Task<string>> computeMany(IEnumerable<BaseClient> clientObjects)
 		{
 			// Allocate different list implementation depending on whether we know total count ahead of time
@@ -105,8 +94,12 @@ static class APIUtils
 		}
 		async Task<string> compute(BaseClient clientObject)
 		{
-			string clientIdQuery = await computeQueryTree(clientObject);
-			return (await Compute(clientIdQuery, queryClient)).Deserialize<string>()!;
+			var jsonResult = await ComputeQuery
+			(
+				clientObject.QueryTree.Add("id"),
+				await clientObject.Context.Connection()
+			);
+			return jsonResult.Deserialize<string>()!;
 		}
 
 		foreach (Operation queryTree in query.Where(tree => tree.Arguments.Length != 0))

@@ -68,5 +68,5 @@ static class QueryTreeExtensions
 public abstract class BaseClient
 {
 	internal ImmutableList<Operation> QueryTree { get; init; } = ImmutableList<Operation>.Empty;
-	internal Context Context { private protected get; init; } = new();
+	internal Context Context { get; init; } = new();
 }
