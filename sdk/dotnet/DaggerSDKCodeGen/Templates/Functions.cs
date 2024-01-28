@@ -147,6 +147,13 @@ static class Functions
 		}
 	}
 
+	public static bool IsInputObject(TypeReference type)
+	{
+		while (type.Kind == Introspection.TypeKind.LIST || type.Kind == Introspection.TypeKind.NON_NULL)
+			type = type.OfType!;
+		return type.Kind == Introspection.TypeKind.INPUT_OBJECT;
+	}
+
 	public static bool IsEnum(Introspection.Type type)
 		=> type.Kind == Introspection.TypeKind.ENUM
 			// We ignore the internal GraphQL enums
@@ -181,6 +188,64 @@ static class Functions
 			return "Sub" + methodName;
 		return methodName;
 	}
+
+	public static IEnumerable<ExpressionSyntax> OperationArgumentConversionExpressions
+	(
+		IEnumerable<InputValue> inputs,
+		Func<string, string> nameFormatter,
+		bool isForRootClient
+	)
+		=> inputs.Select
+		(
+			argument =>
+			{
+				bool referenceTakesRawID =
+					argument.Name == "id" && isForRootClient
+					|| argument.Type.ResolveName().EndsWith("ID") == false;
+
+				ExpressionSyntax valueExpression = IdentifierName(nameFormatter(argument.Name));
+
+				if (IsCustomScalar(argument.Type) && referenceTakesRawID)
+					valueExpression = argument.Type.IsOptional()
+						? ConditionalAccessExpression(valueExpression, "Value")
+						: MemberAccessExpression(valueExpression, "Value");
+				else if (IsInputObject(argument.Type))
+				{
+					if (argument.Type.IsList())
+					{
+						var selectLambdaExpression = SimpleLambdaExpression
+						(
+							"element",
+							InvocationExpression(MemberAccessExpression("element", "AsOperationArguments"))
+						);
+						valueExpression = argument.Type.IsOptional()
+							? ConditionalAccessExpression
+							(
+								valueExpression,
+								InvocationExpression(MemberBindingExpression(IdentifierName("Select")))
+									.AddArgumentListArguments(selectLambdaExpression)
+									.ChainInvocation("ToList")
+							)
+							: InvocationExpression(MemberAccessExpression(valueExpression, "Select"))
+								.AddArgumentListArguments(selectLambdaExpression)
+								.ChainInvocation("ToList");
+					}
+					else
+						valueExpression = argument.Type.IsOptional()
+							? ConditionalInvocationExpression(valueExpression, "AsOperationArguments")
+							: InvocationExpression(MemberAccessExpression(valueExpression, "AsOperationArguments"));
+				}
+
+				return ObjectCreationExpression("OperationArgument")
+					.AddArgumentListArguments
+					(
+						LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(argument.Name)),
+						valueExpression,
+						ParameterSerializationEnum(argument.Type, referenceTakesRawID),
+						LiteralExpression(argument.Type.Kind == Introspection.TypeKind.LIST)
+					);
+			}
+		);
 
 	public static ExpressionSyntax ParameterSerializationEnum(TypeReference typeReference, bool takesRawId = false)
 		=> typeReference.Kind switch

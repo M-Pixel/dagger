@@ -65,33 +65,16 @@ static class Method
 
 	public static InvocationExpressionSyntax AppendQueryTree(Field field)
 	{
+		// Insert arguments
+		bool isForRootClient = field.ParentObject?.Name == "Query";
 		InvocationExpressionSyntax queryAddChain =
 			InvocationExpression(MemberAccessExpression("QueryTree", "Add"))
-			.AddArgumentListArgument(field.Name);
-
-		// Insert arguments
-		foreach (InputValue argument in field.Arguments)
-		{
-			bool takesRawString =
-				argument.Name == "id" && field.ParentObject?.Name == "Query"
-				|| argument.Type.ResolveName().EndsWith("ID") == false;
-			ExpressionSyntax valueExpression = IdentifierName(FormatParameterName(argument.Name));
-			if (IsCustomScalar(argument.Type) && takesRawString)
-				valueExpression = argument.Type.IsOptional()
-					? ConditionalAccessExpression(valueExpression, "Value")
-					: MemberAccessExpression(valueExpression, "Value");
-			queryAddChain = queryAddChain.AddArgumentListArgument
+			.AddArgumentListArguments
 			(
-				ObjectCreationExpression("OperationArgument")
-					.AddArgumentListArguments
-					(
-						LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(argument.Name)),
-						valueExpression,
-						ParameterSerializationEnum(argument.Type, takesRawString),
-						LiteralExpression(argument.Type.Kind == TypeKind.LIST)
-					)
+				OperationArgumentConversionExpressions(field.Arguments, FormatParameterName, isForRootClient)
+					.Prepend(LiteralExpression(field.Name))
 			);
-		}
+
 		return queryAddChain;
 	}
 

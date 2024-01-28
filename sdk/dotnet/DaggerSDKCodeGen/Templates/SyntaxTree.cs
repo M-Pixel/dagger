@@ -20,6 +20,13 @@ static class SyntaxTree
 	public static AccessorDeclarationSyntax WithSemicolonToken(this AccessorDeclarationSyntax self)
 		=> self.WithSemicolonToken(Token(SyntaxKind.SemicolonToken));
 
+	public static ArrayTypeSyntax ArrayType(string identifierName)
+		=> SyntaxFactory.ArrayType(IdentifierName(identifierName))
+			.AddRankSpecifiers
+			(
+				ArrayRankSpecifier(SingletonSeparatedList<ExpressionSyntax>(OmittedArraySizeExpression()))
+			);
+
 	public static AssignmentExpressionSyntax AssignmentExpression(string identifierName, ExpressionSyntax expression)
 		=> SyntaxFactory.AssignmentExpression
 		(
@@ -68,6 +75,12 @@ static class SyntaxTree
 	)
 		=> self.WithMembers(new SyntaxList<MemberDeclarationSyntax>(members));
 
+	public static CollectionExpressionSyntax CollectionExpression(IEnumerable<ExpressionSyntax> expressions)
+		=> SyntaxFactory.CollectionExpression
+		(
+			SeparatedList<CollectionElementSyntax>(expressions.Select(ExpressionElement))
+		);
+
 	public static CompilationUnitSyntax AddComment(this CompilationUnitSyntax self, string text)
 		=> self.WithLeadingTrivia(self.GetLeadingTrivia().Append(Comment("// " + text)));
 
@@ -104,6 +117,17 @@ static class SyntaxTree
 		(
 			expression,
 			MemberBindingExpression(IdentifierName(whenNotNullIdentifierName))
+		);
+
+	public static ConditionalAccessExpressionSyntax ConditionalInvocationExpression
+	(
+		ExpressionSyntax expression,
+		string whenNotNullIdentifierName
+	)
+		=> SyntaxFactory.ConditionalAccessExpression
+		(
+			expression,
+			SyntaxFactory.InvocationExpression(MemberBindingExpression(IdentifierName(whenNotNullIdentifierName)))
 		);
 
 	public static EnumDeclarationSyntax AddAttribute
@@ -186,9 +210,16 @@ static class SyntaxTree
 	public static InvocationExpressionSyntax AddArgumentListArguments
 	(
 		this InvocationExpressionSyntax self,
-		params ExpressionSyntax[] expressions
+		IEnumerable<ExpressionSyntax> expressions
 	)
 		=> self.AddArgumentListArguments(expressions.Select(Argument).ToArray());
+
+	public static InvocationExpressionSyntax AddArgumentListArguments
+	(
+		this InvocationExpressionSyntax self,
+		params ExpressionSyntax[] expressions
+	)
+		=> self.AddArgumentListArguments((IEnumerable<ExpressionSyntax>)expressions);
 
 	public static InvocationExpressionSyntax ChainInvocation
 	(
@@ -239,6 +270,14 @@ static class SyntaxTree
 
 	public static MethodDeclarationSyntax AddModifiers(this MethodDeclarationSyntax self, params SyntaxKind[] tokens)
 		=> self.WithModifiers(TokenList(self.Modifiers.Concat(tokens.Select(syntaxKind => Token(syntaxKind)))));
+
+	public static MethodDeclarationSyntax WithExpressionBody
+	(
+		this MethodDeclarationSyntax self,
+		ExpressionSyntax expression
+	)
+		=> self.WithExpressionBody(ArrowExpressionClause(expression))
+			.WithSemicolonToken(Token(SyntaxKind.SemicolonToken));
 
 	public static MethodDeclarationSyntax WithParameters
 	(
@@ -310,6 +349,10 @@ static class SyntaxTree
 	public static RecordDeclarationSyntax RecordDeclaration(string name)
 		=> SyntaxFactory.RecordDeclaration(Token(SyntaxKind.RecordKeyword), name)
 			.WithSemicolonToken(Token(SyntaxKind.SemicolonToken));
+
+	public static RecordDeclarationSyntax WithBody(this RecordDeclarationSyntax self)
+		=> self.WithOpenBraceToken(Token(SyntaxKind.OpenBraceToken))
+			.WithCloseBraceToken(Token(SyntaxKind.CloseBraceToken));
 
 	public static RecordDeclarationSyntax WithParameters
 	(

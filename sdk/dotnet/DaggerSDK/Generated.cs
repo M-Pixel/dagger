@@ -6,7 +6,10 @@ using static DaggerSDK.APIUtils;
 namespace DaggerSDK;
 ///<param name = "Name">The build argument name.</param>
 ///<param name = "Value">The build argument value.</param>
-public sealed record BuildArg(string Name, string Value);
+public sealed record BuildArg(string Name, string Value)
+{
+	internal OperationArgument[] AsOperationArguments() => [new OperationArgument("name", Name, ParameterSerialization.String, false), new OperationArgument("value", Value, ParameterSerialization.String, false)];
+};
 ///<summary>Sharing mode of the cache volume.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CacheSharingMode>))]
 public enum CacheSharingMode
@@ -70,13 +73,19 @@ public enum NetworkProtocol
 
 ///<param name = "Name">Label name.</param>
 ///<param name = "Value">Label value.</param>
-public sealed record PipelineLabel(string Name, string Value);
+public sealed record PipelineLabel(string Name, string Value)
+{
+	internal OperationArgument[] AsOperationArguments() => [new OperationArgument("name", Name, ParameterSerialization.String, false), new OperationArgument("value", Value, ParameterSerialization.String, false)];
+};
 ///<summary><para>The platform config OS and architecture in a Container.</para><para>The format is [os]/[platform]/[version] (e.g., "darwin/arm64/v7", "windows/amd64", "linux/arm64").</para></summary>
 public sealed record Platform(string Value);
 ///<param name = "Backend">Destination port for traffic.</param>
 ///<param name = "Frontend">Port to expose to clients. If unspecified, a default will be chosen.</param>
 ///<param name = "Protocol">Protocol to use for traffic.</param>
-public sealed record PortForward(int Backend, int? Frontend, NetworkProtocol? Protocol);
+public sealed record PortForward(int Backend, int? Frontend, NetworkProtocol? Protocol)
+{
+	internal OperationArgument[] AsOperationArguments() => [new OperationArgument("backend", Backend, ParameterSerialization.Enum, false), new OperationArgument("frontend", Frontend, ParameterSerialization.Enum, false), new OperationArgument("protocol", Protocol, ParameterSerialization.Enum, false)];
+};
 ///<summary>A unique identifier for a secret.</summary>
 public sealed record SecretID(string Value);
 ///<summary>A unique service identifier.</summary>
@@ -171,7 +180,7 @@ public sealed class Container : BaseClient
 	{
 		return new Container
 		{
-			QueryTree = QueryTree.Add("build", new OperationArgument("context", context, ParameterSerialization.Reference, false), new OperationArgument("dockerfile", dockerfile, ParameterSerialization.String, false), new OperationArgument("buildArgs", buildArgs, ParameterSerialization.Object, true), new OperationArgument("target", target, ParameterSerialization.String, false), new OperationArgument("secrets", secrets, ParameterSerialization.Reference, true)),
+			QueryTree = QueryTree.Add("build", new OperationArgument("context", context, ParameterSerialization.Reference, false), new OperationArgument("dockerfile", dockerfile, ParameterSerialization.String, false), new OperationArgument("buildArgs", buildArgs?.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, true), new OperationArgument("target", target, ParameterSerialization.String, false), new OperationArgument("secrets", secrets, ParameterSerialization.Reference, true)),
 			Context = Context
 		};
 	}
@@ -324,7 +333,7 @@ public sealed class Container : BaseClient
 	{
 		return new Container
 		{
-			QueryTree = QueryTree.Add("pipeline", new OperationArgument("name", name, ParameterSerialization.String, false), new OperationArgument("description", description, ParameterSerialization.String, false), new OperationArgument("labels", labels, ParameterSerialization.Object, true)),
+			QueryTree = QueryTree.Add("pipeline", new OperationArgument("name", name, ParameterSerialization.String, false), new OperationArgument("description", description, ParameterSerialization.String, false), new OperationArgument("labels", labels?.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, true)),
 			Context = Context
 		};
 	}
@@ -863,7 +872,7 @@ public sealed class Directory : BaseClient
 	{
 		return new Container
 		{
-			QueryTree = QueryTree.Add("dockerBuild", new OperationArgument("dockerfile", dockerfile, ParameterSerialization.String, false), new OperationArgument("platform", platform?.Value, ParameterSerialization.String, false), new OperationArgument("buildArgs", buildArgs, ParameterSerialization.Object, true), new OperationArgument("target", target, ParameterSerialization.String, false), new OperationArgument("secrets", secrets, ParameterSerialization.Reference, true)),
+			QueryTree = QueryTree.Add("dockerBuild", new OperationArgument("dockerfile", dockerfile, ParameterSerialization.String, false), new OperationArgument("platform", platform?.Value, ParameterSerialization.String, false), new OperationArgument("buildArgs", buildArgs?.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, true), new OperationArgument("target", target, ParameterSerialization.String, false), new OperationArgument("secrets", secrets, ParameterSerialization.Reference, true)),
 			Context = Context
 		};
 	}
@@ -910,7 +919,7 @@ public sealed class Directory : BaseClient
 	{
 		return new Directory
 		{
-			QueryTree = QueryTree.Add("pipeline", new OperationArgument("name", name, ParameterSerialization.String, false), new OperationArgument("description", description, ParameterSerialization.String, false), new OperationArgument("labels", labels, ParameterSerialization.Object, true)),
+			QueryTree = QueryTree.Add("pipeline", new OperationArgument("name", name, ParameterSerialization.String, false), new OperationArgument("description", description, ParameterSerialization.String, false), new OperationArgument("labels", labels?.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, true)),
 			Context = Context
 		};
 	}
@@ -1495,7 +1504,7 @@ public sealed class Host : BaseClient
 	{
 		return new Service
 		{
-			QueryTree = QueryTree.Add("service", new OperationArgument("ports", ports, ParameterSerialization.Object, false), new OperationArgument("host", host, ParameterSerialization.String, false)),
+			QueryTree = QueryTree.Add("service", new OperationArgument("ports", ports.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, false), new OperationArgument("host", host, ParameterSerialization.String, false)),
 			Context = Context
 		};
 	}
@@ -1520,7 +1529,7 @@ public sealed class Host : BaseClient
 	{
 		return new Service
 		{
-			QueryTree = QueryTree.Add("tunnel", new OperationArgument("service", service, ParameterSerialization.Reference, false), new OperationArgument("native", native, ParameterSerialization.Enum, false), new OperationArgument("ports", ports, ParameterSerialization.Object, true)),
+			QueryTree = QueryTree.Add("tunnel", new OperationArgument("service", service, ParameterSerialization.Reference, false), new OperationArgument("native", native, ParameterSerialization.Enum, false), new OperationArgument("ports", ports?.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, true)),
 			Context = Context
 		};
 	}
@@ -2138,7 +2147,7 @@ public sealed class Client : BaseClient
 	{
 		return new Client
 		{
-			QueryTree = QueryTree.Add("pipeline", new OperationArgument("name", name, ParameterSerialization.String, false), new OperationArgument("description", description, ParameterSerialization.String, false), new OperationArgument("labels", labels, ParameterSerialization.Object, true)),
+			QueryTree = QueryTree.Add("pipeline", new OperationArgument("name", name, ParameterSerialization.String, false), new OperationArgument("description", description, ParameterSerialization.String, false), new OperationArgument("labels", labels?.Select(element => element.AsOperationArguments()).ToList(), ParameterSerialization.Object, true)),
 			Context = Context
 		};
 	}

@@ -59,5 +59,18 @@ static class Structures
 					(
 						inputField => Parameter(FormatType(inputField.Type, isInput: true), FormatName(inputField.Name))
 					)
+			)
+			.WithBody()
+			.AddMembers
+			(
+				MethodDeclaration(ArrayType("OperationArgument"), "AsOperationArguments")
+					.AddModifiers(SyntaxKind.InternalKeyword)
+					.WithExpressionBody
+					(
+						CollectionExpression
+						(
+							OperationArgumentConversionExpressions(type.InputFields, FormatName, isForRootClient: false)
+						)
+					)
 			);
 }
