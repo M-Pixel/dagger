@@ -189,79 +189,120 @@ static class Functions
 		return methodName;
 	}
 
-	public static IEnumerable<ExpressionSyntax> OperationArgumentConversionExpressions
+	/// <returns>
+	///		A sequence of statements that create a linked-list of <c>OperationArgument</c>s and assigns the head to
+	///		a local variable <c>_arguments_</c>
+	/// </returns>
+	public static IEnumerable<StatementSyntax> OperationArgumentConversionStatements
 	(
 		IEnumerable<InputValue> inputs,
 		Func<string, string> nameFormatter,
 		bool isForRootClient
 	)
-		=> inputs.Select
+	{
+		yield return LocalDeclarationAssignmentStatement
 		(
-			argument =>
-			{
-				bool referenceTakesRawID =
-					argument.Name == "id" && isForRootClient
-					|| argument.Type.ResolveName().EndsWith("ID") == false;
-
-				ExpressionSyntax valueExpression = IdentifierName(nameFormatter(argument.Name));
-
-				if (IsCustomScalar(argument.Type) && referenceTakesRawID)
-					valueExpression = argument.Type.IsOptional()
-						? ConditionalAccessExpression(valueExpression, "Value")
-						: MemberAccessExpression(valueExpression, "Value");
-				else if (IsInputObject(argument.Type))
-				{
-					if (argument.Type.IsList())
-					{
-						var selectLambdaExpression = SimpleLambdaExpression
-						(
-							"element",
-							InvocationExpression(MemberAccessExpression("element", "AsOperationArguments"))
-						);
-						valueExpression = argument.Type.IsOptional()
-							? ConditionalAccessExpression
-							(
-								valueExpression,
-								InvocationExpression(MemberBindingExpression(IdentifierName("Select")))
-									.AddArgumentListArguments(selectLambdaExpression)
-									.ChainInvocation("ToList")
-							)
-							: InvocationExpression(MemberAccessExpression(valueExpression, "Select"))
-								.AddArgumentListArguments(selectLambdaExpression)
-								.ChainInvocation("ToList");
-					}
-					else
-						valueExpression = argument.Type.IsOptional()
-							? ConditionalInvocationExpression(valueExpression, "AsOperationArguments")
-							: InvocationExpression(MemberAccessExpression(valueExpression, "AsOperationArguments"));
-				}
-
-				return ObjectCreationExpression("OperationArgument")
-					.AddArgumentListArguments
-					(
-						LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(argument.Name)),
-						valueExpression,
-						ParameterSerializationEnum(argument.Type, referenceTakesRawID),
-						LiteralExpression(argument.Type.Kind == Introspection.TypeKind.LIST)
-					);
-			}
+			NullableType(IdentifierName("OperationArgument")),
+			"_arguments_",
+			NullLiteralExpression
 		);
 
-	public static ExpressionSyntax ParameterSerializationEnum(TypeReference typeReference, bool takesRawId = false)
+		foreach (InputValue argument in inputs)
+		{
+			bool referenceTakesRawID =
+				argument.Name == "id" && isForRootClient
+				|| argument.Type.ResolveName().EndsWith("ID") == false;
+
+			IdentifierNameSyntax valueIdentifier = IdentifierName(nameFormatter(argument.Name));
+
+			ExpressionSyntax valueExpression = valueIdentifier;
+
+			StatementSyntax addArgumentStatement = AssignmentExpression
+				(
+					"_arguments_",
+					ObjectCreationExpression("OperationArgument")
+						.AddArgumentListArguments
+						(
+							LiteralExpression(argument.Name),
+							ParameterArgumentCreationExpression(argument.Type, referenceTakesRawID, valueExpression),
+							IdentifierName("_arguments_")
+						)
+				)
+				.AsStatement();
+
+			yield return argument.Type.IsOptional()
+				? IfStatement
+				(
+					BinaryExpression(SyntaxKind.NotEqualsExpression, valueIdentifier, NullLiteralExpression),
+					addArgumentStatement
+				)
+				: addArgumentStatement;
+		}
+	}
+
+	/// <returns>
+	///		An expression that will construct the correct subclass of <c>OperationArgumentValue</c> for the given
+	///		<paramref name="typeReference"/> using <paramref name="valueExpression"/> as the <c>Value</c> parameter.
+	/// </returns>
+	static ExpressionSyntax ParameterArgumentCreationExpression
+	(
+		TypeReference typeReference,
+		bool takesRawId,
+		ExpressionSyntax valueExpression
+	)
 		=> typeReference.Kind switch
 		{
+			Introspection.TypeKind.NON_NULL =>
+				ParameterArgumentCreationExpression(typeReference.OfType!, takesRawId, valueExpression),
+
 			Introspection.TypeKind.SCALAR => typeReference.Name switch
 			{
 				// No quotes (numbers are technically enum - there are a finite # of choices)
 				nameof(Scalar.Int) or nameof(Scalar.Float) or nameof(Scalar.Boolean)
-					=> ParameterSerializationEnum("Enum"),
-				nameof(Scalar.String) => ParameterSerializationEnum("String"),
-				_ => ParameterSerializationEnum(takesRawId ? "String" : "Reference")
+					=> InvocationExpression(MemberAccessExpression("EnumOperationArgumentValue", "Create"))
+						.AddArgumentListArguments(valueExpression),
+
+				nameof(Scalar.String) => ObjectCreationExpression("StringOperationArgumentValue")
+					.AddArgumentListArguments(valueExpression),
+
+				_ => ObjectCreationExpression((takesRawId ? "String" : "Reference") + "OperationArgumentValue")
+					.AddArgumentListArguments
+					(
+						takesRawId
+							? ConditionalAccessExpression(valueExpression, "Value")
+							: valueExpression
+					)
 			},
-			Introspection.TypeKind.ENUM => ParameterSerializationEnum("Enum"),
-			Introspection.TypeKind.INPUT_OBJECT => ParameterSerializationEnum("Object"),
-			Introspection.TypeKind.LIST or Introspection.TypeKind.NON_NULL
-				=> ParameterSerializationEnum(typeReference.OfType!, takesRawId),
+
+			Introspection.TypeKind.ENUM => InvocationExpression
+				(
+					MemberAccessExpression("EnumOperationArgumentValue", "Create")
+				)
+				.AddArgumentListArguments(valueExpression),
+
+			Introspection.TypeKind.INPUT_OBJECT => ObjectCreationExpression("ObjectOperationArgumentValue")
+				.AddArgumentListArguments
+				(
+					InvocationExpression(MemberAccessExpression(valueExpression, "AsOperationArguments"))
+				),
+
+			Introspection.TypeKind.LIST
+				=> InvocationExpression(MemberAccessExpression("ArrayOperationArgumentValue", "Create"))
+					.AddArgumentListArguments
+					(
+						valueExpression,
+						SimpleLambdaExpression
+						(
+							"element",
+							ParameterArgumentCreationExpression
+							(
+								typeReference.OfType!,
+								takesRawId,
+								IdentifierName("element")
+							)
+						)
+					),
+
 			_ => throw new NotImplementedException()
 		};
 

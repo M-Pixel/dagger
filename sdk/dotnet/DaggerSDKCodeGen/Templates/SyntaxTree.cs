@@ -38,20 +38,6 @@ static class SyntaxTree
 	public static AttributeSyntax WithArgument(this AttributeSyntax self, string? argument)
 		=> argument == null ? self : self.AddArgumentListArguments(AttributeArgument(LiteralExpression(argument)));
 
-	public static BlockSyntax AddVariableDeclarationAssignment
-	(
-		this BlockSyntax self,
-		string name,
-		ExpressionSyntax value
-	)
-		=> self.AddStatements
-		(
-			LocalDeclarationStatement
-			(
-				VariableDeclaration(IdentifierName(Token(SyntaxKind.VarKeyword))).WithVariable(name, value)
-			)
-		);
-
 	public static ClassDeclarationSyntax AddBaseListTypes(this ClassDeclarationSyntax self, params string[] baseNames)
 	{
 		BaseListSyntax baseList = self.BaseList ?? BaseList();
@@ -64,6 +50,9 @@ static class SyntaxTree
 			)
 		);
 	}
+
+	public static BlockSyntax AddStatements(this BlockSyntax self, IEnumerable<StatementSyntax> statements)
+		=> self.WithStatements(self.Statements.AddRange(statements));
 
 	public static ClassDeclarationSyntax AddModifiers(this ClassDeclarationSyntax self, params SyntaxKind[] modifiers)
 		=> self.WithModifiers(TokenList(self.Modifiers.Concat(modifiers.Select(Token))));
@@ -248,6 +237,24 @@ static class SyntaxTree
 	public static LiteralExpressionSyntax LiteralExpression(string value)
 		=> SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value));
 
+	public static readonly LiteralExpressionSyntax NullLiteralExpression
+		= SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression);
+
+	public static LocalDeclarationStatementSyntax LocalDeclarationAssignmentStatement
+	(
+		string name,
+		ExpressionSyntax value
+	)
+		=> LocalDeclarationStatement(VariableDeclarationAssignment(VarType, name, value));
+
+	public static LocalDeclarationStatementSyntax LocalDeclarationAssignmentStatement
+	(
+		TypeSyntax type,
+		string name,
+		ExpressionSyntax value
+	)
+		=> LocalDeclarationStatement(VariableDeclarationAssignment(type, name, value));
+
 	public static MemberAccessExpressionSyntax MemberAccessExpression
 	(
 		ExpressionSyntax expression,
@@ -270,6 +277,13 @@ static class SyntaxTree
 
 	public static MethodDeclarationSyntax AddModifiers(this MethodDeclarationSyntax self, params SyntaxKind[] tokens)
 		=> self.WithModifiers(TokenList(self.Modifiers.Concat(tokens.Select(syntaxKind => Token(syntaxKind)))));
+
+	public static MethodDeclarationSyntax WithBody
+	(
+		this MethodDeclarationSyntax self,
+		IEnumerable<StatementSyntax> statements
+	)
+		=> self.WithBody(Block(statements));
 
 	public static MethodDeclarationSyntax WithExpressionBody
 	(
@@ -364,6 +378,8 @@ static class SyntaxTree
 	public static SimpleLambdaExpressionSyntax SimpleLambdaExpression(string parameterName, ExpressionSyntax expression)
 		=> SyntaxFactory.SimpleLambdaExpression(SyntaxFactory.Parameter(Identifier(parameterName)), expression);
 
+	public static StatementSyntax AsStatement(this ExpressionSyntax self) => ExpressionStatement(self);
+
 	public static TSyntax AddDocumentationComment<TSyntax>(this TSyntax self, XmlNodeSyntax section)
 		where TSyntax : SyntaxNode
 		=> self.AddDocumentationComments(new[]{section});
@@ -389,13 +405,22 @@ static class SyntaxTree
 	public static TypeSyntax Nullable(TypeSyntax type)
 		=> type is NullableTypeSyntax ? type : NullableType(type);
 
-	public static VariableDeclarationSyntax WithVariable
+	public static readonly TypeSyntax VarType = IdentifierName
+		(
+			Identifier(TriviaList(), SyntaxKind.VarKeyword, "var", "var", TriviaList())
+		);
+
+	public static VariableDeclarationSyntax VariableDeclarationAssignment
 	(
-		this VariableDeclarationSyntax self,
+		TypeSyntax type,
 		string name,
 		ExpressionSyntax value
 	)
-		=> self.AddVariables(VariableDeclarator(name).WithInitializer(EqualsValueClause(value)));
+		=> VariableDeclaration
+		(
+			type,
+			SingletonSeparatedList(VariableDeclarator(name).WithInitializer(EqualsValueClause(value)))
+		);
 
 	public static XmlElementSyntax XmlParaElement(string content) => SyntaxFactory.XmlParaElement(XmlText(content));
 

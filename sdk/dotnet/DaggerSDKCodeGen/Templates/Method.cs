@@ -50,9 +50,7 @@ static class Method
 						)
 							.WithDefault
 							(
-								argument.Type.IsOptional()
-									? EqualsValueClause(LiteralExpression(SyntaxKind.DefaultLiteralExpression))
-									: null
+								argument.Type.IsOptional() ? EqualsValueClause(NullLiteralExpression) : null
 							)
 					)
 			);
@@ -63,19 +61,24 @@ static class Method
 		return result;
 	}
 
-	public static InvocationExpressionSyntax AppendQueryTree(Field field)
+	public static IEnumerable<StatementSyntax> AppendQueryTree(Field field)
 	{
 		// Insert arguments
 		bool isForRootClient = field.ParentObject?.Name == "Query";
-		InvocationExpressionSyntax queryAddChain =
-			InvocationExpression(MemberAccessExpression("QueryTree", "Add"))
-			.AddArgumentListArguments
-			(
-				OperationArgumentConversionExpressions(field.Arguments, FormatParameterName, isForRootClient)
-					.Prepend(LiteralExpression(field.Name))
-			);
+		foreach
+		(
+			StatementSyntax statement
+			in
+			OperationArgumentConversionStatements(field.Arguments, FormatParameterName, isForRootClient)
+		)
+			yield return statement;
 
-		return queryAddChain;
+		yield return LocalDeclarationAssignmentStatement
+		(
+			"_newQueryTree_",
+			InvocationExpression(MemberAccessExpression("QueryTree", "Add"))
+				.AddArgumentListArguments(LiteralExpression(field.Name), IdentifierName("_arguments_"))
+		);
 	}
 
 	public static MethodDeclarationSyntax GenerateMethod(Field field)
@@ -83,20 +86,24 @@ static class Method
 		TypeSyntax returnType = FormatType(field.Type, isInput: false, forceNonNull: true);
 		return MethodDeclaration(returnType, FormatMethodName(field))
 			.WithCommon(field)
-			.AddBodyStatements
+			.WithBody
 			(
-				ReturnStatement
-				(
-					ObjectCreationExpression(returnType)
-						.WithInitializer
+				AppendQueryTree(field)
+					.Append
+					(
+						ReturnStatement
 						(
-							new(string, ExpressionSyntax)[]
-							{
-								("QueryTree", AppendQueryTree(field)),
-								("Context", IdentifierName("Context"))
-							}
+							ObjectCreationExpression(returnType)
+								.WithInitializer
+								(
+									new(string, ExpressionSyntax)[]
+									{
+										("QueryTree", IdentifierName("_newQueryTree_")),
+										("Context", IdentifierName("Context"))
+									}
+								)
 						)
-				)
+					)
 			);
 	}
 }

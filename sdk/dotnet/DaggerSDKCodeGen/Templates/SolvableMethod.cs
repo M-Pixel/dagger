@@ -44,22 +44,32 @@ static class SolvableMethod
 			);
 		}
 
-		InvocationExpressionSyntax appendedQueryTreeExpression = Method.AppendQueryTree(field);
+		body = body.AddStatements(Method.AppendQueryTree(field));
 
 		// Add subfields
 		if (field.Type.IsList() && IsListOfObject(field.Type))
-			appendedQueryTreeExpression = appendedQueryTreeExpression.ChainInvocation("Add")
-				.AddArgumentListArgument
+			body = body.AddStatements
+			(
+				ExpressionStatement
 				(
-					string.Join(' ', GetArrayField(schema, field).Select(arrayField => arrayField.Name))
-				);
+					AssignmentExpression
+					(
+						"_newQueryTree_",
+						InvocationExpression(MemberAccessExpression("_newQueryTree_", "Add"))
+							.AddArgumentListArgument
+							(
+								string.Join(' ', GetArrayField(schema, field).Select(arrayField => arrayField.Name))
+							)
+					)
+				)
+			);
 
 		AwaitExpressionSyntax awaitComputeExpression = AwaitExpression
 		(
 			InvocationExpression("ComputeQuery")
 				.AddArgumentListArguments
 				(
-					appendedQueryTreeExpression,
+					IdentifierName("_newQueryTree_"),
 					AwaitExpression(InvocationExpression(MemberAccessExpression("Context", "Connection")))
 				)
 		);

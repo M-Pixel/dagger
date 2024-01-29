@@ -63,14 +63,12 @@ static class Structures
 			.WithBody()
 			.AddMembers
 			(
-				MethodDeclaration(ArrayType("OperationArgument"), "AsOperationArguments")
+				MethodDeclaration(IdentifierName("OperationArgument"), "AsOperationArguments")
 					.AddModifiers(SyntaxKind.InternalKeyword)
-					.WithExpressionBody
+					.WithBody
 					(
-						CollectionExpression
-						(
-							OperationArgumentConversionExpressions(type.InputFields, FormatName, isForRootClient: false)
-						)
+						OperationArgumentConversionStatements(type.InputFields, FormatName, isForRootClient: false)
+							.Append(ReturnStatement(IdentifierName("_arguments_")))
 					)
 			);
 }
