@@ -188,7 +188,7 @@ public sealed class Container : BaseClient
 	///<param name = "PlatformVariants">Identifiers for other platform specific containers. Used for multi-platform image.</param>
 	///<param name = "ForcedCompression">Force each layer of the image to use the specified compression algorithm. If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</param>
 	///<param name = "MediaTypes">Use the specified media types for the image's layers. Defaults to OCI, which is largely compatible with most recent container runtimes, but Docker may be needed for older runtimes without OCI support.</param>
-	public File AsTarball(IReadOnlyList<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
+	public File AsTarball(IEnumerable<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
 	{
 		OperationArgument? _arguments_ = null;
 		if (platformVariants != null)
@@ -211,7 +211,7 @@ public sealed class Container : BaseClient
 	///<param name = "BuildArgs">Additional build arguments.</param>
 	///<param name = "Target">Target build stage to build.</param>
 	///<param name = "Secrets"><para>Secrets to pass to the build.</para><para>They will be mounted at /run/secrets/[secret-name] in the build container</para><para>They can be accessed in the Dockerfile using the "secret" mount type and mount path /run/secrets/[secret-name] e.g. RUN --mount=type=secret,id=my-secret curl url?token=$(cat /run/secrets/my-secret)"</para></param>
-	public Container Build(Directory context, string? dockerfile = null, IReadOnlyList<BuildArg>? buildArgs = null, string? target = null, IReadOnlyList<Secret>? secrets = null)
+	public Container Build(Directory context, string? dockerfile = null, IEnumerable<BuildArg>? buildArgs = null, string? target = null, IEnumerable<Secret>? secrets = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("context", new ReferenceOperationArgumentValue(context), _arguments_);
@@ -296,7 +296,7 @@ public sealed class Container : BaseClient
 
 	///<summary><para>EXPERIMENTAL API! Subject to change/removal at any time.</para><para>experimentalWithGPU configures the provided list of devices to be accesible to this container. This currently works for Nvidia devices only.</para></summary>
 	///<param name = "Devices"></param>
-	public Container ExperimentalWithGPU(IReadOnlyList<string> devices)
+	public Container ExperimentalWithGPU(IEnumerable<string> devices)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("devices", ArrayOperationArgumentValue.Create(devices, element => new StringOperationArgumentValue(element)), _arguments_);
@@ -313,7 +313,7 @@ public sealed class Container : BaseClient
 	///<param name = "PlatformVariants">Identifiers for other platform specific containers. Used for multi-platform image.</param>
 	///<param name = "ForcedCompression">Force each layer of the exported image to use the specified compression algorithm. If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</param>
 	///<param name = "MediaTypes">Use the specified media types for the exported image's layers. Defaults to OCI, which is largely compatible with most recent container runtimes, but Docker may be needed for older runtimes without OCI support.</param>
-	public async Task<bool> Export(string path, IReadOnlyList<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
+	public async Task<bool> Export(string path, IEnumerable<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
 	{
 		if (CachedExport != null)
 			return CachedExport.Value;
@@ -426,7 +426,7 @@ public sealed class Container : BaseClient
 	///<param name = "Name">Pipeline name.</param>
 	///<param name = "Description">Pipeline description.</param>
 	///<param name = "Labels">Pipeline labels.</param>
-	public Container Pipeline(string name, string? description = null, IReadOnlyList<PipelineLabel>? labels = null)
+	public Container Pipeline(string name, string? description = null, IEnumerable<PipelineLabel>? labels = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
@@ -457,7 +457,7 @@ public sealed class Container : BaseClient
 	///<param name = "PlatformVariants">Identifiers for other platform specific containers. Used for multi-platform image.</param>
 	///<param name = "ForcedCompression">Force each layer of the published image to use the specified compression algorithm. If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</param>
 	///<param name = "MediaTypes">Use the specified media types for the published image's layers. Defaults to OCI, which is largely compatible with most recent registries, but Docker may be needed for older registries without OCI support.</param>
-	public async Task<string> Publish(string address, IReadOnlyList<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
+	public async Task<string> Publish(string address, IEnumerable<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
 	{
 		if (CachedPublish != null)
 			return CachedPublish;
@@ -536,7 +536,7 @@ public sealed class Container : BaseClient
 
 	///<summary>Configures default arguments for future commands.</summary>
 	///<param name = "Args">Arguments to prepend to future executions (e.g., ["-v", "--no-cache"]).</param>
-	public Container WithDefaultArgs(IReadOnlyList<string>? args = null)
+	public Container WithDefaultArgs(IEnumerable<string>? args = null)
 	{
 		OperationArgument? _arguments_ = null;
 		if (args != null)
@@ -555,7 +555,7 @@ public sealed class Container : BaseClient
 	///<param name = "Exclude">Patterns to exclude in the written directory (e.g., ["node_modules/**", ".gitignore", ".git/"]).</param>
 	///<param name = "Include">Patterns to include in the written directory (e.g., ["*.go", "go.mod", "go.sum"]).</param>
 	///<param name = "Owner"><para>A user:group to set for the directory and its contents.</para><para>The user and group can either be an ID (1000:1000) or a name (foo:bar).</para><para>If the group is omitted, it defaults to the same as the user.</para></param>
-	public Container WithDirectory(string path, Directory directory, IReadOnlyList<string>? exclude = null, IReadOnlyList<string>? include = null, string? owner = null)
+	public Container WithDirectory(string path, Directory directory, IEnumerable<string>? exclude = null, IEnumerable<string>? include = null, string? owner = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
@@ -577,7 +577,7 @@ public sealed class Container : BaseClient
 	///<summary>Retrieves this container but with a different command entrypoint.</summary>
 	///<param name = "Args">Entrypoint to use for future executions (e.g., ["go", "run"]).</param>
 	///<param name = "KeepDefaultArgs">Don't remove the default arguments when setting the entrypoint.</param>
-	public Container WithEntrypoint(IReadOnlyList<string> args, bool? keepDefaultArgs = null)
+	public Container WithEntrypoint(IEnumerable<string> args, bool? keepDefaultArgs = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
@@ -618,7 +618,7 @@ public sealed class Container : BaseClient
 	///<param name = "RedirectStderr">Redirect the command's standard error to a file in the container (e.g., "/tmp/stderr").</param>
 	///<param name = "ExperimentalPrivilegedNesting"><para>Provides dagger access to the executed command.</para><para>Do not use this option unless you trust the command being executed. The command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM.</para></param>
 	///<param name = "InsecureRootCapabilities">Execute the command with all root capabilities. This is similar to running a command with "sudo" or executing `docker run` with the `--privileged` flag. Containerization does not provide any security guarantees when using this option. It should only be used when absolutely necessary and only with trusted commands.</param>
-	public Container WithExec(IReadOnlyList<string> args, bool? skipEntrypoint = null, string? stdin = null, string? redirectStdout = null, string? redirectStderr = null, bool? experimentalPrivilegedNesting = null, bool? insecureRootCapabilities = null)
+	public Container WithExec(IEnumerable<string> args, bool? skipEntrypoint = null, string? stdin = null, string? redirectStdout = null, string? redirectStderr = null, bool? experimentalPrivilegedNesting = null, bool? insecureRootCapabilities = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
@@ -1172,7 +1172,7 @@ public sealed class Directory : BaseClient
 	///<param name = "BuildArgs">Build arguments to use in the build.</param>
 	///<param name = "Target">Target build stage to build.</param>
 	///<param name = "Secrets"><para>Secrets to pass to the build.</para><para>They will be mounted at /run/secrets/[secret-name].</para></param>
-	public Container DockerBuild(string? dockerfile = null, Platform? platform = null, IReadOnlyList<BuildArg>? buildArgs = null, string? target = null, IReadOnlyList<Secret>? secrets = null)
+	public Container DockerBuild(string? dockerfile = null, Platform? platform = null, IEnumerable<BuildArg>? buildArgs = null, string? target = null, IEnumerable<Secret>? secrets = null)
 	{
 		OperationArgument? _arguments_ = null;
 		if (dockerfile != null)
@@ -1244,7 +1244,7 @@ public sealed class Directory : BaseClient
 	///<param name = "Name">Pipeline name.</param>
 	///<param name = "Description">Pipeline description.</param>
 	///<param name = "Labels">Pipeline labels.</param>
-	public Directory Pipeline(string name, string? description = null, IReadOnlyList<PipelineLabel>? labels = null)
+	public Directory Pipeline(string name, string? description = null, IEnumerable<PipelineLabel>? labels = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
@@ -1274,7 +1274,7 @@ public sealed class Directory : BaseClient
 	///<param name = "Directory">Identifier of the directory to copy.</param>
 	///<param name = "Exclude">Exclude artifacts that match the given pattern (e.g., ["node_modules/", ".git*"]).</param>
 	///<param name = "Include">Include only artifacts that match the given pattern (e.g., ["app/", "package.*"]).</param>
-	public Directory WithDirectory(string path, Directory directory, IReadOnlyList<string>? exclude = null, IReadOnlyList<string>? include = null)
+	public Directory WithDirectory(string path, Directory directory, IEnumerable<string>? exclude = null, IEnumerable<string>? include = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
@@ -1821,7 +1821,7 @@ public sealed class GeneratedCode : BaseClient
 
 	///<summary>Set the list of paths to mark generated in version control</summary>
 	///<param name = "Paths"></param>
-	public GeneratedCode WithVCSGeneratedPaths(IReadOnlyList<string> paths)
+	public GeneratedCode WithVCSGeneratedPaths(IEnumerable<string> paths)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("paths", ArrayOperationArgumentValue.Create(paths, element => new StringOperationArgumentValue(element)), _arguments_);
@@ -1835,7 +1835,7 @@ public sealed class GeneratedCode : BaseClient
 
 	///<summary>Set the list of paths to ignore in version control</summary>
 	///<param name = "Paths"></param>
-	public GeneratedCode WithVCSIgnoredPaths(IReadOnlyList<string> paths)
+	public GeneratedCode WithVCSIgnoredPaths(IEnumerable<string> paths)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("paths", ArrayOperationArgumentValue.Create(paths, element => new StringOperationArgumentValue(element)), _arguments_);
@@ -1958,7 +1958,7 @@ public sealed class Host : BaseClient
 	///<param name = "Path">Location of the directory to access (e.g., ".").</param>
 	///<param name = "Exclude">Exclude artifacts that match the given pattern (e.g., ["node_modules/", ".git*"]).</param>
 	///<param name = "Include">Include only artifacts that match the given pattern (e.g., ["app/", "package.*"]).</param>
-	public Directory Directory(string path, IReadOnlyList<string>? exclude = null, IReadOnlyList<string>? include = null)
+	public Directory Directory(string path, IEnumerable<string>? exclude = null, IEnumerable<string>? include = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
@@ -1991,7 +1991,7 @@ public sealed class Host : BaseClient
 	///<summary>Creates a service that forwards traffic to a specified address via the host.</summary>
 	///<param name = "Ports"><para>Ports to expose via the service, forwarding through the host network.</para><para>If a port's frontend is unspecified or 0, it defaults to the same as the backend port.</para><para>An empty set of ports is not valid; an error will be returned.</para></param>
 	///<param name = "Host">Upstream host to forward traffic to.</param>
-	public Service Service(IReadOnlyList<PortForward> ports, string? host = null)
+	public Service Service(IEnumerable<PortForward> ports, string? host = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("ports", ArrayOperationArgumentValue.Create(ports, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
@@ -2025,7 +2025,7 @@ public sealed class Host : BaseClient
 	///<param name = "Service">Service to send traffic from the tunnel.</param>
 	///<param name = "Native"><para>Map each service port to the same port on the host, as if the service were running natively.</para><para>Note: enabling may result in port conflicts.</para></param>
 	///<param name = "Ports"><para>Configure explicit port forwarding rules for the tunnel.</para><para>If a port's frontend is unspecified or 0, a random port will be chosen by the host.</para><para>If no ports are given, all of the service's ports are forwarded. If native is true, each port maps to the same port on the host. If native is false, each port maps to a random port chosen by the host.</para><para>If ports are given and native is true, the ports are additive.</para></param>
-	public Service Tunnel(Service service, bool? native = null, IReadOnlyList<PortForward>? ports = null)
+	public Service Tunnel(Service service, bool? native = null, IEnumerable<PortForward>? ports = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("service", new ReferenceOperationArgumentValue(service), _arguments_);
@@ -2815,7 +2815,7 @@ public sealed class Client : BaseClient
 	///<param name = "Name">Pipeline name.</param>
 	///<param name = "Description">Pipeline description.</param>
 	///<param name = "Labels">Pipeline labels.</param>
-	public Client Pipeline(string name, string? description = null, IReadOnlyList<PipelineLabel>? labels = null)
+	public Client Pipeline(string name, string? description = null, IEnumerable<PipelineLabel>? labels = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);

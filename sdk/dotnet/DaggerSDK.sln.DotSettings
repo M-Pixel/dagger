@@ -3,4 +3,5 @@
 	<s:String x:Key="/Default/CodeInspection/Highlighting/InspectionSeverities/=WithExpressionModifiesAllMembers/@EntryIndexedValue">SUGGESTION</s:String>
 	<s:String x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=CLI/@EntryIndexedValue">CLI</s:String>
 	<s:String x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=ID/@EntryIndexedValue">ID</s:String>
-	<s:String x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=QL/@EntryIndexedValue">QL</s:String></wpf:ResourceDictionary>
+	<s:String x:Key="/Default/CodeStyle/Naming/CSharpNaming/Abbreviations/=QL/@EntryIndexedValue">QL</s:String>
+	<s:Boolean x:Key="/Default/UserDictionary/Words/=Typifier/@EntryIndexedValue">True</s:Boolean></wpf:ResourceDictionary>

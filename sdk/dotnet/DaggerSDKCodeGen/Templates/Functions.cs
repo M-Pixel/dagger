@@ -91,7 +91,7 @@ static class Functions
 
 		return typeReference.Kind switch
 		{
-			Introspection.TypeKind.LIST => (isInput ? GenericName("IReadOnlyList") : GenericName("ImmutableArray"))
+			Introspection.TypeKind.LIST => (isInput ? GenericName("IEnumerable") : GenericName("ImmutableArray"))
 				.WithTypeArgumentList
 				(
 					TypeArgumentList(SingletonSeparatedList(FormatType(typeReference.OfType!, isInput)))

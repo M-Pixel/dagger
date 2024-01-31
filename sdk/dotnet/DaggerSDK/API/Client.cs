@@ -170,18 +170,18 @@ class ReferenceOperationArgumentValue : OperationArgumentValue
 
 class ArrayOperationArgumentValue<T> : OperationArgumentValue
 {
-	private IReadOnlyList<T>? _value;
-	private List<OperationArgumentValue>? _typifiedValue;
+	private IEnumerable<T>? _values;
+	private Task<IList<OperationArgumentValue>>? _typifiedValues;
 	private readonly Func<T, OperationArgumentValue> _valueTypifier;
 
 
 	public ArrayOperationArgumentValue
 	(
-		IReadOnlyList<T> value,
+		IEnumerable<T> values,
 		Func<T, OperationArgumentValue> valueTypifier
 	)
 	{
-		_value = value;
+		_values = values;
 		_valueTypifier = valueTypifier;
 	}
 
@@ -191,7 +191,7 @@ class ArrayOperationArgumentValue<T> : OperationArgumentValue
 	public override async ValueTask Serialize(StringBuilder queryOut)
 	{
 		queryOut.Append('[');
-		foreach (OperationArgumentValue element in GetTypifiedValue())
+		foreach (OperationArgumentValue element in await GetTypifiedValue())
 		{
 			await element.Serialize(queryOut);
 			queryOut.Append(',');
@@ -199,30 +199,38 @@ class ArrayOperationArgumentValue<T> : OperationArgumentValue
 		queryOut[^1] = ']'; // Replace final trailing comma
 	}
 
-	private List<OperationArgumentValue> GetTypifiedValue()
+	private Task<IList<OperationArgumentValue>> GetTypifiedValue()
 	{
 		lock (this)
 		{
-			if (_typifiedValue == null)
+			if (_typifiedValues == null)
 			{
-				_typifiedValue = new List<OperationArgumentValue>(_value!.Count);
-				foreach (T element in _value)
-					_typifiedValue.Add(_valueTypifier(element));
-				_value = null;
+				_typifiedValues = TypifyValues(_values!);
+				_values = null;
 			}
-			return _typifiedValue;
+			return _typifiedValues;
 		}
+	}
+
+	private async Task<IList<OperationArgumentValue>> TypifyValues(IEnumerable<T> values)
+	{
+		await Task.Yield();
+		// If we don't know how many elements will be added, an ImmutableList.Builder has the most scalable Add
+		IList<OperationArgumentValue> result = values switch
+		{
+			IReadOnlyList<T> knownQuantity => new List<OperationArgumentValue>(knownQuantity.Count),
+			_ => ImmutableList.CreateBuilder<OperationArgumentValue>()
+		};
+		foreach (T element in values)
+			result.Add(_valueTypifier(element));
+		return result;
 	}
 }
 
 static class ArrayOperationArgumentValue
 {
-	public static ArrayOperationArgumentValue<T> Create<T>
-	(
-		IReadOnlyList<T> value,
-		Func<T, OperationArgumentValue> valueTypifier
-	)
-		=> new ArrayOperationArgumentValue<T>(value, valueTypifier);
+	public static ArrayOperationArgumentValue<T> Create<T>(IEnumerable<T> value,
+		Func<T, OperationArgumentValue> valueTypifier) => new(value, valueTypifier);
 }
 
 record Operation
