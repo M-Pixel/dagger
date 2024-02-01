@@ -104,6 +104,28 @@ class ObjectOperationArgumentValue : OperationArgumentValue
 	}
 }
 
+class TrueOperationArgumentValue : OperationArgumentValue
+{
+	internal static readonly TrueOperationArgumentValue instance = new();
+
+	public override ValueTask Serialize(StringBuilder queryOut)
+	{
+		queryOut.Append("true");
+		return ValueTask.CompletedTask;
+	}
+}
+
+class FalseOperationArgumentValue : OperationArgumentValue
+{
+	internal static readonly TrueOperationArgumentValue instance = new();
+
+	public override ValueTask Serialize(StringBuilder queryOut)
+	{
+		queryOut.Append("false");
+		return ValueTask.CompletedTask;
+	}
+}
+
 /// <summary>Value has a simple representation that should not be demarcated.</summary>
 class EnumOperationArgumentValue<T> : OperationArgumentValue
 {
@@ -129,7 +151,10 @@ static class EnumOperationArgumentValue
 	///		Allows codegen to be simpler by leveraging automatic type deduction, which works no function calls but not
 	///		constructors.
 	/// </summary>
-	public static EnumOperationArgumentValue<T> Create<T>(T value) => new EnumOperationArgumentValue<T>(value);
+	public static EnumOperationArgumentValue<T> Create<T>(T value) => new(value);
+
+	public static OperationArgumentValue Create(bool value) =>
+		value ? TrueOperationArgumentValue.instance : FalseOperationArgumentValue.instance;
 }
 
 /// <summary>Value is a <see cref="Client"/> object that needs to be substituted with an ID string.</summary>
