@@ -18,7 +18,7 @@ static class APIUtils
 	}
 
 	/// <summary>Convert the queryTree into a GraphQL query.</summary>
-	static async Task BuildQuery(StringBuilder queryOut, IReadOnlyList<Operation> queryTree)
+	internal static async Task BuildQuery(StringBuilder queryOut, IReadOnlyList<Operation> queryTree)
 	{
 		queryOut.Append('{');
 		foreach (Operation operation in queryTree)
@@ -47,7 +47,7 @@ static class APIUtils
 	}
 
 	/// <summary>Return a Graphql query result flattened.</summary>
-	static JsonElement QueryFlatten(JsonElement response)
+	internal static JsonElement QueryFlatten(JsonElement response)
 	{
 		// Recursion break condition
 		// If our response is not an object we assume we reached the value

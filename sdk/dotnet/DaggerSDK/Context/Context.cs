@@ -53,6 +53,16 @@ public sealed partial class Context : IDisposable
 	}
 
 
+	internal Task<IGraphQLClient>? Client
+	{
+		get
+		{
+			lock (_disposableCriticalSection)
+				lock (_clientCriticalSection)
+					return _client;
+		}
+	}
+
 	/// <summary>Returns a GraphQL client connected to the engine.</summary>
 	/// <remarks>If no client is set, it will create one.</remarks>
 	public Task<IGraphQLClient> Connection(ConnectionOptions? connectionOptions = null)
