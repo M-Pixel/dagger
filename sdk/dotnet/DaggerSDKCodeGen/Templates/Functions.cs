@@ -248,19 +248,25 @@ static class Functions
 	(
 		TypeReference typeReference,
 		bool takesRawId,
-		ExpressionSyntax valueExpression
+		ExpressionSyntax valueExpression,
+		bool optional = true
 	)
 		=> typeReference.Kind switch
 		{
 			Introspection.TypeKind.NON_NULL =>
-				ParameterArgumentCreationExpression(typeReference.OfType!, takesRawId, valueExpression),
+				ParameterArgumentCreationExpression(typeReference.OfType!, takesRawId, valueExpression, optional: false),
 
 			Introspection.TypeKind.SCALAR => typeReference.Name switch
 			{
 				// No quotes (numbers are technically enum - there are a finite # of choices)
 				nameof(Scalar.Int) or nameof(Scalar.Float) or nameof(Scalar.Boolean)
 					=> InvocationExpression(MemberAccessExpression("EnumOperationArgumentValue", "Create"))
-						.AddArgumentListArguments(valueExpression),
+						.AddArgumentListArguments
+						(
+							optional
+								? MemberAccessExpression(valueExpression, "Value")
+								: valueExpression
+						),
 
 				nameof(Scalar.String) => ObjectCreationExpression("StringOperationArgumentValue")
 					.AddArgumentListArguments(valueExpression),

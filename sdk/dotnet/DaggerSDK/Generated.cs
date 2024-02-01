@@ -101,7 +101,7 @@ public sealed record PortForward(int Backend, int? Frontend, NetworkProtocol? Pr
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("backend", EnumOperationArgumentValue.Create(Backend), _arguments_);
 		if (Frontend != null)
-			_arguments_ = new OperationArgument("frontend", EnumOperationArgumentValue.Create(Frontend), _arguments_);
+			_arguments_ = new OperationArgument("frontend", EnumOperationArgumentValue.Create(Frontend.Value), _arguments_);
 		if (Protocol != null)
 			_arguments_ = new OperationArgument("protocol", EnumOperationArgumentValue.Create(Protocol), _arguments_);
 		return _arguments_;
@@ -582,7 +582,7 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
 		if (keepDefaultArgs != null)
-			_arguments_ = new OperationArgument("keepDefaultArgs", EnumOperationArgumentValue.Create(keepDefaultArgs), _arguments_);
+			_arguments_ = new OperationArgument("keepDefaultArgs", EnumOperationArgumentValue.Create(keepDefaultArgs.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withEntrypoint", _arguments_);
 		return new Container
 		{
@@ -601,7 +601,7 @@ public sealed class Container : BaseClient
 		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
 		_arguments_ = new OperationArgument("value", new StringOperationArgumentValue(value), _arguments_);
 		if (expand != null)
-			_arguments_ = new OperationArgument("expand", EnumOperationArgumentValue.Create(expand), _arguments_);
+			_arguments_ = new OperationArgument("expand", EnumOperationArgumentValue.Create(expand.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withEnvVariable", _arguments_);
 		return new Container
 		{
@@ -623,7 +623,7 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
 		if (skipEntrypoint != null)
-			_arguments_ = new OperationArgument("skipEntrypoint", EnumOperationArgumentValue.Create(skipEntrypoint), _arguments_);
+			_arguments_ = new OperationArgument("skipEntrypoint", EnumOperationArgumentValue.Create(skipEntrypoint.Value), _arguments_);
 		if (stdin != null)
 			_arguments_ = new OperationArgument("stdin", new StringOperationArgumentValue(stdin), _arguments_);
 		if (redirectStdout != null)
@@ -631,9 +631,9 @@ public sealed class Container : BaseClient
 		if (redirectStderr != null)
 			_arguments_ = new OperationArgument("redirectStderr", new StringOperationArgumentValue(redirectStderr), _arguments_);
 		if (experimentalPrivilegedNesting != null)
-			_arguments_ = new OperationArgument("experimentalPrivilegedNesting", EnumOperationArgumentValue.Create(experimentalPrivilegedNesting), _arguments_);
+			_arguments_ = new OperationArgument("experimentalPrivilegedNesting", EnumOperationArgumentValue.Create(experimentalPrivilegedNesting.Value), _arguments_);
 		if (insecureRootCapabilities != null)
-			_arguments_ = new OperationArgument("insecureRootCapabilities", EnumOperationArgumentValue.Create(insecureRootCapabilities), _arguments_);
+			_arguments_ = new OperationArgument("insecureRootCapabilities", EnumOperationArgumentValue.Create(insecureRootCapabilities.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withExec", _arguments_);
 		return new Container
 		{
@@ -673,7 +673,7 @@ public sealed class Container : BaseClient
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
 		_arguments_ = new OperationArgument("source", new ReferenceOperationArgumentValue(source), _arguments_);
 		if (permissions != null)
-			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions), _arguments_);
+			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions.Value), _arguments_);
 		if (owner != null)
 			_arguments_ = new OperationArgument("owner", new StringOperationArgumentValue(owner), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withFile", _arguments_);
@@ -788,7 +788,7 @@ public sealed class Container : BaseClient
 		if (owner != null)
 			_arguments_ = new OperationArgument("owner", new StringOperationArgumentValue(owner), _arguments_);
 		if (mode != null)
-			_arguments_ = new OperationArgument("mode", EnumOperationArgumentValue.Create(mode), _arguments_);
+			_arguments_ = new OperationArgument("mode", EnumOperationArgumentValue.Create(mode.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withMountedSecret", _arguments_);
 		return new Container
 		{
@@ -823,7 +823,7 @@ public sealed class Container : BaseClient
 		if (contents != null)
 			_arguments_ = new OperationArgument("contents", new StringOperationArgumentValue(contents), _arguments_);
 		if (permissions != null)
-			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions), _arguments_);
+			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions.Value), _arguments_);
 		if (owner != null)
 			_arguments_ = new OperationArgument("owner", new StringOperationArgumentValue(owner), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withNewFile", _arguments_);
@@ -963,7 +963,7 @@ public sealed class Container : BaseClient
 	{
 		OperationArgument? _arguments_ = null;
 		if (keepDefaultArgs != null)
-			_arguments_ = new OperationArgument("keepDefaultArgs", EnumOperationArgumentValue.Create(keepDefaultArgs), _arguments_);
+			_arguments_ = new OperationArgument("keepDefaultArgs", EnumOperationArgumentValue.Create(keepDefaultArgs.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withoutEntrypoint", _arguments_);
 		return new Container
 		{
@@ -1301,7 +1301,7 @@ public sealed class Directory : BaseClient
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
 		_arguments_ = new OperationArgument("source", new ReferenceOperationArgumentValue(source), _arguments_);
 		if (permissions != null)
-			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions), _arguments_);
+			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withFile", _arguments_);
 		return new Directory
 		{
@@ -1318,7 +1318,7 @@ public sealed class Directory : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
 		if (permissions != null)
-			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions), _arguments_);
+			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withNewDirectory", _arguments_);
 		return new Directory
 		{
@@ -1337,7 +1337,7 @@ public sealed class Directory : BaseClient
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
 		_arguments_ = new OperationArgument("contents", new StringOperationArgumentValue(contents), _arguments_);
 		if (permissions != null)
-			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions), _arguments_);
+			_arguments_ = new OperationArgument("permissions", EnumOperationArgumentValue.Create(permissions.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withNewFile", _arguments_);
 		return new Directory
 		{
@@ -1494,7 +1494,7 @@ public sealed class File : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
 		if (allowParentDirPath != null)
-			_arguments_ = new OperationArgument("allowParentDirPath", EnumOperationArgumentValue.Create(allowParentDirPath), _arguments_);
+			_arguments_ = new OperationArgument("allowParentDirPath", EnumOperationArgumentValue.Create(allowParentDirPath.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("export", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<bool>();
 	}
@@ -2030,7 +2030,7 @@ public sealed class Host : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("service", new ReferenceOperationArgumentValue(service), _arguments_);
 		if (native != null)
-			_arguments_ = new OperationArgument("native", EnumOperationArgumentValue.Create(native), _arguments_);
+			_arguments_ = new OperationArgument("native", EnumOperationArgumentValue.Create(native.Value), _arguments_);
 		if (ports != null)
 			_arguments_ = new OperationArgument("ports", ArrayOperationArgumentValue.Create(ports, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("tunnel", _arguments_);
@@ -2542,7 +2542,7 @@ public sealed class Client : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("url", new StringOperationArgumentValue(url), _arguments_);
 		if (keepGitDir != null)
-			_arguments_ = new OperationArgument("keepGitDir", EnumOperationArgumentValue.Create(keepGitDir), _arguments_);
+			_arguments_ = new OperationArgument("keepGitDir", EnumOperationArgumentValue.Create(keepGitDir.Value), _arguments_);
 		if (sshKnownHosts != null)
 			_arguments_ = new OperationArgument("sshKnownHosts", new StringOperationArgumentValue(sshKnownHosts), _arguments_);
 		if (sshAuthSocket != null)
@@ -2951,7 +2951,7 @@ public sealed class Service : BaseClient
 			return CachedEndpoint;
 		OperationArgument? _arguments_ = null;
 		if (port != null)
-			_arguments_ = new OperationArgument("port", EnumOperationArgumentValue.Create(port), _arguments_);
+			_arguments_ = new OperationArgument("port", EnumOperationArgumentValue.Create(port.Value), _arguments_);
 		if (scheme != null)
 			_arguments_ = new OperationArgument("scheme", new StringOperationArgumentValue(scheme), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("endpoint", _arguments_);
