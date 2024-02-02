@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
-using DaggerSDK.Introspection;
+using Dagger.Introspection;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 class CSharpGenerator : Generator
 {

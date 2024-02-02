@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 
-namespace DaggerSDK.Introspection;
+namespace Dagger.Introspection;
 
 record Response
 (

@@ -1,9 +1,9 @@
 ﻿using System.Diagnostics;
-using DaggerSDK;
+using Dagger;
 using GraphQL.Client.Abstractions;
 using static System.Environment;
-using static DaggerSDK.Bootstrap;
-using static DaggerSDK.CodeGenerator;
+using static Dagger.Bootstrap;
+using static Dagger.CodeGenerator;
 
 if (GetCommandLineArgs().Contains("debug"))
 	while (Debugger.IsAttached == false)

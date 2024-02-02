@@ -1,16 +1,16 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 record DockerImageRefValidationExceptionOptions
 (
 	string Reference
 )
-	: DaggerSDKExceptionOptions;
+	: DaggerExceptionOptions;
 
 /// <summary>
 /// This error is thrown if the passed image reference does not pass validation and is not compliant with the
 /// DockerImage constructor.
 /// </summary>
-public class DockerImageReferenceValidationException : DaggerSDKException
+public class DockerImageReferenceValidationException : DaggerException
 {
 	public override ErrorCode Code => ErrorCode.DockerImageRefValidationError;
 

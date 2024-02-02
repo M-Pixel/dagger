@@ -9,7 +9,7 @@ using MicroKnights.IO.Streams;
 using static System.Environment;
 using static System.OperatingSystem;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 /// <summary>
 /// Runs an engine session from a specified binary
@@ -70,7 +70,7 @@ static class ExecutableDownloader
 			throw new InitEngineSessionBinaryException
 			(
 				$"failed to download dagger cli binary: {exception}",
-				new DaggerSDKExceptionOptions(Cause: exception)
+				new DaggerExceptionOptions(Cause: exception)
 			);
 		}
 		finally

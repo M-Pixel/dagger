@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 /// <summary>
 /// Abstractions that make it possible to use Syntax Tree more concisely and expressively.

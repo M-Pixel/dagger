@@ -1,4 +1,4 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 /// <summary>
 /// Defines options used to connect to an engine.

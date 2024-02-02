@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using GraphQL.Client.Abstractions;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 public record ContextConfiguration
 (

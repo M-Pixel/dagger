@@ -1,4 +1,4 @@
 using System.Runtime.CompilerServices;
 
-[assembly:InternalsVisibleTo("DaggerSDK.EngineConnection")]
-[assembly:InternalsVisibleTo("DaggerSDK")]
+[assembly:InternalsVisibleTo("Dagger.EngineConnection")]
+[assembly:InternalsVisibleTo("Dagger.SDK")]

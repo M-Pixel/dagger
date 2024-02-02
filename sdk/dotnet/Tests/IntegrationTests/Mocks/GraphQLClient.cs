@@ -2,7 +2,7 @@ using System.Reactive.Linq;
 using GraphQL;
 using GraphQL.Client.Abstractions;
 
-namespace IntegrationTests;
+namespace Dagger.IntegrationTests;
 
 class GraphQLClientMock : IGraphQLClient
 {

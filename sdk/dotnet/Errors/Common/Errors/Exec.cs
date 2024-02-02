@@ -1,4 +1,4 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 record ExecErrorExceptionOptions
 (
@@ -7,10 +7,10 @@ record ExecErrorExceptionOptions
 	string Stdout,
 	string Stderr
 )
-	: DaggerSDKExceptionOptions;
+	: DaggerExceptionOptions;
 
 /// <summary>API error from an exec operation in a pipeline.</summary>
-public class ExecErrorException : DaggerSDKException
+public class ExecErrorException : DaggerException
 {
 	public override ErrorCode Code => ErrorCode.ExecError;
 

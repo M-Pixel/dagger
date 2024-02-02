@@ -1,8 +1,8 @@
-using DaggerSDK.Introspection;
+using Dagger.Introspection;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 static class API
 {
@@ -15,8 +15,8 @@ static class API
 				"System.Text.Json",
 				"System.Text.Json.Serialization"
 			)
-			.AddUsingStatic("DaggerSDK", "APIUtils")
-			.WithFileScopedNamespaceDeclaration("DaggerSDK")
+			.AddUsingStatic("Dagger", "APIUtils")
+			.WithFileScopedNamespaceDeclaration("Dagger")
 			.AddMembers
 			(
 				Structures.Generate(schema)

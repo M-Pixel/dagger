@@ -1,12 +1,12 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 record EngineSessionConnectionTimeoutExceptionOptions
 (
 	int TimeOutDurationMs
 )
-	: DaggerSDKExceptionOptions;
+	: DaggerExceptionOptions;
 
-public class EngineSessionConnectionTimeout : DaggerSDKException
+public class EngineSessionConnectionTimeout : DaggerException
 {
 	public override ErrorCode Code => ErrorCode.EngineSessionConnectionTimeoutError;
 

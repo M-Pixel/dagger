@@ -8,6 +8,10 @@
     <IsPackable>false</IsPackable>
 
     <LangVersion>12</LangVersion>
+
+    <AssemblyName>Dagger.IntegrationTests</AssemblyName>
+
+    <RootNamespace>Dagger.IntegrationTests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

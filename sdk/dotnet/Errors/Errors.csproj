@@ -4,8 +4,8 @@
         <TargetFramework>net8.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <AssemblyName>DaggerSDK.Errors</AssemblyName>
-        <RootNamespace>DaggerSDK</RootNamespace>
+        <AssemblyName>Dagger.Errors</AssemblyName>
+        <RootNamespace>Dagger</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

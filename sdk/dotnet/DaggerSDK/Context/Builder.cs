@@ -1,6 +1,6 @@
 using GraphQL.Client.Abstractions;
 
-namespace DaggerSDK;
+namespace Dagger;
 using static Environment;
 
 public sealed partial class Context

@@ -1,13 +1,13 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 record EngineSessionConnectParamsParseExceptionOptions
 (
 	string ParsedLine,
 	Exception? Cause = null
 )
-	: DaggerSDKExceptionOptions(Cause);
+	: DaggerExceptionOptions(Cause);
 
-public class EngineSessionConnectParamsParseException : DaggerSDKException
+public class EngineSessionConnectParamsParseException : DaggerException
 {
 	public override ErrorCode Code => ErrorCode.EngineSessionConnectParamsParseError;
 

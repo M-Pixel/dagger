@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using GraphQL.Client.Abstractions;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 public record AdvancedConnectionOptions : ConnectionOptions
 {

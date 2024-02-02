@@ -1,9 +1,9 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using static DaggerSDK.APIUtils;
+using static Dagger.APIUtils;
 
-namespace DaggerSDK;
+namespace Dagger;
 ///<param name = "Name">The build argument name.</param>
 ///<param name = "Value">The build argument value.</param>
 public sealed record BuildArg(string Name, string Value)

@@ -6,8 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <AssemblyName>DaggerSDK.CodeGen</AssemblyName>
-    <RootNamespace>DaggerSDK</RootNamespace>
+    <AssemblyName>Dagger.CodeGen</AssemblyName>
+    <RootNamespace>Dagger</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,19 +1,19 @@
-namespace DaggerSDK;
+namespace Dagger;
 using static Utils;
 
-record DaggerSDKExceptionOptions(Exception? Cause = null);
+record DaggerExceptionOptions(Exception? Cause = null);
 
 /// <summary>The base error. Every other error inherits this error.</summary>
-public abstract class DaggerSDKException : Exception
+public abstract class DaggerException : Exception
 {
 	/// <summary>The dagger specific error code.  Use this to identify dagger errors programmatically.</summary>
 	public abstract ErrorCode Code { get; }
 
-	/// <summary>The original error, which caused the DaggerSDKError.</summary>
+	/// <summary>The original error, which caused the DaggerError.</summary>
 	public Exception? cause { get; }
 
 
-	private protected DaggerSDKException(string message, DaggerSDKExceptionOptions? options = null)
+	private protected DaggerException(string message, DaggerExceptionOptions? options = null)
 		: base(message)
 	{
 		cause = options?.Cause;

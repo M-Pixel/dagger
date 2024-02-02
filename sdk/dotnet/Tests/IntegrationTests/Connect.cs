@@ -1,17 +1,9 @@
-﻿using System.Diagnostics;
-using System.Net.Http.Headers;
-using System.Text.Json;
-using DaggerSDK;
-using GraphQL;
-using GraphQL.Client.Abstractions;
+﻿using System.Net.Http.Headers;
 using GraphQL.Client.Http;
-using IntegrationTests.TestData;
-using Newtonsoft.Json;
-using JsonSerializer = System.Text.Json.JsonSerializer;
-using static DaggerSDK.Dagger;
-using static DaggerSDK.TestHelpers;
+using static Dagger.Dagger;
+using static Dagger.IntegrationTests.TestHelpers;
 
-namespace IntegrationTests;
+namespace Dagger.IntegrationTests;
 
 [NonParallelizable]
 class CSharpDefaultClient

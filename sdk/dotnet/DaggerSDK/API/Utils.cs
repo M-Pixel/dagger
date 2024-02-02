@@ -4,7 +4,7 @@ using System.Text.Json;
 using GraphQL;
 using GraphQL.Client.Abstractions;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 static class APIUtils
 {

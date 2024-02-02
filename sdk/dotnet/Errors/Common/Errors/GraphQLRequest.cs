@@ -1,17 +1,17 @@
 using GraphQL;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 record GraphQLRequestErrorExceptionOptions
 (
 	IGraphQLResponse Response,
 	string Request
-) : DaggerSDKExceptionOptions;
+) : DaggerExceptionOptions;
 
 /// <summary>
 /// This error originates from the dagger engine. It means that some error was thrown and sent back via GraphQL.
 /// </summary>
-public class GraphQLRequestErrorException : DaggerSDKException
+public class GraphQLRequestErrorException : DaggerException
 {
 	public override ErrorCode Code => ErrorCode.GraphQLRequestError;
 

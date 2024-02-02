@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 class ImmutableArrayConverter<T> : JsonConverter<ImmutableArray<T>>
 {

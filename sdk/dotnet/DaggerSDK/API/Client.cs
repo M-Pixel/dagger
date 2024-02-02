@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 /// <summary>User-provided argument to a query as a forward-linked list.</summary>
 record OperationArgument

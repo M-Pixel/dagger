@@ -1,4 +1,4 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 public delegate Task CallbackFunction(Client client);
 

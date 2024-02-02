@@ -1,11 +1,11 @@
 using System.Collections.Immutable;
-using DaggerSDK.Introspection;
+using Dagger.Introspection;
 using GraphQL;
 using GraphQL.Client.Abstractions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 abstract class Generator
 {

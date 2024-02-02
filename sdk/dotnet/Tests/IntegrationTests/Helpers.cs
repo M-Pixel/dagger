@@ -1,7 +1,7 @@
 using GraphQL.Client.Abstractions;
+using static System.Environment;
 
-namespace DaggerSDK;
-using static Environment;
+namespace Dagger.IntegrationTests;
 
 static class TestHelpers
 {

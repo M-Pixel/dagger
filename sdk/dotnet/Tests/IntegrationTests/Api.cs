@@ -1,10 +1,10 @@
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
-using static DaggerSDK.APIUtils;
-using static DaggerSDK.TestHelpers;
+using static Dagger.APIUtils;
+using static Dagger.IntegrationTests.TestHelpers;
 
-namespace DaggerSDK;
+namespace Dagger.IntegrationTests;
 
 class CSharpApi
 {

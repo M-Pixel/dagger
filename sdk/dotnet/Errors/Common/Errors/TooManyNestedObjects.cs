@@ -1,16 +1,16 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 record TooManyNestedObjectsExceptionOptions
 (
 	object Response
 )
-	: DaggerSDKExceptionOptions;
+	: DaggerExceptionOptions;
 
 /// <summary>
 /// Dagger only expects one response value from the engine. If the engine returns more than one value this error is
 /// thrown.
 /// </summary>
-public class TooManyNestedObjectsException : DaggerSDKException
+public class TooManyNestedObjectsException : DaggerException
 {
 	public override ErrorCode Code => ErrorCode.TooManyNestedObjectsError;
 

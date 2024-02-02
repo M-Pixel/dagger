@@ -1,11 +1,11 @@
-using DaggerSDK.Introspection;
+using Dagger.Introspection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
-using static DaggerSDK.SyntaxTree;
+using static Dagger.SyntaxTree;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 static class Functions
 {

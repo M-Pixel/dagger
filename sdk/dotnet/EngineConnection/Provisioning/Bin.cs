@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using GraphQL.Client.Abstractions;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 /// <summary>Runs an engine session from a specified binary</summary>
 public class LocalExecutable : IEngineConnection

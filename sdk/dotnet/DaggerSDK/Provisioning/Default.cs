@@ -1,4 +1,4 @@
-namespace DaggerSDK;
+namespace Dagger;
 
 static class CLI
 {

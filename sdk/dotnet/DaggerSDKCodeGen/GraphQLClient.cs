@@ -2,7 +2,7 @@ using System.Reflection;
 using GraphQL.Client.Abstractions;
 using static System.Environment;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 static class Bootstrap
 {

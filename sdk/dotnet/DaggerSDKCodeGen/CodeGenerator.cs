@@ -1,7 +1,7 @@
-using DaggerSDK.Introspection;
+using Dagger.Introspection;
 using GraphQL.Client.Abstractions;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 static class CodeGenerator
 {

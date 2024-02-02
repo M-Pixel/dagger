@@ -8,7 +8,7 @@ using GraphQL.Client.Http;
 using GraphQL.Client.Serializer.SystemTextJson;
 using static System.Environment;
 
-namespace DaggerSDK;
+namespace Dagger;
 
 public static class GraphQLClientFactory
 {
