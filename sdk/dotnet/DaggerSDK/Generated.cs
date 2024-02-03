@@ -94,7 +94,7 @@ public sealed record Platform(string Value);
 ///<param name = "Backend">Destination port for traffic.</param>
 ///<param name = "Frontend">Port to expose to clients. If unspecified, a default will be chosen.</param>
 ///<param name = "Protocol">Protocol to use for traffic.</param>
-public sealed record PortForward(int Backend, int? Frontend, NetworkProtocol? Protocol)
+public sealed record PortForward(int Backend, int? Frontend = null, NetworkProtocol? Protocol = null)
 {
 	internal OperationArgument AsOperationArguments()
 	{

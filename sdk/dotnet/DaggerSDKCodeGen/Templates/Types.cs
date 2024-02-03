@@ -58,6 +58,10 @@ static class Structures
 					.Select
 					(
 						inputField => Parameter(FormatType(inputField.Type, isInput: true), FormatName(inputField.Name))
+							.WithDefault
+							(
+								inputField.Type.IsOptional() ? EqualsValueClause(NullLiteralExpression) : null
+							)
 					)
 			)
 			.WithBody()
