@@ -15,6 +15,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EngineConnection", "EngineC
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Errors", "Errors\Errors.csproj", "{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pipelines", "Pipelines\Pipelines.csproj", "{F5F3276F-78AC-4016-934A-88204DD07661}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,10 @@ Global
 		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DC561D94-1BB4-43DB-96B2-249D3C0D89D5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F5F3276F-78AC-4016-934A-88204DD07661}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F5F3276F-78AC-4016-934A-88204DD07661}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F5F3276F-78AC-4016-934A-88204DD07661}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F5F3276F-78AC-4016-934A-88204DD07661}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

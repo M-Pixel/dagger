@@ -16,6 +16,7 @@ class CSharpDefaultClient
 		Assert.That(Client.Default.Context.Client, Is.Null);
 
 		string standardOut = await Client.Default
+			.TestPipeline()
 			.Container()
 			.From("alpine:3.16.2")
 			.WithExec(["echo", "hello", "world"])
@@ -42,6 +43,7 @@ class CSharpDefaultClient
 			async () =>
 			{
 				string standardOut = await Client.Default
+					.TestPipeline()
 					.Container()
 					.From("alpine:3.16.2")
 					.WithExec(["echo", "hello", "world"])
@@ -68,6 +70,7 @@ class CSharpDefaultClient
 			async () =>
 			{
 				string standardOut = await Client.Default
+					.TestPipeline()
 					.Container()
 					.From("alpine:3.16.2")
 					.WithExec(["echo", "hello", "world"])
@@ -115,6 +118,7 @@ class CSharpDefaultClient
 			async client =>
 			{
 				await client
+					.TestPipeline()
 					.Container()
 					.From("alpine")
 					.WithExec(["apk", "add", "curl"])
@@ -136,7 +140,11 @@ class CSharpSDKConnect
 			{
 				try
 				{
-					await client.Container().From("alpine").File("unknown_file").Contents();
+					await client
+						.Container()
+						.From("alpine")
+						.File("unknown_file")
+						.Contents();
 				}
 				catch (GraphQLRequestErrorException)
 				{

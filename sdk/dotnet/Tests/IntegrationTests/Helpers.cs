@@ -12,7 +12,7 @@ static class TestHelpers
 
 	public static async Task TestParallelConnect(Func<Client, Task> callback, ConnectionOptions? options = null)
 	{
-		await callback(new Client{ Context = await MakeContext(options) });
+		await callback(new Client{ Context = await MakeContext(options) }.TestPipeline());
 	}
 
 	private static async Task<Context> MakeContext(ConnectionOptions? options)
@@ -41,4 +41,6 @@ static class TestHelpers
 		IGraphQLClient client = await _executable.Connect(new AdvancedConnectionOptions(options));
 		return new Context(new ContextConfiguration(client));
 	}
+
+	public static Client TestPipeline(this Client self) => self.Pipeline("C# SDK Integration Tests");
 }
