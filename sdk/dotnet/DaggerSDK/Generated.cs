@@ -1501,6 +1501,7 @@ public sealed class File : BaseClient
 	internal FileID? CachedId { private get; init; }
 	internal string? CachedContents { private get; init; }
 	internal bool? CachedExport { private get; init; }
+	internal string? CachedName { private get; init; }
 	internal int? CachedSize { private get; init; }
 	internal FileID? CachedSync { private get; init; }
 
@@ -1537,6 +1538,16 @@ public sealed class File : BaseClient
 			_arguments_ = new OperationArgument("allowParentDirPath", EnumOperationArgumentValue.Create(allowParentDirPath.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("export", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<bool>();
+	}
+
+	///<summary>Retrieves the name of the file.</summary>
+	public async Task<string> Name()
+	{
+		if (CachedName != null)
+			return CachedName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("name", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
 	///<summary>Retrieves the size of the file, in bytes.</summary>
@@ -1937,8 +1948,8 @@ public sealed class GitRef : BaseClient
 	}
 
 	///<summary>The filesystem tree at this ref.</summary>
-	///<param name = "SshKnownHosts"></param>
-	///<param name = "SshAuthSocket"></param>
+	///<param name = "SshKnownHosts">DEPRECATED: This option should be passed to `git` instead.</param>
+	///<param name = "SshAuthSocket">DEPRECATED: This option should be passed to `git` instead.</param>
 	public Directory Tree(string? sshKnownHosts = null, Socket? sshAuthSocket = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -2693,7 +2704,7 @@ public sealed class Client : BaseClient
 	}
 
 	///<summary><para>Creates a scratch container.</para><para>Optional platform argument initializes new containers to execute and publish as that platform. Platform defaults to that of the builder's host.</para></summary>
-	///<param name = "Id"></param>
+	///<param name = "Id">DEPRECATED: Use `loadContainerFromID` instead.</param>
 	///<param name = "Platform">Platform to initialize the container with.</param>
 	public Container Container(ContainerID? id = null, Platform? platform = null)
 	{
@@ -2752,7 +2763,7 @@ public sealed class Client : BaseClient
 	}
 
 	///<summary>Creates an empty directory.</summary>
-	///<param name = "Id"></param>
+	///<param name = "Id">DEPRECATED: Use `loadDirectoryFromID` isntead.</param>
 	public Directory Directory(DirectoryID? id = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -2766,7 +2777,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	[Obsolete("Use loadFileFromID instead.")]
+	[Obsolete("Use `loadFileFromID` instead.")]
 	///<summary></summary>
 	///<param name = "Id"></param>
 	public File File(FileID id)
