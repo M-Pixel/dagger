@@ -25,28 +25,34 @@ public enum CacheSharingMode
 	SHARED
 }
 
-///<summary>A global cache volume identifier.</summary>
+///<summary>The `CacheVolumeID` scalar type represents an identifier for an object of type CacheVolume.</summary>
 public sealed record CacheVolumeID(string Value);
-///<summary>A unique container identifier. Null designates an empty container (scratch).</summary>
+///<summary>The `ContainerID` scalar type represents an identifier for an object of type Container.</summary>
 public sealed record ContainerID(string Value);
-///<summary>The `DateTime` scalar type represents a DateTime. The DateTime is serialized as an RFC 3339 quoted string</summary>
-public sealed record DateTime(string Value);
-///<summary>A content-addressed directory identifier.</summary>
+///<summary>The `DirectoryID` scalar type represents an identifier for an object of type Directory.</summary>
 public sealed record DirectoryID(string Value);
-///<summary>A file identifier.</summary>
+///<summary>The `EnvVariableID` scalar type represents an identifier for an object of type EnvVariable.</summary>
+public sealed record EnvVariableID(string Value);
+///<summary>The `FieldTypeDefID` scalar type represents an identifier for an object of type FieldTypeDef.</summary>
+public sealed record FieldTypeDefID(string Value);
+///<summary>The `FileID` scalar type represents an identifier for an object of type File.</summary>
 public sealed record FileID(string Value);
-///<summary>A reference to a FunctionArg.</summary>
+///<summary>The `FunctionArgID` scalar type represents an identifier for an object of type FunctionArg.</summary>
 public sealed record FunctionArgID(string Value);
-///<summary>A reference to a Function.</summary>
+///<summary>The `FunctionCallArgValueID` scalar type represents an identifier for an object of type FunctionCallArgValue.</summary>
+public sealed record FunctionCallArgValueID(string Value);
+///<summary>The `FunctionCallID` scalar type represents an identifier for an object of type FunctionCall.</summary>
+public sealed record FunctionCallID(string Value);
+///<summary>The `FunctionID` scalar type represents an identifier for an object of type Function.</summary>
 public sealed record FunctionID(string Value);
-///<summary>A reference to GeneratedCode.</summary>
+///<summary>The `GeneratedCodeID` scalar type represents an identifier for an object of type GeneratedCode.</summary>
 public sealed record GeneratedCodeID(string Value);
-///<summary>A git reference identifier.</summary>
+///<summary>The `GitRefID` scalar type represents an identifier for an object of type GitRef.</summary>
 public sealed record GitRefID(string Value);
-///<summary>A git repository identifier.</summary>
+///<summary>The `GitRepositoryID` scalar type represents an identifier for an object of type GitRepository.</summary>
 public sealed record GitRepositoryID(string Value);
-///<summary>The `ID` scalar type represents a unique identifier, often used to refetch an object or as key for a cache. The ID type appears in a JSON response as a String; however, it is not intended to be human-readable. When expected as an input type, any string (such as `"4"`) or integer (such as `4`) input value will be accepted as an ID.</summary>
-public sealed record ID(string Value);
+///<summary>The `HostID` scalar type represents an identifier for an object of type Host.</summary>
+public sealed record HostID(string Value);
 ///<summary>Compression algorithm to use for image layers.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<ImageLayerCompression>))]
 public enum ImageLayerCompression
@@ -65,9 +71,17 @@ public enum ImageMediaTypes
 	OCIMediaTypes
 }
 
+///<summary>The `InterfaceTypeDefID` scalar type represents an identifier for an object of type InterfaceTypeDef.</summary>
+public sealed record InterfaceTypeDefID(string Value);
 ///<summary>An arbitrary JSON-encoded value.</summary>
 public sealed record JSON(string Value);
-///<summary>A reference to a Module.</summary>
+///<summary>The `LabelID` scalar type represents an identifier for an object of type Label.</summary>
+public sealed record LabelID(string Value);
+///<summary>The `ListTypeDefID` scalar type represents an identifier for an object of type ListTypeDef.</summary>
+public sealed record ListTypeDefID(string Value);
+///<summary>The `ModuleConfigID` scalar type represents an identifier for an object of type ModuleConfig.</summary>
+public sealed record ModuleConfigID(string Value);
+///<summary>The `ModuleID` scalar type represents an identifier for an object of type Module.</summary>
 public sealed record ModuleID(string Value);
 ///<summary>Transport layer network protocol associated to a port.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<NetworkProtocol>))]
@@ -77,6 +91,8 @@ public enum NetworkProtocol
 	UDP
 }
 
+///<summary>The `ObjectTypeDefID` scalar type represents an identifier for an object of type ObjectTypeDef.</summary>
+public sealed record ObjectTypeDefID(string Value);
 ///<param name = "Name">Label name.</param>
 ///<param name = "Value">Label value.</param>
 public sealed record PipelineLabel(string Name, string Value)
@@ -91,51 +107,53 @@ public sealed record PipelineLabel(string Name, string Value)
 };
 ///<summary><para>The platform config OS and architecture in a Container.</para><para>The format is [os]/[platform]/[version] (e.g., "darwin/arm64/v7", "windows/amd64", "linux/arm64").</para></summary>
 public sealed record Platform(string Value);
-///<param name = "Backend">Destination port for traffic.</param>
 ///<param name = "Frontend">Port to expose to clients. If unspecified, a default will be chosen.</param>
-///<param name = "Protocol">Protocol to use for traffic.</param>
+///<param name = "Backend">Destination port for traffic.</param>
+///<param name = "Protocol">Transport layer protocol to use for traffic.</param>
 public sealed record PortForward(int Backend, int? Frontend = null, NetworkProtocol? Protocol = null)
 {
 	internal OperationArgument AsOperationArguments()
 	{
 		OperationArgument? _arguments_ = null;
-		_arguments_ = new OperationArgument("backend", EnumOperationArgumentValue.Create(Backend), _arguments_);
 		if (Frontend != null)
 			_arguments_ = new OperationArgument("frontend", EnumOperationArgumentValue.Create(Frontend.Value), _arguments_);
+		_arguments_ = new OperationArgument("backend", EnumOperationArgumentValue.Create(Backend), _arguments_);
 		if (Protocol != null)
 			_arguments_ = new OperationArgument("protocol", EnumOperationArgumentValue.Create(Protocol), _arguments_);
 		return _arguments_;
 	}
 };
-///<summary>A unique identifier for a secret.</summary>
+///<summary>The `PortID` scalar type represents an identifier for an object of type Port.</summary>
+public sealed record PortID(string Value);
+///<summary>The `SecretID` scalar type represents an identifier for an object of type Secret.</summary>
 public sealed record SecretID(string Value);
-///<summary>A unique service identifier.</summary>
+///<summary>The `ServiceID` scalar type represents an identifier for an object of type Service.</summary>
 public sealed record ServiceID(string Value);
-///<summary>A content-addressed socket identifier.</summary>
+///<summary>The `SocketID` scalar type represents an identifier for an object of type Socket.</summary>
 public sealed record SocketID(string Value);
-///<summary>A reference to a TypeDef.</summary>
+///<summary>The `TypeDefID` scalar type represents an identifier for an object of type TypeDef.</summary>
 public sealed record TypeDefID(string Value);
 ///<summary>Distinguishes the different kinds of TypeDefs.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<TypeDefKind>))]
 public enum TypeDefKind
 {
-	BooleanKind,
-	IntegerKind,
-	InterfaceKind,
-	ListKind,
-	ObjectKind,
-	StringKind,
-	VoidKind
+	BOOLEAN_KIND,
+	INTEGER_KIND,
+	INTERFACE_KIND,
+	LIST_KIND,
+	OBJECT_KIND,
+	STRING_KIND,
+	VOID_KIND
 }
 
-///<summary><para>The absense of a value.</para><para>A Null Void is used as a placeholder for resolvers that do not return anything.</para></summary>
+///<summary><para>The absence of a value.</para><para>A Null Void is used as a placeholder for resolvers that do not return anything.</para></summary>
 public sealed record Void(string Value);
 ///<summary>A directory whose contents persist across runs.</summary>
 public sealed class CacheVolume : BaseClient
 {
 	internal CacheVolumeID? CachedId { private get; init; }
 
-	///<summary></summary>
+	///<summary>A unique identifier for this CacheVolume.</summary>
 	public async Task<CacheVolumeID> Id()
 	{
 		if (CachedId != null)
@@ -146,7 +164,7 @@ public sealed class CacheVolume : BaseClient
 	}
 }
 
-///<summary>An OCI-compatible container, also known as a docker container.</summary>
+///<summary>An OCI-compatible container, also known as a Docker container.</summary>
 public sealed class Container : BaseClient
 {
 	internal ContainerID? CachedId { private get; init; }
@@ -163,7 +181,7 @@ public sealed class Container : BaseClient
 	internal string? CachedUser { private get; init; }
 	internal string? CachedWorkdir { private get; init; }
 
-	///<summary>A unique identifier for this container.</summary>
+	///<summary>A unique identifier for this Container.</summary>
 	public async Task<ContainerID> Id()
 	{
 		if (CachedId != null)
@@ -186,9 +204,9 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>Returns a File representing the container serialized to a tarball.</summary>
-	///<param name = "PlatformVariants">Identifiers for other platform specific containers. Used for multi-platform image.</param>
-	///<param name = "ForcedCompression">Force each layer of the image to use the specified compression algorithm. If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</param>
-	///<param name = "MediaTypes">Use the specified media types for the image's layers. Defaults to OCI, which is largely compatible with most recent container runtimes, but Docker may be needed for older runtimes without OCI support.</param>
+	///<param name = "PlatformVariants"><para>Identifiers for other platform specific containers.</para><para>Used for multi-platform images.</para></param>
+	///<param name = "ForcedCompression"><para>Force each layer of the image to use the specified compression algorithm.</para><para>If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</para></param>
+	///<param name = "MediaTypes"><para>Use the specified media types for the image's layers.</para><para>Defaults to OCI, which is largely compatible with most recent container runtimes, but Docker may be needed for older runtimes without OCI support.</para></param>
 	public File AsTarball(IEnumerable<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -208,20 +226,20 @@ public sealed class Container : BaseClient
 
 	///<summary>Initializes this container from a Dockerfile build.</summary>
 	///<param name = "Context">Directory context used by the Dockerfile.</param>
-	///<param name = "Dockerfile"><para>Path to the Dockerfile to use.</para><para>Default: './Dockerfile'.</para></param>
-	///<param name = "BuildArgs">Additional build arguments.</param>
+	///<param name = "Dockerfile">Path to the Dockerfile to use.</param>
 	///<param name = "Target">Target build stage to build.</param>
-	///<param name = "Secrets"><para>Secrets to pass to the build.</para><para>They will be mounted at /run/secrets/[secret-name] in the build container</para><para>They can be accessed in the Dockerfile using the "secret" mount type and mount path /run/secrets/[secret-name] e.g. RUN --mount=type=secret,id=my-secret curl url?token=$(cat /run/secrets/my-secret)"</para></param>
-	public Container Build(Directory context, string? dockerfile = null, IEnumerable<BuildArg>? buildArgs = null, string? target = null, IEnumerable<Secret>? secrets = null)
+	///<param name = "BuildArgs">Additional build arguments.</param>
+	///<param name = "Secrets"><para>Secrets to pass to the build.</para><para>They will be mounted at /run/secrets/[secret-name] in the build container</para><para>They can be accessed in the Dockerfile using the "secret" mount type and mount path /run/secrets/[secret-name], e.g. RUN --mount=type=secret,id=my-secret curl http://example.com?token=$(cat /run/secrets/my-secret)</para></param>
+	public Container Build(Directory context, string? dockerfile = null, string? target = null, IEnumerable<BuildArg>? buildArgs = null, IEnumerable<Secret>? secrets = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("context", new ReferenceOperationArgumentValue(context), _arguments_);
 		if (dockerfile != null)
 			_arguments_ = new OperationArgument("dockerfile", new StringOperationArgumentValue(dockerfile), _arguments_);
-		if (buildArgs != null)
-			_arguments_ = new OperationArgument("buildArgs", ArrayOperationArgumentValue.Create(buildArgs, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
 		if (target != null)
 			_arguments_ = new OperationArgument("target", new StringOperationArgumentValue(target), _arguments_);
+		if (buildArgs != null)
+			_arguments_ = new OperationArgument("buildArgs", ArrayOperationArgumentValue.Create(buildArgs, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
 		if (secrets != null)
 			_arguments_ = new OperationArgument("secrets", ArrayOperationArgumentValue.Create(secrets, element => new ReferenceOperationArgumentValue(element)), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("build", _arguments_);
@@ -279,11 +297,11 @@ public sealed class Container : BaseClient
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("envVariables", _arguments_);
-		_newQueryTree_ = _newQueryTree_.Add("name value");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new EnvVariable { QueryTree = QueryTree, Context = Context, CachedName = json.GetProperty("name").Deserialize<string>(), CachedValue = json.GetProperty("value").Deserialize<string>() }).ToImmutableArray();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new EnvVariable { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<EnvVariableID>() }).ToImmutableArray();
 	}
 
-	///<summary><para>EXPERIMENTAL API! Subject to change/removal at any time.</para><para>experimentalWithAllGPUs configures all available GPUs on the host to be accessible to this container. This currently works for Nvidia devices only.</para></summary>
+	///<summary><para>EXPERIMENTAL API! Subject to change/removal at any time.</para><para>Configures all available GPUs on the host to be accessible to this container.</para><para>This currently works for Nvidia devices only.</para></summary>
 	public Container ExperimentalWithAllGPUs()
 	{
 		OperationArgument? _arguments_ = null;
@@ -295,8 +313,8 @@ public sealed class Container : BaseClient
 		};
 	}
 
-	///<summary><para>EXPERIMENTAL API! Subject to change/removal at any time.</para><para>experimentalWithGPU configures the provided list of devices to be accesible to this container. This currently works for Nvidia devices only.</para></summary>
-	///<param name = "Devices"></param>
+	///<summary><para>EXPERIMENTAL API! Subject to change/removal at any time.</para><para>Configures the provided list of devices to be accesible to this container.</para><para>This currently works for Nvidia devices only.</para></summary>
+	///<param name = "Devices">List of devices to be accessible to this container.</param>
 	public Container ExperimentalWithGPU(IEnumerable<string> devices)
 	{
 		OperationArgument? _arguments_ = null;
@@ -309,11 +327,11 @@ public sealed class Container : BaseClient
 		};
 	}
 
-	///<summary><para>Writes the container as an OCI tarball to the destination file path on the host for the specified platform variants.</para><para>Return true on success. It can also publishes platform variants.</para></summary>
-	///<param name = "Path">Host's destination path (e.g., "./tarball"). Path can be relative to the engine's workdir or absolute.</param>
-	///<param name = "PlatformVariants">Identifiers for other platform specific containers. Used for multi-platform image.</param>
-	///<param name = "ForcedCompression">Force each layer of the exported image to use the specified compression algorithm. If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</param>
-	///<param name = "MediaTypes">Use the specified media types for the exported image's layers. Defaults to OCI, which is largely compatible with most recent container runtimes, but Docker may be needed for older runtimes without OCI support.</param>
+	///<summary><para>Writes the container as an OCI tarball to the destination file path on the host.</para><para>Return true on success.</para><para>It can also export platform variants.</para></summary>
+	///<param name = "Path"><para>Host's destination path (e.g., "./tarball").</para><para>Path can be relative to the engine's workdir or absolute.</para></param>
+	///<param name = "PlatformVariants"><para>Identifiers for other platform specific containers.</para><para>Used for multi-platform image.</para></param>
+	///<param name = "ForcedCompression"><para>Force each layer of the exported image to use the specified compression algorithm.</para><para>If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</para></param>
+	///<param name = "MediaTypes"><para>Use the specified media types for the exported image's layers.</para><para>Defaults to OCI, which is largely compatible with most recent container runtimes, but Docker may be needed for older runtimes without OCI support.</para></param>
 	public async Task<bool> Export(string path, IEnumerable<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
 	{
 		if (CachedExport != null)
@@ -335,8 +353,8 @@ public sealed class Container : BaseClient
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("exposedPorts", _arguments_);
-		_newQueryTree_ = _newQueryTree_.Add("description port protocol");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = QueryTree, Context = Context, CachedDescription = json.GetProperty("description").Deserialize<string?>(), CachedPort = json.GetProperty("port").Deserialize<int>(), CachedProtocol = json.GetProperty("protocol").Deserialize<NetworkProtocol>() }).ToImmutableArray();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<PortID>() }).ToImmutableArray();
 	}
 
 	///<summary><para>Retrieves a file at the given path.</para><para>Mounts are included.</para></summary>
@@ -368,16 +386,16 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>The unique image reference which can only be retrieved immediately after the 'Container.From' call.</summary>
-	public async Task<string?> ImageRef()
+	public async Task<string> ImageRef()
 	{
 		if (CachedImageRef != null)
 			return CachedImageRef;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("imageRef", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary><para>Reads the container from an OCI tarball.</para><para>NOTE: this involves unpacking the tarball to an OCI store on the host at $XDG_CACHE_DIR/dagger/oci. This directory can be removed whenever you like.</para></summary>
+	///<summary>Reads the container from an OCI tarball.</summary>
 	///<param name = "Source">File to read the container from.</param>
 	///<param name = "Tag">Identifies the tag to import from the archive, if the archive bundles multiple tags.</param>
 	public Container Import(File source, string? tag = null)
@@ -395,7 +413,7 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>Retrieves the value of the specified label.</summary>
-	///<param name = "Name"></param>
+	///<param name = "Name">The name of the label (e.g., "org.opencontainers.artifact.created").</param>
 	public async Task<string?> Label(string name)
 	{
 		if (CachedLabel != null)
@@ -411,8 +429,8 @@ public sealed class Container : BaseClient
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("labels", _arguments_);
-		_newQueryTree_ = _newQueryTree_.Add("name value");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Label { QueryTree = QueryTree, Context = Context, CachedName = json.GetProperty("name").Deserialize<string>(), CachedValue = json.GetProperty("value").Deserialize<string>() }).ToImmutableArray();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Label { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<LabelID>() }).ToImmutableArray();
 	}
 
 	///<summary>Retrieves the list of paths where a directory is mounted.</summary>
@@ -423,10 +441,10 @@ public sealed class Container : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>Creates a named sub-pipeline</summary>
-	///<param name = "Name">Pipeline name.</param>
-	///<param name = "Description">Pipeline description.</param>
-	///<param name = "Labels">Pipeline labels.</param>
+	///<summary>Creates a named sub-pipeline.</summary>
+	///<param name = "Name">Name of the sub-pipeline.</param>
+	///<param name = "Description">Description of the sub-pipeline.</param>
+	///<param name = "Labels">Labels to apply to the sub-pipeline.</param>
 	public Container Pipeline(string name, string? description = null, IEnumerable<PipelineLabel>? labels = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -453,11 +471,11 @@ public sealed class Container : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary><para>Publishes this container as a new image to the specified address.</para><para>Publish returns a fully qualified ref. It can also publish platform variants.</para></summary>
+	///<summary><para>Publishes this container as a new image to the specified address.</para><para>Publish returns a fully qualified ref.</para><para>It can also publish platform variants.</para></summary>
 	///<param name = "Address"><para>Registry's address to publish the image to.</para><para>Formatted as [host]/[user]/[repo]:[tag] (e.g. "docker.io/dagger/dagger:main").</para></param>
-	///<param name = "PlatformVariants">Identifiers for other platform specific containers. Used for multi-platform image.</param>
-	///<param name = "ForcedCompression">Force each layer of the published image to use the specified compression algorithm. If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</param>
-	///<param name = "MediaTypes">Use the specified media types for the published image's layers. Defaults to OCI, which is largely compatible with most recent registries, but Docker may be needed for older registries without OCI support.</param>
+	///<param name = "PlatformVariants"><para>Identifiers for other platform specific containers.</para><para>Used for multi-platform image.</para></param>
+	///<param name = "ForcedCompression"><para>Force each layer of the published image to use the specified compression algorithm.</para><para>If this is unset, then if a layer already has a compressed blob in the engine's cache, that will be used (this can result in a mix of compression algorithms for different layers). If this is unset and a layer has no compressed blob in the engine's cache, then it will be compressed using Gzip.</para></param>
+	///<param name = "MediaTypes"><para>Use the specified media types for the published image's layers.</para><para>Defaults to OCI, which is largely compatible with most recent registries, but Docker may be needed for older registries without OCI support.</para></param>
 	public async Task<string> Publish(string address, IEnumerable<Container>? platformVariants = null, ImageLayerCompression? forcedCompression = null, ImageMediaTypes? mediaTypes = null)
 	{
 		if (CachedPublish != null)
@@ -526,13 +544,13 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>Retrieves the user to be set for all commands.</summary>
-	public async Task<string?> User()
+	public async Task<string> User()
 	{
 		if (CachedUser != null)
 			return CachedUser;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("user", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
 	///<summary>Configures default arguments for future commands.</summary>
@@ -552,8 +570,8 @@ public sealed class Container : BaseClient
 	///<summary>Retrieves this container plus a directory written at the given path.</summary>
 	///<param name = "Path">Location of the written directory (e.g., "/tmp/directory").</param>
 	///<param name = "Directory">Identifier of the directory to write</param>
-	///<param name = "Exclude">Patterns to exclude in the written directory (e.g., ["node_modules/**", ".gitignore", ".git/"]).</param>
-	///<param name = "Include">Patterns to include in the written directory (e.g., ["*.go", "go.mod", "go.sum"]).</param>
+	///<param name = "Exclude">Patterns to exclude in the written directory (e.g. ["node_modules/**", ".gitignore", ".git/"]).</param>
+	///<param name = "Include">Patterns to include in the written directory (e.g. ["*.go", "go.mod", "go.sum"]).</param>
 	///<param name = "Owner"><para>A user:group to set for the directory and its contents.</para><para>The user and group can either be an ID (1000:1000) or a name (foo:bar).</para><para>If the group is omitted, it defaults to the same as the user.</para></param>
 	public Container WithDirectory(string path, Directory directory, IEnumerable<string>? exclude = null, IEnumerable<string>? include = null, string? owner = null)
 	{
@@ -594,7 +612,7 @@ public sealed class Container : BaseClient
 	///<summary>Retrieves this container plus the given environment variable.</summary>
 	///<param name = "Name">The name of the environment variable (e.g., "HOST").</param>
 	///<param name = "Value">The value of the environment variable. (e.g., "localhost").</param>
-	///<param name = "Expand">Replace `${VAR}` or $VAR in the value according to the current environment variables defined in the container (e.g., "/opt/bin:$PATH").</param>
+	///<param name = "Expand">Replace `${VAR}` or `$VAR` in the value according to the current environment variables defined in the container (e.g., "/opt/bin:$PATH").</param>
 	public Container WithEnvVariable(string name, string value, bool? expand = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -616,8 +634,8 @@ public sealed class Container : BaseClient
 	///<param name = "Stdin">Content to write to the command's standard input before closing (e.g., "Hello world").</param>
 	///<param name = "RedirectStdout">Redirect the command's standard output to a file in the container (e.g., "/tmp/stdout").</param>
 	///<param name = "RedirectStderr">Redirect the command's standard error to a file in the container (e.g., "/tmp/stderr").</param>
-	///<param name = "ExperimentalPrivilegedNesting"><para>Provides dagger access to the executed command.</para><para>Do not use this option unless you trust the command being executed. The command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM.</para></param>
-	///<param name = "InsecureRootCapabilities">Execute the command with all root capabilities. This is similar to running a command with "sudo" or executing `docker run` with the `--privileged` flag. Containerization does not provide any security guarantees when using this option. It should only be used when absolutely necessary and only with trusted commands.</param>
+	///<param name = "ExperimentalPrivilegedNesting"><para>Provides dagger access to the executed command.</para><para>Do not use this option unless you trust the command being executed; the command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM.</para></param>
+	///<param name = "InsecureRootCapabilities">Execute the command with all root capabilities. This is similar to running a command with "sudo" or executing "docker run" with the "--privileged" flag. Containerization does not provide any security guarantees when using this option. It should only be used when absolutely necessary and only with trusted commands.</param>
 	public Container WithExec(IEnumerable<string> args, bool? skipEntrypoint = null, string? stdin = null, string? redirectStdout = null, string? redirectStderr = null, bool? experimentalPrivilegedNesting = null, bool? insecureRootCapabilities = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -642,7 +660,7 @@ public sealed class Container : BaseClient
 		};
 	}
 
-	///<summary><para>Expose a network port.</para><para>Exposed ports serve two purposes:</para><para>- For health checks and introspection, when running services - For setting the EXPOSE OCI field when publishing the container</para></summary>
+	///<summary><para>Expose a network port.</para><para>Exposed ports serve two purposes:</para><para>- For health checks and introspection, when running services</para><para>- For setting the EXPOSE OCI field when publishing the container</para></summary>
 	///<param name = "Port">Port number to expose</param>
 	///<param name = "Protocol">Transport layer network protocol</param>
 	///<param name = "Description">Optional port description</param>
@@ -665,7 +683,7 @@ public sealed class Container : BaseClient
 	///<summary>Retrieves this container plus the contents of the given file copied to the given path.</summary>
 	///<param name = "Path">Location of the copied file (e.g., "/tmp/file.txt").</param>
 	///<param name = "Source">Identifier of the file to copy.</param>
-	///<param name = "Permissions"><para>Permission given to the copied file (e.g., 0600).</para><para>Default: 0644.</para></param>
+	///<param name = "Permissions">Permission given to the copied file (e.g., 0600).</param>
 	///<param name = "Owner"><para>A user:group to set for the file.</para><para>The user and group can either be an ID (1000:1000) or a name (foo:bar).</para><para>If the group is omitted, it defaults to the same as the user.</para></param>
 	public Container WithFile(string path, File source, int? permissions = null, string? owner = null)
 	{
@@ -779,7 +797,7 @@ public sealed class Container : BaseClient
 	///<param name = "Path">Location of the secret file (e.g., "/tmp/secret.txt").</param>
 	///<param name = "Source">Identifier of the secret to mount.</param>
 	///<param name = "Owner"><para>A user:group to set for the mounted secret.</para><para>The user and group can either be an ID (1000:1000) or a name (foo:bar).</para><para>If the group is omitted, it defaults to the same as the user.</para></param>
-	///<param name = "Mode"><para>Permission given to the mounted secret (e.g., 0600). This option requires an owner to be set to be active.</para><para>Default: 0400.</para></param>
+	///<param name = "Mode"><para>Permission given to the mounted secret (e.g., 0600).</para><para>This option requires an owner to be set to be active.</para></param>
 	public Container WithMountedSecret(string path, Secret source, string? owner = null, int? mode = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -814,7 +832,7 @@ public sealed class Container : BaseClient
 	///<summary>Retrieves this container plus a new file written at the given path.</summary>
 	///<param name = "Path">Location of the written file (e.g., "/tmp/file.txt").</param>
 	///<param name = "Contents">Content of the file to write (e.g., "Hello world!").</param>
-	///<param name = "Permissions"><para>Permission given to the written file (e.g., 0600).</para><para>Default: 0644.</para></param>
+	///<param name = "Permissions">Permission given to the written file (e.g., 0600).</param>
 	///<param name = "Owner"><para>A user:group to set for the file.</para><para>The user and group can either be an ID (1000:1000) or a name (foo:bar).</para><para>If the group is omitted, it defaults to the same as the user.</para></param>
 	public Container WithNewFile(string path, string? contents = null, int? permissions = null, string? owner = null)
 	{
@@ -835,7 +853,7 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>Retrieves this container with a registry authentication for a given address.</summary>
-	///<param name = "Address">Registry's address to bind the authentication to. Formatted as [host]/[user]/[repo]:[tag] (e.g. docker.io/dagger/dagger:main).</param>
+	///<param name = "Address"><para>Registry's address to bind the authentication to.</para><para>Formatted as [host]/[user]/[repo]:[tag] (e.g. docker.io/dagger/dagger:main).</para></param>
 	///<param name = "Username">The username of the registry's account (e.g., "Dagger").</param>
 	///<param name = "Secret">The API key, password or token to authenticate to this registry.</param>
 	public Container WithRegistryAuth(string address, string username, Secret secret)
@@ -852,8 +870,8 @@ public sealed class Container : BaseClient
 		};
 	}
 
-	///<summary>Initializes this container from this DirectoryID.</summary>
-	///<param name = "Directory"></param>
+	///<summary>Retrieves the container with the given directory mounted to /.</summary>
+	///<param name = "Directory">Directory to mount.</param>
 	public Container WithRootfs(Directory directory)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1044,7 +1062,7 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>Retrieves this container without the registry authentication of a given address.</summary>
-	///<param name = "Address">Registry's address to remove the authentication from. Formatted as [host]/[user]/[repo]:[tag] (e.g. docker.io/dagger/dagger:main).</param>
+	///<param name = "Address"><para>Registry's address to remove the authentication from.</para><para>Formatted as [host]/[user]/[repo]:[tag] (e.g. docker.io/dagger/dagger:main).</para></param>
 	public Container WithoutRegistryAuth(string address)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1096,13 +1114,13 @@ public sealed class Container : BaseClient
 	}
 
 	///<summary>Retrieves the working directory for all commands.</summary>
-	public async Task<string?> Workdir()
+	public async Task<string> Workdir()
 	{
 		if (CachedWorkdir != null)
 			return CachedWorkdir;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("workdir", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 }
 
@@ -1113,7 +1131,7 @@ public sealed class Directory : BaseClient
 	internal bool? CachedExport { private get; init; }
 	internal DirectoryID? CachedSync { private get; init; }
 
-	///<summary>The content-addressed identifier of the directory.</summary>
+	///<summary>A unique identifier for this Directory.</summary>
 	public async Task<DirectoryID> Id()
 	{
 		if (CachedId != null)
@@ -1167,22 +1185,22 @@ public sealed class Directory : BaseClient
 	}
 
 	///<summary>Builds a new Docker container from this directory.</summary>
-	///<param name = "Dockerfile"><para>Path to the Dockerfile to use (e.g., "frontend.Dockerfile").</para><para>Defaults: './Dockerfile'.</para></param>
 	///<param name = "Platform">The platform to build.</param>
-	///<param name = "BuildArgs">Build arguments to use in the build.</param>
+	///<param name = "Dockerfile">Path to the Dockerfile to use (e.g., "frontend.Dockerfile").</param>
 	///<param name = "Target">Target build stage to build.</param>
+	///<param name = "BuildArgs">Build arguments to use in the build.</param>
 	///<param name = "Secrets"><para>Secrets to pass to the build.</para><para>They will be mounted at /run/secrets/[secret-name].</para></param>
-	public Container DockerBuild(string? dockerfile = null, Platform? platform = null, IEnumerable<BuildArg>? buildArgs = null, string? target = null, IEnumerable<Secret>? secrets = null)
+	public Container DockerBuild(Platform? platform = null, string? dockerfile = null, string? target = null, IEnumerable<BuildArg>? buildArgs = null, IEnumerable<Secret>? secrets = null)
 	{
 		OperationArgument? _arguments_ = null;
-		if (dockerfile != null)
-			_arguments_ = new OperationArgument("dockerfile", new StringOperationArgumentValue(dockerfile), _arguments_);
 		if (platform != null)
 			_arguments_ = new OperationArgument("platform", new StringOperationArgumentValue(platform?.Value), _arguments_);
-		if (buildArgs != null)
-			_arguments_ = new OperationArgument("buildArgs", ArrayOperationArgumentValue.Create(buildArgs, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
+		if (dockerfile != null)
+			_arguments_ = new OperationArgument("dockerfile", new StringOperationArgumentValue(dockerfile), _arguments_);
 		if (target != null)
 			_arguments_ = new OperationArgument("target", new StringOperationArgumentValue(target), _arguments_);
+		if (buildArgs != null)
+			_arguments_ = new OperationArgument("buildArgs", ArrayOperationArgumentValue.Create(buildArgs, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
 		if (secrets != null)
 			_arguments_ = new OperationArgument("secrets", ArrayOperationArgumentValue.Create(secrets, element => new ReferenceOperationArgumentValue(element)), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("dockerBuild", _arguments_);
@@ -1240,10 +1258,10 @@ public sealed class Directory : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>Creates a named sub-pipeline</summary>
-	///<param name = "Name">Pipeline name.</param>
-	///<param name = "Description">Pipeline description.</param>
-	///<param name = "Labels">Pipeline labels.</param>
+	///<summary>Creates a named sub-pipeline.</summary>
+	///<param name = "Name">Name of the sub-pipeline.</param>
+	///<param name = "Description">Description of the sub-pipeline.</param>
+	///<param name = "Labels">Labels to apply to the sub-pipeline.</param>
 	public Directory Pipeline(string name, string? description = null, IEnumerable<PipelineLabel>? labels = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1294,7 +1312,7 @@ public sealed class Directory : BaseClient
 	///<summary>Retrieves this directory plus the contents of the given file copied to the given path.</summary>
 	///<param name = "Path">Location of the copied file (e.g., "/file.txt").</param>
 	///<param name = "Source">Identifier of the file to copy.</param>
-	///<param name = "Permissions"><para>Permission given to the copied file (e.g., 0600).</para><para>Default: 0644.</para></param>
+	///<param name = "Permissions">Permission given to the copied file (e.g., 0600).</param>
 	public Directory WithFile(string path, File source, int? permissions = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1312,7 +1330,7 @@ public sealed class Directory : BaseClient
 
 	///<summary>Retrieves this directory plus a new directory created at the given path.</summary>
 	///<param name = "Path">Location of the directory created (e.g., "/logs").</param>
-	///<param name = "Permissions"><para>Permission granted to the created directory (e.g., 0777).</para><para>Default: 0755.</para></param>
+	///<param name = "Permissions">Permission granted to the created directory (e.g., 0777).</param>
 	public Directory WithNewDirectory(string path, int? permissions = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1330,7 +1348,7 @@ public sealed class Directory : BaseClient
 	///<summary>Retrieves this directory plus a new file written at the given path.</summary>
 	///<param name = "Path">Location of the written file (e.g., "/file.txt").</param>
 	///<param name = "Contents">Content of the written file (e.g., "Hello world!").</param>
-	///<param name = "Permissions"><para>Permission given to the copied file (e.g., 0600).</para><para>Default: 0644.</para></param>
+	///<param name = "Permissions">Permission given to the copied file (e.g., 0600).</param>
 	public Directory WithNewFile(string path, string contents, int? permissions = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1389,13 +1407,24 @@ public sealed class Directory : BaseClient
 	}
 }
 
-///<summary>A simple key value object that represents an environment variable.</summary>
+///<summary>An environment variable name and value.</summary>
 public sealed class EnvVariable : BaseClient
 {
+	internal EnvVariableID? CachedId { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal string? CachedValue { private get; init; }
 
-	///<summary>The environment variable name.</summary>
+	///<summary>A unique identifier for this EnvVariable.</summary>
+	public async Task<EnvVariableID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -1405,7 +1434,7 @@ public sealed class EnvVariable : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The environment variable value.</summary>
+	///<summary></summary>
 	public async Task<string> Value()
 	{
 		if (CachedValue != null)
@@ -1416,23 +1445,34 @@ public sealed class EnvVariable : BaseClient
 	}
 }
 
-///<summary>A definition of a field on a custom object defined in a Module. A field on an object has a static value, as opposed to a function on an object whose value is computed by invoking code (and can accept arguments).</summary>
+///<summary><para>A definition of a field on a custom object defined in a Module.</para><para>A field on an object has a static value, as opposed to a function on an object whose value is computed by invoking code (and can accept arguments).</para></summary>
 public sealed class FieldTypeDef : BaseClient
 {
+	internal FieldTypeDefID? CachedId { private get; init; }
 	internal string? CachedDescription { private get; init; }
 	internal string? CachedName { private get; init; }
 
-	///<summary>A doc string for the field, if any</summary>
-	public async Task<string?> Description()
+	///<summary>A unique identifier for this FieldTypeDef.</summary>
+	public async Task<FieldTypeDefID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
+	public async Task<string> Description()
 	{
 		if (CachedDescription != null)
 			return CachedDescription;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The name of the field in the object</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -1442,7 +1482,7 @@ public sealed class FieldTypeDef : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The type of the field</summary>
+	///<summary></summary>
 	public TypeDef GetTypeDef()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1464,7 +1504,7 @@ public sealed class File : BaseClient
 	internal int? CachedSize { private get; init; }
 	internal FileID? CachedSync { private get; init; }
 
-	///<summary>Retrieves the content-addressed identifier of the file.</summary>
+	///<summary>A unique identifier for this File.</summary>
 	public async Task<FileID> Id()
 	{
 		if (CachedId != null)
@@ -1499,7 +1539,7 @@ public sealed class File : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<bool>();
 	}
 
-	///<summary>Gets the size of the file, in bytes.</summary>
+	///<summary>Retrieves the size of the file, in bytes.</summary>
 	public async Task<int> Size()
 	{
 		if (CachedSize != null)
@@ -1540,7 +1580,7 @@ public sealed class Function : BaseClient
 	internal string? CachedDescription { private get; init; }
 	internal string? CachedName { private get; init; }
 
-	///<summary>The ID of the function</summary>
+	///<summary>A unique identifier for this Function.</summary>
 	public async Task<FunctionID> Id()
 	{
 		if (CachedId != null)
@@ -1550,7 +1590,7 @@ public sealed class Function : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>Arguments accepted by this function, if any</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<FunctionArg>> Args()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1559,17 +1599,17 @@ public sealed class Function : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionArg { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionArgID>() }).ToImmutableArray();
 	}
 
-	///<summary>A doc string for the function, if any</summary>
-	public async Task<string?> Description()
+	///<summary></summary>
+	public async Task<string> Description()
 	{
 		if (CachedDescription != null)
 			return CachedDescription;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The name of the function</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -1579,7 +1619,7 @@ public sealed class Function : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The type returned by this function</summary>
+	///<summary></summary>
 	public TypeDef ReturnType()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1613,8 +1653,8 @@ public sealed class Function : BaseClient
 		};
 	}
 
-	///<summary>Returns the function with the doc string</summary>
-	///<param name = "Description"></param>
+	///<summary>Returns the function with the given doc string.</summary>
+	///<param name = "Description">The doc string to set.</param>
 	public Function WithDescription(string description)
 	{
 		OperationArgument? _arguments_ = null;
@@ -1636,7 +1676,7 @@ public sealed class FunctionArg : BaseClient
 	internal string? CachedDescription { private get; init; }
 	internal string? CachedName { private get; init; }
 
-	///<summary>The ID of the argument</summary>
+	///<summary>A unique identifier for this FunctionArg.</summary>
 	public async Task<FunctionArgID> Id()
 	{
 		if (CachedId != null)
@@ -1646,8 +1686,8 @@ public sealed class FunctionArg : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>A default value to use for this argument when not explicitly set by the caller, if any</summary>
-	public async Task<JSON?> DefaultValue()
+	///<summary></summary>
+	public async Task<JSON> DefaultValue()
 	{
 		if (CachedDefaultValue != null)
 			return CachedDefaultValue;
@@ -1656,17 +1696,17 @@ public sealed class FunctionArg : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>A doc string for the argument, if any</summary>
-	public async Task<string?> Description()
+	///<summary></summary>
+	public async Task<string> Description()
 	{
 		if (CachedDescription != null)
 			return CachedDescription;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The name of the argument</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -1676,7 +1716,7 @@ public sealed class FunctionArg : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The type of the argument</summary>
+	///<summary></summary>
 	public TypeDef GetTypeDef()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1689,24 +1729,35 @@ public sealed class FunctionArg : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>An active function call.</summary>
 public sealed class FunctionCall : BaseClient
 {
+	internal FunctionCallID? CachedId { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal JSON? CachedParent { private get; init; }
 	internal string? CachedParentName { private get; init; }
 	internal Void? CachedReturnValue { private get; init; }
 
-	///<summary>The argument values the function is being invoked with.</summary>
+	///<summary>A unique identifier for this FunctionCall.</summary>
+	public async Task<FunctionCallID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public async Task<ImmutableArray<FunctionCallArgValue>> InputArgs()
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("inputArgs", _arguments_);
-		_newQueryTree_ = _newQueryTree_.Add("name value");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionCallArgValue { QueryTree = QueryTree, Context = Context, CachedName = json.GetProperty("name").Deserialize<string>(), CachedValue = json.GetProperty("value").Deserialize<JSON>() }).ToImmutableArray();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionCallArgValue { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionCallArgValueID>() }).ToImmutableArray();
 	}
 
-	///<summary>The name of the function being called.</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -1716,7 +1767,7 @@ public sealed class FunctionCall : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The value of the parent object of the function being called. If the function is "top-level" to the module, this is always an empty object.</summary>
+	///<summary></summary>
 	public async Task<JSON> Parent()
 	{
 		if (CachedParent != null)
@@ -1726,7 +1777,7 @@ public sealed class FunctionCall : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>The name of the parent object of the function being called. If the function is "top-level" to the module, this is the name of the module.</summary>
+	///<summary></summary>
 	public async Task<string> ParentName()
 	{
 		if (CachedParentName != null)
@@ -1736,8 +1787,8 @@ public sealed class FunctionCall : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>Set the return value of the function call to the provided value. The value should be a string of the JSON serialization of the return value.</summary>
-	///<param name = "Value"></param>
+	///<summary>Set the return value of the function call to the provided value.</summary>
+	///<param name = "Value">JSON serialization of the return value.</param>
 	public async Task<Void?> ReturnValue(JSON value)
 	{
 		if (CachedReturnValue != null)
@@ -1749,13 +1800,24 @@ public sealed class FunctionCall : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>A value passed as a named argument to a function call.</summary>
 public sealed class FunctionCallArgValue : BaseClient
 {
+	internal FunctionCallArgValueID? CachedId { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal JSON? CachedValue { private get; init; }
 
-	///<summary>The name of the argument.</summary>
+	///<summary>A unique identifier for this FunctionCallArgValue.</summary>
+	public async Task<FunctionCallArgValueID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -1765,7 +1827,7 @@ public sealed class FunctionCallArgValue : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The value of the argument represented as a string of the JSON serialization.</summary>
+	///<summary></summary>
 	public async Task<JSON> Value()
 	{
 		if (CachedValue != null)
@@ -1776,12 +1838,12 @@ public sealed class FunctionCallArgValue : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>The result of running an SDK's codegen.</summary>
 public sealed class GeneratedCode : BaseClient
 {
 	internal GeneratedCodeID? CachedId { private get; init; }
 
-	///<summary></summary>
+	///<summary>A unique identifier for this GeneratedCode.</summary>
 	public async Task<GeneratedCodeID> Id()
 	{
 		if (CachedId != null)
@@ -1791,7 +1853,7 @@ public sealed class GeneratedCode : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>The directory containing the generated code</summary>
+	///<summary></summary>
 	public Directory Code()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1803,7 +1865,7 @@ public sealed class GeneratedCode : BaseClient
 		};
 	}
 
-	///<summary>List of paths to mark generated in version control (i.e. .gitattributes)</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<string>> VcsGeneratedPaths()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1811,7 +1873,7 @@ public sealed class GeneratedCode : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>List of paths to ignore in version control (i.e. .gitignore)</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<string>> VcsIgnoredPaths()
 	{
 		OperationArgument? _arguments_ = null;
@@ -1819,7 +1881,7 @@ public sealed class GeneratedCode : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>Set the list of paths to mark generated in version control</summary>
+	///<summary>Set the list of paths to mark generated in version control.</summary>
 	///<param name = "Paths"></param>
 	public GeneratedCode WithVCSGeneratedPaths(IEnumerable<string> paths)
 	{
@@ -1833,7 +1895,7 @@ public sealed class GeneratedCode : BaseClient
 		};
 	}
 
-	///<summary>Set the list of paths to ignore in version control</summary>
+	///<summary>Set the list of paths to ignore in version control.</summary>
 	///<param name = "Paths"></param>
 	public GeneratedCode WithVCSIgnoredPaths(IEnumerable<string> paths)
 	{
@@ -1848,13 +1910,13 @@ public sealed class GeneratedCode : BaseClient
 	}
 }
 
-///<summary>A git ref (tag, branch or commit).</summary>
+///<summary>A git ref (tag, branch, or commit).</summary>
 public sealed class GitRef : BaseClient
 {
 	internal GitRefID? CachedId { private get; init; }
 	internal string? CachedCommit { private get; init; }
 
-	///<summary>Retrieves the content-addressed identifier of the git ref.</summary>
+	///<summary>A unique identifier for this GitRef.</summary>
 	public async Task<GitRefID> Id()
 	{
 		if (CachedId != null)
@@ -1898,7 +1960,7 @@ public sealed class GitRepository : BaseClient
 {
 	internal GitRepositoryID? CachedId { private get; init; }
 
-	///<summary>Retrieves the content-addressed identifier of the git repository.</summary>
+	///<summary>A unique identifier for this GitRepository.</summary>
 	public async Task<GitRepositoryID> Id()
 	{
 		if (CachedId != null)
@@ -1908,7 +1970,7 @@ public sealed class GitRepository : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>Returns details on one branch.</summary>
+	///<summary>Returns details of a branch.</summary>
 	///<param name = "Name">Branch's name (e.g., "main").</param>
 	public GitRef Branch(string name)
 	{
@@ -1922,7 +1984,7 @@ public sealed class GitRepository : BaseClient
 		};
 	}
 
-	///<summary>Returns details on one commit.</summary>
+	///<summary>Returns details of a commit.</summary>
 	///<param name = "Id">Identifier of the commit (e.g., "b6315d8f2810962c601af73f86831f6866ea798b").</param>
 	public GitRef Commit(string id)
 	{
@@ -1936,7 +1998,7 @@ public sealed class GitRepository : BaseClient
 		};
 	}
 
-	///<summary>Returns details on one tag.</summary>
+	///<summary>Returns details of a tag.</summary>
 	///<param name = "Name">Tag's name (e.g., "v0.3.9").</param>
 	public GitRef Tag(string name)
 	{
@@ -1951,9 +2013,21 @@ public sealed class GitRepository : BaseClient
 	}
 }
 
-///<summary>Information about the host execution environment.</summary>
+///<summary>Information about the host environment.</summary>
 public sealed class Host : BaseClient
 {
+	internal HostID? CachedId { private get; init; }
+
+	///<summary>A unique identifier for this Host.</summary>
+	public async Task<HostID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
 	///<summary>Accesses a directory on the host.</summary>
 	///<param name = "Path">Location of the directory to access (e.g., ".").</param>
 	///<param name = "Exclude">Exclude artifacts that match the given pattern (e.g., ["node_modules/", ".git*"]).</param>
@@ -1989,14 +2063,14 @@ public sealed class Host : BaseClient
 	}
 
 	///<summary>Creates a service that forwards traffic to a specified address via the host.</summary>
-	///<param name = "Ports"><para>Ports to expose via the service, forwarding through the host network.</para><para>If a port's frontend is unspecified or 0, it defaults to the same as the backend port.</para><para>An empty set of ports is not valid; an error will be returned.</para></param>
 	///<param name = "Host">Upstream host to forward traffic to.</param>
+	///<param name = "Ports"><para>Ports to expose via the service, forwarding through the host network.</para><para>If a port's frontend is unspecified or 0, it defaults to the same as the backend port.</para><para>An empty set of ports is not valid; an error will be returned.</para></param>
 	public Service Service(IEnumerable<PortForward> ports, string? host = null)
 	{
 		OperationArgument? _arguments_ = null;
-		_arguments_ = new OperationArgument("ports", ArrayOperationArgumentValue.Create(ports, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
 		if (host != null)
 			_arguments_ = new OperationArgument("host", new StringOperationArgumentValue(host), _arguments_);
+		_arguments_ = new OperationArgument("ports", ArrayOperationArgumentValue.Create(ports, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("service", _arguments_);
 		return new Service
 		{
@@ -2005,7 +2079,7 @@ public sealed class Host : BaseClient
 		};
 	}
 
-	///<summary>Sets a secret given a user-defined name and the file path on the host, and returns the secret. The file is limited to a size of 512000 bytes.</summary>
+	///<summary><para>Sets a secret given a user-defined name and the file path on the host, and returns the secret.</para><para>The file is limited to a size of 512000 bytes.</para></summary>
 	///<param name = "Name">The user defined name for this secret.</param>
 	///<param name = "Path">Location of the file to set as a secret.</param>
 	public Secret SetSecretFile(string name, string path)
@@ -2023,16 +2097,16 @@ public sealed class Host : BaseClient
 
 	///<summary>Creates a tunnel that forwards traffic from the host to a service.</summary>
 	///<param name = "Service">Service to send traffic from the tunnel.</param>
-	///<param name = "Native"><para>Map each service port to the same port on the host, as if the service were running natively.</para><para>Note: enabling may result in port conflicts.</para></param>
 	///<param name = "Ports"><para>Configure explicit port forwarding rules for the tunnel.</para><para>If a port's frontend is unspecified or 0, a random port will be chosen by the host.</para><para>If no ports are given, all of the service's ports are forwarded. If native is true, each port maps to the same port on the host. If native is false, each port maps to a random port chosen by the host.</para><para>If ports are given and native is true, the ports are additive.</para></param>
-	public Service Tunnel(Service service, bool? native = null, IEnumerable<PortForward>? ports = null)
+	///<param name = "Native"><para>Map each service port to the same port on the host, as if the service were running natively.</para><para>Note: enabling may result in port conflicts.</para></param>
+	public Service Tunnel(Service service, IEnumerable<PortForward>? ports = null, bool? native = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("service", new ReferenceOperationArgumentValue(service), _arguments_);
-		if (native != null)
-			_arguments_ = new OperationArgument("native", EnumOperationArgumentValue.Create(native.Value), _arguments_);
 		if (ports != null)
 			_arguments_ = new OperationArgument("ports", ArrayOperationArgumentValue.Create(ports, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
+		if (native != null)
+			_arguments_ = new OperationArgument("native", EnumOperationArgumentValue.Create(native.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("tunnel", _arguments_);
 		return new Service
 		{
@@ -2059,21 +2133,32 @@ public sealed class Host : BaseClient
 ///<summary>A definition of a custom interface defined in a Module.</summary>
 public sealed class InterfaceTypeDef : BaseClient
 {
+	internal InterfaceTypeDefID? CachedId { private get; init; }
 	internal string? CachedDescription { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal string? CachedSourceModuleName { private get; init; }
 
-	///<summary>The doc string for the interface, if any</summary>
-	public async Task<string?> Description()
+	///<summary>A unique identifier for this InterfaceTypeDef.</summary>
+	public async Task<InterfaceTypeDefID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
+	public async Task<string> Description()
 	{
 		if (CachedDescription != null)
 			return CachedDescription;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>Functions defined on this interface, if any</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<Function>> Functions()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2082,7 +2167,7 @@ public sealed class InterfaceTypeDef : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionID>() }).ToImmutableArray();
 	}
 
-	///<summary>The name of the interface</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -2092,24 +2177,35 @@ public sealed class InterfaceTypeDef : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>If this InterfaceTypeDef is associated with a Module, the name of the module. Unset otherwise.</summary>
-	public async Task<string?> SourceModuleName()
+	///<summary></summary>
+	public async Task<string> SourceModuleName()
 	{
 		if (CachedSourceModuleName != null)
 			return CachedSourceModuleName;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("sourceModuleName", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 }
 
 ///<summary>A simple key value object that represents a label.</summary>
 public sealed class Label : BaseClient
 {
+	internal LabelID? CachedId { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal string? CachedValue { private get; init; }
 
-	///<summary>The label name.</summary>
+	///<summary>A unique identifier for this Label.</summary>
+	public async Task<LabelID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -2119,7 +2215,7 @@ public sealed class Label : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The label value.</summary>
+	///<summary></summary>
 	public async Task<string> Value()
 	{
 		if (CachedValue != null)
@@ -2133,7 +2229,19 @@ public sealed class Label : BaseClient
 ///<summary>A definition of a list type in a Module.</summary>
 public sealed class ListTypeDef : BaseClient
 {
-	///<summary>The type of the elements in the list</summary>
+	internal ListTypeDefID? CachedId { private get; init; }
+
+	///<summary>A unique identifier for this ListTypeDef.</summary>
+	public async Task<ListTypeDefID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public TypeDef ElementTypeDef()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2146,7 +2254,7 @@ public sealed class ListTypeDef : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>A Dagger module.</summary>
 public sealed class Module : BaseClient
 {
 	internal ModuleID? CachedId { private get; init; }
@@ -2154,9 +2262,9 @@ public sealed class Module : BaseClient
 	internal string? CachedName { private get; init; }
 	internal string? CachedSdk { private get; init; }
 	internal Void? CachedServe { private get; init; }
-	internal string? CachedSourceDirectorySubPath { private get; init; }
+	internal string? CachedSourceDirectorySubpath { private get; init; }
 
-	///<summary>The ID of the module</summary>
+	///<summary>A unique identifier for this Module.</summary>
 	public async Task<ModuleID> Id()
 	{
 		if (CachedId != null)
@@ -2166,7 +2274,7 @@ public sealed class Module : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>Modules used by this module</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<Module>> Dependencies()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2175,7 +2283,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Module { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<ModuleID>() }).ToImmutableArray();
 	}
 
-	///<summary>The dependencies as configured by the module</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<string>> DependencyConfig()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2183,7 +2291,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>The doc string of the module, if any</summary>
+	///<summary></summary>
 	public async Task<string?> Description()
 	{
 		if (CachedDescription != null)
@@ -2193,7 +2301,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
 	}
 
-	///<summary>The code generated by the SDK's runtime</summary>
+	///<summary></summary>
 	public GeneratedCode GetGeneratedCode()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2205,7 +2313,19 @@ public sealed class Module : BaseClient
 		};
 	}
 
-	///<summary>Interfaces served by this module</summary>
+	///<summary>Retrieves the module with the objects loaded via its SDK.</summary>
+	public Module Initialize()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("initialize", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary></summary>
 	public async Task<ImmutableArray<TypeDef>> Interfaces()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2214,7 +2334,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
 	}
 
-	///<summary>The name of the module</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -2224,7 +2344,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>Objects served by this module</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<TypeDef>> Objects()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2233,7 +2353,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
 	}
 
-	///<summary>The SDK used by this module. Either a name of a builtin SDK or a module ref pointing to the SDK's implementation.</summary>
+	///<summary></summary>
 	public async Task<string> Sdk()
 	{
 		if (CachedSdk != null)
@@ -2243,7 +2363,7 @@ public sealed class Module : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>Serve a module's API in the current session.     Note: this can only be called once per session.     In the future, it could return a stream or service to remove the side effect.</summary>
+	///<summary><para>Serve a module's API in the current session.</para><para>Note: this can only be called once per session. In the future, it could return a stream or service to remove the side effect.</para></summary>
 	public async Task<Void?> Serve()
 	{
 		if (CachedServe != null)
@@ -2253,7 +2373,7 @@ public sealed class Module : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>The directory containing the module's source code</summary>
+	///<summary></summary>
 	public Directory SourceDirectory()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2265,13 +2385,13 @@ public sealed class Module : BaseClient
 		};
 	}
 
-	///<summary>The module's subpath within the source directory</summary>
-	public async Task<string> SourceDirectorySubPath()
+	///<summary></summary>
+	public async Task<string> SourceDirectorySubpath()
 	{
-		if (CachedSourceDirectorySubPath != null)
-			return CachedSourceDirectorySubPath;
+		if (CachedSourceDirectorySubpath != null)
+			return CachedSourceDirectorySubpath;
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("sourceDirectorySubPath", _arguments_);
+		var _newQueryTree_ = QueryTree.Add("sourceDirectorySubpath", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
@@ -2289,7 +2409,7 @@ public sealed class Module : BaseClient
 		};
 	}
 
-	///<summary>This module plus the given Object type and associated functions</summary>
+	///<summary>This module plus the given Object type and associated functions.</summary>
 	///<param name = "Object"></param>
 	public Module WithObject(TypeDef @object)
 	{
@@ -2302,16 +2422,44 @@ public sealed class Module : BaseClient
 			Context = Context
 		};
 	}
+
+	///<summary>Retrieves the module with basic configuration loaded, ready for initialization.</summary>
+	///<param name = "Directory">The directory containing the module's source code.</param>
+	///<param name = "Subpath"><para>An optional subpath of the directory which contains the module's source code.</para><para>This is needed when the module code is in a subdirectory but requires parent directories to be loaded in order to execute. For example, the module source code may need a go.mod, project.toml, package.json, etc. file from a parent directory.</para><para>If not set, the module source code is loaded from the root of the directory.</para></param>
+	public Module WithSource(Directory directory, string? subpath = null)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("directory", new ReferenceOperationArgumentValue(directory), _arguments_);
+		if (subpath != null)
+			_arguments_ = new OperationArgument("subpath", new StringOperationArgumentValue(subpath), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withSource", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
 }
 
 ///<summary>Static configuration for a module (e.g. parsed contents of dagger.json)</summary>
 public sealed class ModuleConfig : BaseClient
 {
+	internal ModuleConfigID? CachedId { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal string? CachedRoot { private get; init; }
 	internal string? CachedSdk { private get; init; }
 
-	///<summary>Modules that this module depends on.</summary>
+	///<summary>A unique identifier for this ModuleConfig.</summary>
+	public async Task<ModuleConfigID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public async Task<ImmutableArray<string>> Dependencies()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2319,7 +2467,7 @@ public sealed class ModuleConfig : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>Exclude these file globs when loading the module root.</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<string>> Exclude()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2327,7 +2475,7 @@ public sealed class ModuleConfig : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>Include only these file globs when loading the module root.</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<string>> Include()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2335,7 +2483,7 @@ public sealed class ModuleConfig : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
-	///<summary>The name of the module.</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -2345,17 +2493,17 @@ public sealed class ModuleConfig : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>The root directory of the module's project, which may be above the module source code.</summary>
-	public async Task<string?> Root()
+	///<summary></summary>
+	public async Task<string> Root()
 	{
 		if (CachedRoot != null)
 			return CachedRoot;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("root", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>Either the name of a built-in SDK ('go', 'python', etc.) OR a module reference pointing to the SDK's module implementation.</summary>
+	///<summary></summary>
 	public async Task<string> Sdk()
 	{
 		if (CachedSdk != null)
@@ -2369,11 +2517,22 @@ public sealed class ModuleConfig : BaseClient
 ///<summary>A definition of a custom object defined in a Module.</summary>
 public sealed class ObjectTypeDef : BaseClient
 {
+	internal ObjectTypeDefID? CachedId { private get; init; }
 	internal string? CachedDescription { private get; init; }
 	internal string? CachedName { private get; init; }
 	internal string? CachedSourceModuleName { private get; init; }
 
-	///<summary>The function used to construct new instances of this object, if any</summary>
+	///<summary>A unique identifier for this ObjectTypeDef.</summary>
+	public async Task<ObjectTypeDefID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public Function Constructor()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2385,26 +2544,26 @@ public sealed class ObjectTypeDef : BaseClient
 		};
 	}
 
-	///<summary>The doc string for the object, if any</summary>
-	public async Task<string?> Description()
+	///<summary></summary>
+	public async Task<string> Description()
 	{
 		if (CachedDescription != null)
 			return CachedDescription;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>Static fields defined on this object, if any</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<FieldTypeDef>> Fields()
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("fields", _arguments_);
-		_newQueryTree_ = _newQueryTree_.Add("description name");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FieldTypeDef { QueryTree = QueryTree, Context = Context, CachedDescription = json.GetProperty("description").Deserialize<string?>(), CachedName = json.GetProperty("name").Deserialize<string>() }).ToImmutableArray();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FieldTypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FieldTypeDefID>() }).ToImmutableArray();
 	}
 
-	///<summary>Functions defined on this object, if any</summary>
+	///<summary></summary>
 	public async Task<ImmutableArray<Function>> Functions()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2413,7 +2572,7 @@ public sealed class ObjectTypeDef : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionID>() }).ToImmutableArray();
 	}
 
-	///<summary>The name of the object</summary>
+	///<summary></summary>
 	public async Task<string> Name()
 	{
 		if (CachedName != null)
@@ -2423,25 +2582,36 @@ public sealed class ObjectTypeDef : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary>If this ObjectTypeDef is associated with a Module, the name of the module. Unset otherwise.</summary>
-	public async Task<string?> SourceModuleName()
+	///<summary></summary>
+	public async Task<string> SourceModuleName()
 	{
 		if (CachedSourceModuleName != null)
 			return CachedSourceModuleName;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("sourceModuleName", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 }
 
 ///<summary>A port exposed by a container.</summary>
 public sealed class Port : BaseClient
 {
+	internal PortID? CachedId { private get; init; }
 	internal string? CachedDescription { private get; init; }
 	internal int? CachedPort { private get; init; }
 	internal NetworkProtocol? CachedProtocol { private get; init; }
 
-	///<summary>The port description.</summary>
+	///<summary>A unique identifier for this Port.</summary>
+	public async Task<PortID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
 	public async Task<string?> Description()
 	{
 		if (CachedDescription != null)
@@ -2451,7 +2621,7 @@ public sealed class Port : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
 	}
 
-	///<summary>The port number.</summary>
+	///<summary></summary>
 	public async Task<int> SubPort()
 	{
 		if (CachedPort != null)
@@ -2461,7 +2631,7 @@ public sealed class Port : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<int>();
 	}
 
-	///<summary>The transport layer network protocol.</summary>
+	///<summary></summary>
 	public async Task<NetworkProtocol> Protocol()
 	{
 		if (CachedProtocol != null)
@@ -2472,11 +2642,31 @@ public sealed class Port : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>The root of the DAG.</summary>
 public sealed class Client : BaseClient
 {
 	internal bool? CachedCheckVersionCompatibility { private get; init; }
 	internal Platform? CachedDefaultPlatform { private get; init; }
+
+	///<summary>Retrieves a content-addressed blob.</summary>
+	///<param name = "Digest">Digest of the blob</param>
+	///<param name = "Size">Size of the blob</param>
+	///<param name = "MediaType">Media type of the blob</param>
+	///<param name = "Uncompressed">Digest of the uncompressed blob</param>
+	public Directory Blob(string digest, int size, string mediaType, string uncompressed)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("digest", new StringOperationArgumentValue(digest), _arguments_);
+		_arguments_ = new OperationArgument("size", EnumOperationArgumentValue.Create(size), _arguments_);
+		_arguments_ = new OperationArgument("mediaType", new StringOperationArgumentValue(mediaType), _arguments_);
+		_arguments_ = new OperationArgument("uncompressed", new StringOperationArgumentValue(uncompressed), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("blob", _arguments_);
+		return new Directory
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
 
 	///<summary>Constructs a cache volume for a given cache key.</summary>
 	///<param name = "Key">A string identifier to target this cache volume (e.g., "modules-cache").</param>
@@ -2493,7 +2683,7 @@ public sealed class Client : BaseClient
 	}
 
 	///<summary>Checks if the current Dagger Engine is compatible with an SDK's required version.</summary>
-	///<param name = "Version">The SDK's required version.</param>
+	///<param name = "Version">Version required by the SDK.</param>
 	public async Task<bool> CheckVersionCompatibility(string version)
 	{
 		OperationArgument? _arguments_ = null;
@@ -2502,9 +2692,9 @@ public sealed class Client : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<bool>();
 	}
 
-	///<summary><para>Creates a scratch container or loads one by ID.</para><para>Optional platform argument initializes new containers to execute and publish as that platform. Platform defaults to that of the builder's host.</para></summary>
+	///<summary><para>Creates a scratch container.</para><para>Optional platform argument initializes new containers to execute and publish as that platform. Platform defaults to that of the builder's host.</para></summary>
 	///<param name = "Id"></param>
-	///<param name = "Platform"></param>
+	///<param name = "Platform">Platform to initialize the container with.</param>
 	public Container Container(ContainerID? id = null, Platform? platform = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -2520,7 +2710,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>The FunctionCall context that the SDK caller is currently executing in. If the caller is not currently executing in a function, this will return an error.</summary>
+	///<summary><para>The FunctionCall context that the SDK caller is currently executing in.</para><para>If the caller is not currently executing in a function, this will return an error.</para></summary>
 	public FunctionCall CurrentFunctionCall()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2553,7 +2743,7 @@ public sealed class Client : BaseClient
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
 	}
 
-	///<summary>The default platform of the builder.</summary>
+	///<summary>The default platform of the engine.</summary>
 	public async Task<Platform> DefaultPlatform()
 	{
 		OperationArgument? _arguments_ = null;
@@ -2561,7 +2751,7 @@ public sealed class Client : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>Creates an empty directory or loads one by ID.</summary>
+	///<summary>Creates an empty directory.</summary>
 	///<param name = "Id"></param>
 	public Directory Directory(DirectoryID? id = null)
 	{
@@ -2576,8 +2766,8 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	[Obsolete("Use `loadFileFromID` instead.")]
-	///<summary>Loads a file by ID.</summary>
+	[Obsolete("Use loadFileFromID instead.")]
+	///<summary></summary>
 	///<param name = "Id"></param>
 	public File File(FileID id)
 	{
@@ -2591,9 +2781,9 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Create a function.</summary>
-	///<param name = "Name"></param>
-	///<param name = "ReturnType"></param>
+	///<summary>Creates a function.</summary>
+	///<param name = "Name">Name of the function, in its original format from the implementation language.</param>
+	///<param name = "ReturnType">Return type of the function.</param>
 	public Function Function(string name, TypeDef returnType)
 	{
 		OperationArgument? _arguments_ = null;
@@ -2621,24 +2811,24 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Queries a git repository.</summary>
-	///<param name = "Url">Url of the git repository. Can be formatted as `https://{host}/{owner}/{repo}`, `git@{host}:{owner}/{repo}` Suffix ".git" is optional.</param>
+	///<summary>Queries a Git repository.</summary>
+	///<param name = "Url"><para>URL of the git repository.</para><para>Can be formatted as `https://{host}/{owner}/{repo}`, `git@{host}:{owner}/{repo}`.</para><para>Suffix ".git" is optional.</para></param>
 	///<param name = "KeepGitDir">Set to true to keep .git directory.</param>
+	///<param name = "ExperimentalServiceHost">A service which must be started before the repo is fetched.</param>
 	///<param name = "SshKnownHosts">Set SSH known hosts</param>
 	///<param name = "SshAuthSocket">Set SSH auth socket</param>
-	///<param name = "ExperimentalServiceHost">A service which must be started before the repo is fetched.</param>
-	public GitRepository Git(string url, bool? keepGitDir = null, string? sshKnownHosts = null, Socket? sshAuthSocket = null, Service? experimentalServiceHost = null)
+	public GitRepository Git(string url, bool? keepGitDir = null, Service? experimentalServiceHost = null, string? sshKnownHosts = null, Socket? sshAuthSocket = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("url", new StringOperationArgumentValue(url), _arguments_);
 		if (keepGitDir != null)
 			_arguments_ = new OperationArgument("keepGitDir", EnumOperationArgumentValue.Create(keepGitDir.Value), _arguments_);
+		if (experimentalServiceHost != null)
+			_arguments_ = new OperationArgument("experimentalServiceHost", new ReferenceOperationArgumentValue(experimentalServiceHost), _arguments_);
 		if (sshKnownHosts != null)
 			_arguments_ = new OperationArgument("sshKnownHosts", new StringOperationArgumentValue(sshKnownHosts), _arguments_);
 		if (sshAuthSocket != null)
 			_arguments_ = new OperationArgument("sshAuthSocket", new ReferenceOperationArgumentValue(sshAuthSocket), _arguments_);
-		if (experimentalServiceHost != null)
-			_arguments_ = new OperationArgument("experimentalServiceHost", new ReferenceOperationArgumentValue(experimentalServiceHost), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("git", _arguments_);
 		return new GitRepository
 		{
@@ -2690,7 +2880,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Loads a container from an ID.</summary>
+	///<summary>Load a Container from its ID.</summary>
 	///<param name = "Id"></param>
 	public Container LoadContainerFromID(ContainerID id)
 	{
@@ -2718,6 +2908,34 @@ public sealed class Client : BaseClient
 		};
 	}
 
+	///<summary>Load a EnvVariable from its ID.</summary>
+	///<param name = "Id"></param>
+	public EnvVariable LoadEnvVariableFromID(EnvVariableID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadEnvVariableFromID", _arguments_);
+		return new EnvVariable
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a FieldTypeDef from its ID.</summary>
+	///<param name = "Id"></param>
+	public FieldTypeDef LoadFieldTypeDefFromID(FieldTypeDefID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadFieldTypeDefFromID", _arguments_);
+		return new FieldTypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
 	///<summary>Load a File from its ID.</summary>
 	///<param name = "Id"></param>
 	public File LoadFileFromID(FileID id)
@@ -2732,7 +2950,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a function argument by ID.</summary>
+	///<summary>Load a FunctionArg from its ID.</summary>
 	///<param name = "Id"></param>
 	public FunctionArg LoadFunctionArgFromID(FunctionArgID id)
 	{
@@ -2746,7 +2964,35 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a function by ID.</summary>
+	///<summary>Load a FunctionCallArgValue from its ID.</summary>
+	///<param name = "Id"></param>
+	public FunctionCallArgValue LoadFunctionCallArgValueFromID(FunctionCallArgValueID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadFunctionCallArgValueFromID", _arguments_);
+		return new FunctionCallArgValue
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a FunctionCall from its ID.</summary>
+	///<param name = "Id"></param>
+	public FunctionCall LoadFunctionCallFromID(FunctionCallID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadFunctionCallFromID", _arguments_);
+		return new FunctionCall
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a Function from its ID.</summary>
 	///<param name = "Id"></param>
 	public Function LoadFunctionFromID(FunctionID id)
 	{
@@ -2760,7 +3006,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a GeneratedCode by ID.</summary>
+	///<summary>Load a GeneratedCode from its ID.</summary>
 	///<param name = "Id"></param>
 	public GeneratedCode LoadGeneratedCodeFromID(GeneratedCodeID id)
 	{
@@ -2774,7 +3020,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a git ref from its ID.</summary>
+	///<summary>Load a GitRef from its ID.</summary>
 	///<param name = "Id"></param>
 	public GitRef LoadGitRefFromID(GitRefID id)
 	{
@@ -2788,7 +3034,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a git repository from its ID.</summary>
+	///<summary>Load a GitRepository from its ID.</summary>
 	///<param name = "Id"></param>
 	public GitRepository LoadGitRepositoryFromID(GitRepositoryID id)
 	{
@@ -2802,7 +3048,77 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a module by ID.</summary>
+	///<summary>Load a Host from its ID.</summary>
+	///<param name = "Id"></param>
+	public Host LoadHostFromID(HostID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadHostFromID", _arguments_);
+		return new Host
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a InterfaceTypeDef from its ID.</summary>
+	///<param name = "Id"></param>
+	public InterfaceTypeDef LoadInterfaceTypeDefFromID(InterfaceTypeDefID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadInterfaceTypeDefFromID", _arguments_);
+		return new InterfaceTypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a Label from its ID.</summary>
+	///<param name = "Id"></param>
+	public Label LoadLabelFromID(LabelID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadLabelFromID", _arguments_);
+		return new Label
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a ListTypeDef from its ID.</summary>
+	///<param name = "Id"></param>
+	public ListTypeDef LoadListTypeDefFromID(ListTypeDefID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadListTypeDefFromID", _arguments_);
+		return new ListTypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a ModuleConfig from its ID.</summary>
+	///<param name = "Id"></param>
+	public ModuleConfig LoadModuleConfigFromID(ModuleConfigID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadModuleConfigFromID", _arguments_);
+		return new ModuleConfig
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a Module from its ID.</summary>
 	///<param name = "Id"></param>
 	public Module LoadModuleFromID(ModuleID id)
 	{
@@ -2810,6 +3126,34 @@ public sealed class Client : BaseClient
 		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("loadModuleFromID", _arguments_);
 		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a ObjectTypeDef from its ID.</summary>
+	///<param name = "Id"></param>
+	public ObjectTypeDef LoadObjectTypeDefFromID(ObjectTypeDefID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadObjectTypeDefFromID", _arguments_);
+		return new ObjectTypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a Port from its ID.</summary>
+	///<param name = "Id"></param>
+	public Port LoadPortFromID(PortID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadPortFromID", _arguments_);
+		return new Port
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -2830,7 +3174,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Loads a service from ID.</summary>
+	///<summary>Load a Service from its ID.</summary>
 	///<param name = "Id"></param>
 	public Service LoadServiceFromID(ServiceID id)
 	{
@@ -2858,7 +3202,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a TypeDef by ID.</summary>
+	///<summary>Load a TypeDef from its ID.</summary>
 	///<param name = "Id"></param>
 	public TypeDef LoadTypeDefFromID(TypeDefID id)
 	{
@@ -2902,9 +3246,9 @@ public sealed class Client : BaseClient
 	}
 
 	///<summary>Creates a named sub-pipeline.</summary>
-	///<param name = "Name">Pipeline name.</param>
-	///<param name = "Description">Pipeline description.</param>
-	///<param name = "Labels">Pipeline labels.</param>
+	///<param name = "Name">Name of the sub-pipeline.</param>
+	///<param name = "Description">Description of the sub-pipeline.</param>
+	///<param name = "Labels">Labels to apply to the sub-pipeline.</param>
 	public Client Pipeline(string name, string? description = null, IEnumerable<PipelineLabel>? labels = null)
 	{
 		OperationArgument? _arguments_ = null;
@@ -2921,13 +3265,12 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	[Obsolete("Use `loadSecretFromID` instead")]
-	///<summary>Loads a secret from its ID.</summary>
-	///<param name = "Id"></param>
-	public Secret Secret(SecretID id)
+	///<summary>Reference a secret by name.</summary>
+	///<param name = "Name"></param>
+	public Secret Secret(string name)
 	{
 		OperationArgument? _arguments_ = null;
-		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("secret", _arguments_);
 		return new Secret
 		{
@@ -2936,7 +3279,7 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Sets a secret given a user defined name to its plaintext and returns the secret. The plaintext value is limited to a size of 128000 bytes.</summary>
+	///<summary><para>Sets a secret given a user defined name to its plaintext and returns the secret.</para><para>The plaintext value is limited to a size of 128000 bytes.</para></summary>
 	///<param name = "Name">The user defined name for this secret</param>
 	///<param name = "Plaintext">The plaintext of the secret</param>
 	public Secret SetSecret(string name, string plaintext)
@@ -2955,11 +3298,10 @@ public sealed class Client : BaseClient
 	[Obsolete("Use `loadSocketFromID` instead.")]
 	///<summary>Loads a socket by its ID.</summary>
 	///<param name = "Id"></param>
-	public Socket Socket(SocketID? id = null)
+	public Socket Socket(SocketID id)
 	{
 		OperationArgument? _arguments_ = null;
-		if (id != null)
-			_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("socket", _arguments_);
 		return new Socket
 		{
@@ -2992,7 +3334,7 @@ public sealed class Secret : BaseClient
 	internal SecretID? CachedId { private get; init; }
 	internal string? CachedPlaintext { private get; init; }
 
-	///<summary>The identifier for this secret.</summary>
+	///<summary>A unique identifier for this Secret.</summary>
 	public async Task<SecretID> Id()
 	{
 		if (CachedId != null)
@@ -3013,7 +3355,7 @@ public sealed class Secret : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>A content-addressed service providing TCP connectivity.</summary>
 public sealed class Service : BaseClient
 {
 	internal ServiceID? CachedId { private get; init; }
@@ -3022,7 +3364,7 @@ public sealed class Service : BaseClient
 	internal ServiceID? CachedStart { private get; init; }
 	internal ServiceID? CachedStop { private get; init; }
 
-	///<summary>A unique identifier for this service.</summary>
+	///<summary>A unique identifier for this Service.</summary>
 	public async Task<ServiceID> Id()
 	{
 		if (CachedId != null)
@@ -3063,8 +3405,8 @@ public sealed class Service : BaseClient
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("ports", _arguments_);
-		_newQueryTree_ = _newQueryTree_.Add("description port protocol");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = QueryTree, Context = Context, CachedDescription = json.GetProperty("description").Deserialize<string?>(), CachedPort = json.GetProperty("port").Deserialize<int>(), CachedProtocol = json.GetProperty("protocol").Deserialize<NetworkProtocol>() }).ToImmutableArray();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<PortID>() }).ToImmutableArray();
 	}
 
 	///<summary><para>Start the service and wait for its health checks to succeed.</para><para>Services bound to a Container do not need to be manually started.</para></summary>
@@ -3086,12 +3428,12 @@ public sealed class Service : BaseClient
 	}
 }
 
-///<summary></summary>
+///<summary>A Unix or TCP/IP socket that can be mounted into a container.</summary>
 public sealed class Socket : BaseClient
 {
 	internal SocketID? CachedId { private get; init; }
 
-	///<summary>The content-addressed identifier of the socket.</summary>
+	///<summary>A unique identifier for this Socket.</summary>
 	public async Task<SocketID> Id()
 	{
 		if (CachedId != null)
@@ -3109,7 +3451,7 @@ public sealed class TypeDef : BaseClient
 	internal TypeDefKind? CachedKind { private get; init; }
 	internal bool? CachedOptional { private get; init; }
 
-	///<summary></summary>
+	///<summary>A unique identifier for this TypeDef.</summary>
 	public async Task<TypeDefID> Id()
 	{
 		if (CachedId != null)
@@ -3119,7 +3461,7 @@ public sealed class TypeDef : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
-	///<summary>If kind is INTERFACE, the interface-specific type definition. If kind is not INTERFACE, this will be null.</summary>
+	///<summary></summary>
 	public InterfaceTypeDef AsInterface()
 	{
 		OperationArgument? _arguments_ = null;
@@ -3131,7 +3473,7 @@ public sealed class TypeDef : BaseClient
 		};
 	}
 
-	///<summary>If kind is LIST, the list-specific type definition. If kind is not LIST, this will be null.</summary>
+	///<summary></summary>
 	public ListTypeDef AsList()
 	{
 		OperationArgument? _arguments_ = null;
@@ -3143,7 +3485,7 @@ public sealed class TypeDef : BaseClient
 		};
 	}
 
-	///<summary>If kind is OBJECT, the object-specific type definition. If kind is not OBJECT, this will be null.</summary>
+	///<summary></summary>
 	public ObjectTypeDef AsObject()
 	{
 		OperationArgument? _arguments_ = null;
@@ -3155,17 +3497,17 @@ public sealed class TypeDef : BaseClient
 		};
 	}
 
-	///<summary>The kind of type this is (e.g. primitive, list, object)</summary>
-	public async Task<TypeDefKind?> Kind()
+	///<summary></summary>
+	public async Task<TypeDefKind> Kind()
 	{
 		if (CachedKind != null)
 			return CachedKind.Value;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("kind", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<TypeDefKind?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<TypeDefKind>();
 	}
 
-	///<summary>Whether this type can be set to null. Defaults to false.</summary>
+	///<summary></summary>
 	public async Task<bool> IsOptional()
 	{
 		if (CachedOptional != null)
