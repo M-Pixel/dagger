@@ -3,10 +3,10 @@ package sdk
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"dagger.io/dagger"
@@ -142,7 +142,7 @@ func (Elixir) Generate(ctx context.Context) error {
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("Cannot export generated code to `%s`", elixirSDKGeneratedPath)
+		return fmt.Errorf("cannot export generated code to `%s`", elixirSDKGeneratedPath)
 	}
 	return nil
 }
@@ -156,15 +156,11 @@ func (Elixir) Publish(ctx context.Context, tag string) error {
 	defer c.Close()
 
 	var (
-		version   = strings.TrimPrefix(tag, "sdk/elixir/v")
-		mixFile   = "sdk/elixir/mix.exs"
-		hexAPIKey = os.Getenv("HEX_API_KEY")
-		dryRun    = os.Getenv("HEX_DRY_RUN")
+		version = strings.TrimPrefix(tag, "sdk/elixir/v")
+		mixFile = "sdk/elixir/mix.exs"
 	)
 
-	if hexAPIKey == "" {
-		return errors.New("HEX_API_KEY environment variable must be set")
-	}
+	dryRun, _ := strconv.ParseBool(os.Getenv("DRY_RUN"))
 
 	mixExs, err := os.ReadFile(mixFile)
 	if err != nil {
@@ -176,18 +172,19 @@ func (Elixir) Publish(ctx context.Context, tag string) error {
 		return err
 	}
 
-	args := []string{"mix", "hex.publish", "--yes"}
-	if dryRun != "" {
-		args = append(args, "--dry-run")
-	}
-
 	c = c.Pipeline("sdk").Pipeline("elixir").Pipeline("generate")
 
-	_, err = elixirBase(c, elixirVersions[1]).
-		WithEnvVariable("HEX_API_KEY", hexAPIKey).
-		WithExec(args).
-		Sync(ctx)
-
+	result := elixirBase(c, elixirVersions[1])
+	args := []string{"mix", "hex.publish", "--yes"}
+	if dryRun {
+		args = append(args, "--dry-run")
+		result = result.WithExec(args)
+	} else {
+		result = result.
+			With(util.HostSecretVar(c, "HEX_API_KEY")).
+			WithExec(args)
+	}
+	_, err = result.Sync(ctx)
 	return err
 }
 

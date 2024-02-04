@@ -2,10 +2,10 @@ package sdk
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"dagger.io/dagger"
@@ -128,7 +128,7 @@ func (r Rust) Lint(ctx context.Context) error {
 	})
 
 	eg.Go(func() error {
-		return util.LintGeneratedCode(func() error {
+		return util.LintGeneratedCode("sdk:rust:generate", func() error {
 			return r.Generate(gctx)
 		}, rustGeneratedAPIPath)
 	})
@@ -146,40 +146,35 @@ func (r Rust) Publish(ctx context.Context, tag string) error {
 
 	c = c.Pipeline("sdk").Pipeline("rust").Pipeline("publish")
 
+	dryRun, _ := strconv.ParseBool(os.Getenv("DRY_RUN"))
+
 	var (
 		version = strings.TrimPrefix(tag, "sdk/rust/v")
-		token   = os.Getenv("CARGO_REGISTRY_TOKEN")
-		dryRun  = os.Getenv("CARGO_PUBLISH_DRYRUN")
 		crate   = "dagger-sdk"
 	)
-
-	if token == "" && dryRun == "false" {
-		return errors.New("CARGO_TOKEN environment variable must be set")
-	}
 
 	base := r.
 		rustBase(ctx, c, rustDockerStable).
 		WithExec([]string{
 			"cargo", "install", "cargo-edit",
-		}).WithExec([]string{
-		"cargo", "set-version", "-p", crate, version,
-	})
+		}).
+		WithExec([]string{
+			"cargo", "set-version", "-p", crate, version,
+		})
 
 	args := []string{
 		"cargo", "publish", "-p", crate, "-v", "--all-features",
 	}
 
-	if dryRun == "false" {
-		base = base.
-			WithEnvVariable("CARGO_REGISTRY_TOKEN", token).
-			WithExec(args)
-	} else {
+	if dryRun {
 		args = append(args, "--dry-run")
 		base = base.WithExec(args)
+	} else {
+		base = base.
+			With(util.HostSecretVar(c, "CARGO_REGISTRY_TOKEN")).
+			WithExec(args)
 	}
-
 	_, err = base.Sync(ctx)
-
 	return err
 }
 

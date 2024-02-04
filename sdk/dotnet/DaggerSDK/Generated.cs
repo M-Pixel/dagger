@@ -29,6 +29,8 @@ public enum CacheSharingMode
 public sealed record CacheVolumeID(string Value);
 ///<summary>The `ContainerID` scalar type represents an identifier for an object of type Container.</summary>
 public sealed record ContainerID(string Value);
+///<summary>The `CurrentModuleID` scalar type represents an identifier for an object of type CurrentModule.</summary>
+public sealed record CurrentModuleID(string Value);
 ///<summary>The `DirectoryID` scalar type represents an identifier for an object of type Directory.</summary>
 public sealed record DirectoryID(string Value);
 ///<summary>The `EnvVariableID` scalar type represents an identifier for an object of type EnvVariable.</summary>
@@ -47,6 +49,8 @@ public sealed record FunctionCallID(string Value);
 public sealed record FunctionID(string Value);
 ///<summary>The `GeneratedCodeID` scalar type represents an identifier for an object of type GeneratedCode.</summary>
 public sealed record GeneratedCodeID(string Value);
+///<summary>The `GitModuleSourceID` scalar type represents an identifier for an object of type GitModuleSource.</summary>
+public sealed record GitModuleSourceID(string Value);
 ///<summary>The `GitRefID` scalar type represents an identifier for an object of type GitRef.</summary>
 public sealed record GitRefID(string Value);
 ///<summary>The `GitRepositoryID` scalar type represents an identifier for an object of type GitRepository.</summary>
@@ -71,6 +75,8 @@ public enum ImageMediaTypes
 	OCIMediaTypes
 }
 
+///<summary>The `InputTypeDefID` scalar type represents an identifier for an object of type InputTypeDef.</summary>
+public sealed record InputTypeDefID(string Value);
 ///<summary>The `InterfaceTypeDefID` scalar type represents an identifier for an object of type InterfaceTypeDef.</summary>
 public sealed record InterfaceTypeDefID(string Value);
 ///<summary>An arbitrary JSON-encoded value.</summary>
@@ -79,10 +85,22 @@ public sealed record JSON(string Value);
 public sealed record LabelID(string Value);
 ///<summary>The `ListTypeDefID` scalar type represents an identifier for an object of type ListTypeDef.</summary>
 public sealed record ListTypeDefID(string Value);
-///<summary>The `ModuleConfigID` scalar type represents an identifier for an object of type ModuleConfig.</summary>
-public sealed record ModuleConfigID(string Value);
+///<summary>The `LocalModuleSourceID` scalar type represents an identifier for an object of type LocalModuleSource.</summary>
+public sealed record LocalModuleSourceID(string Value);
+///<summary>The `ModuleDependencyID` scalar type represents an identifier for an object of type ModuleDependency.</summary>
+public sealed record ModuleDependencyID(string Value);
 ///<summary>The `ModuleID` scalar type represents an identifier for an object of type Module.</summary>
 public sealed record ModuleID(string Value);
+///<summary>The `ModuleSourceID` scalar type represents an identifier for an object of type ModuleSource.</summary>
+public sealed record ModuleSourceID(string Value);
+///<summary>The kind of module source.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ModuleSourceKind>))]
+public enum ModuleSourceKind
+{
+	GIT_SOURCE,
+	LOCAL_SOURCE
+}
+
 ///<summary>Transport layer network protocol associated to a port.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<NetworkProtocol>))]
 public enum NetworkProtocol
@@ -131,6 +149,8 @@ public sealed record SecretID(string Value);
 public sealed record ServiceID(string Value);
 ///<summary>The `SocketID` scalar type represents an identifier for an object of type Socket.</summary>
 public sealed record SocketID(string Value);
+///<summary>The `TerminalID` scalar type represents an identifier for an object of type Terminal.</summary>
+public sealed record TerminalID(string Value);
 ///<summary>The `TypeDefID` scalar type represents an identifier for an object of type TypeDef.</summary>
 public sealed record TypeDefID(string Value);
 ///<summary>Distinguishes the different kinds of TypeDefs.</summary>
@@ -138,6 +158,7 @@ public sealed record TypeDefID(string Value);
 public enum TypeDefKind
 {
 	BOOLEAN_KIND,
+	INPUT_KIND,
 	INTEGER_KIND,
 	INTERFACE_KIND,
 	LIST_KIND,
@@ -174,7 +195,6 @@ public sealed class Container : BaseClient
 	internal string? CachedLabel { private get; init; }
 	internal Platform? CachedPlatform { private get; init; }
 	internal string? CachedPublish { private get; init; }
-	internal string? CachedShellEndpoint { private get; init; }
 	internal string? CachedStderr { private get; init; }
 	internal string? CachedStdout { private get; init; }
 	internal ContainerID? CachedSync { private get; init; }
@@ -504,14 +524,19 @@ public sealed class Container : BaseClient
 		};
 	}
 
-	///<summary><para>Return a websocket endpoint that, if connected to, will start the container with a TTY streamed over the websocket.</para><para>Primarily intended for internal use with the dagger CLI.</para></summary>
-	public async Task<string> ShellEndpoint()
+	///<summary>Return an interactive terminal for this container using its configured shell if not overridden by args (or sh as a fallback default).</summary>
+	///<param name = "Args">If set, override the container's default shell and invoke these arguments instead.</param>
+	public Terminal Shell(IEnumerable<string>? args = null)
 	{
-		if (CachedShellEndpoint != null)
-			return CachedShellEndpoint;
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("shellEndpoint", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+		if (args != null)
+			_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("shell", _arguments_);
+		return new Terminal
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
 	}
 
 	///<summary><para>The error stream of the last executed command.</para><para>Will execute default command if none is set, or error if there's no default.</para></summary>
@@ -560,6 +585,20 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withDefaultArgs", _arguments_);
+		return new Container
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Set the default command to invoke for the "shell" API.</summary>
+	///<param name = "Args">The args of the command to set the default shell to.</param>
+	public Container WithDefaultShell(IEnumerable<string> args)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withDefaultShell", _arguments_);
 		return new Container
 		{
 			QueryTree = _newQueryTree_,
@@ -664,7 +703,8 @@ public sealed class Container : BaseClient
 	///<param name = "Port">Port number to expose</param>
 	///<param name = "Protocol">Transport layer network protocol</param>
 	///<param name = "Description">Optional port description</param>
-	public Container WithExposedPort(int port, NetworkProtocol? protocol = null, string? description = null)
+	///<param name = "ExperimentalSkipHealthcheck">Skip the health check when run as a service.</param>
+	public Container WithExposedPort(int port, NetworkProtocol? protocol = null, string? description = null, bool? experimentalSkipHealthcheck = null)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("port", EnumOperationArgumentValue.Create(port), _arguments_);
@@ -672,6 +712,8 @@ public sealed class Container : BaseClient
 			_arguments_ = new OperationArgument("protocol", EnumOperationArgumentValue.Create(protocol), _arguments_);
 		if (description != null)
 			_arguments_ = new OperationArgument("description", new StringOperationArgumentValue(description), _arguments_);
+		if (experimentalSkipHealthcheck != null)
+			_arguments_ = new OperationArgument("experimentalSkipHealthcheck", EnumOperationArgumentValue.Create(experimentalSkipHealthcheck.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withExposedPort", _arguments_);
 		return new Container
 		{
@@ -1121,6 +1163,79 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("workdir", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+}
+
+///<summary>Reflective module API provided to functions at runtime.</summary>
+public sealed class CurrentModule : BaseClient
+{
+	internal CurrentModuleID? CachedId { private get; init; }
+	internal string? CachedName { private get; init; }
+
+	///<summary>A unique identifier for this CurrentModule.</summary>
+	public async Task<CurrentModuleID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary>The name of the module being executed in</summary>
+	public async Task<string> Name()
+	{
+		if (CachedName != null)
+			return CachedName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("name", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>The directory containing the module's source code loaded into the engine (plus any generated code that may have been created).</summary>
+	public Directory Source()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("source", _arguments_);
+		return new Directory
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a directory from the module's scratch working directory, including any changes that may have been made to it during module function execution.</summary>
+	///<param name = "Path">Location of the directory to access (e.g., ".").</param>
+	///<param name = "Exclude">Exclude artifacts that match the given pattern (e.g., ["node_modules/", ".git*"]).</param>
+	///<param name = "Include">Include only artifacts that match the given pattern (e.g., ["app/", "package.*"]).</param>
+	public Directory Workdir(string path, IEnumerable<string>? exclude = null, IEnumerable<string>? include = null)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
+		if (exclude != null)
+			_arguments_ = new OperationArgument("exclude", ArrayOperationArgumentValue.Create(exclude, element => new StringOperationArgumentValue(element)), _arguments_);
+		if (include != null)
+			_arguments_ = new OperationArgument("include", ArrayOperationArgumentValue.Create(include, element => new StringOperationArgumentValue(element)), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("workdir", _arguments_);
+		return new Directory
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a file from the module's scratch working directory, including any changes that may have been made to it during module function execution.Load a file from the module's scratch working directory, including any changes that may have been made to it during module function execution.</summary>
+	///<param name = "Path">Location of the file to retrieve (e.g., "README.md").</param>
+	public File WorkdirFile(string path)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("workdirFile", _arguments_);
+		return new File
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
 	}
 }
 
@@ -1921,6 +2036,77 @@ public sealed class GeneratedCode : BaseClient
 	}
 }
 
+///<summary>Module source originating from a git repo.</summary>
+public sealed class GitModuleSource : BaseClient
+{
+	internal GitModuleSourceID? CachedId { private get; init; }
+	internal string? CachedCloneURL { private get; init; }
+	internal string? CachedCommit { private get; init; }
+	internal string? CachedHtmlURL { private get; init; }
+	internal string? CachedSourceSubpath { private get; init; }
+	internal string? CachedVersion { private get; init; }
+
+	///<summary>A unique identifier for this GitModuleSource.</summary>
+	public async Task<GitModuleSourceID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary>The URL from which the source's git repo can be cloned.</summary>
+	public async Task<string> CloneURL()
+	{
+		if (CachedCloneURL != null)
+			return CachedCloneURL;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("cloneURL", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary></summary>
+	public async Task<string> Commit()
+	{
+		if (CachedCommit != null)
+			return CachedCommit;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("commit", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>The URL to the source's git repo in a web browser</summary>
+	public async Task<string> HtmlURL()
+	{
+		if (CachedHtmlURL != null)
+			return CachedHtmlURL;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("htmlURL", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary></summary>
+	public async Task<string> SourceSubpath()
+	{
+		if (CachedSourceSubpath != null)
+			return CachedSourceSubpath;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("sourceSubpath", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary></summary>
+	public async Task<string> Version()
+	{
+		if (CachedVersion != null)
+			return CachedVersion;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("version", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+}
+
 ///<summary>A git ref (tag, branch, or commit).</summary>
 public sealed class GitRef : BaseClient
 {
@@ -2141,6 +2327,42 @@ public sealed class Host : BaseClient
 	}
 }
 
+///<summary>A graphql input type, which is essentially just a group of named args. This is currently only used to represent pre-existing usage of graphql input types in the core API. It is not used by user modules and shouldn't ever be as user module accept input objects via their id rather than graphql input types.</summary>
+public sealed class InputTypeDef : BaseClient
+{
+	internal InputTypeDefID? CachedId { private get; init; }
+	internal string? CachedName { private get; init; }
+
+	///<summary>A unique identifier for this InputTypeDef.</summary>
+	public async Task<InputTypeDefID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
+	public async Task<ImmutableArray<FieldTypeDef>> Fields()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("fields", _arguments_);
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FieldTypeDef { QueryTree = ImmutableList.Create(new Operation("loadFieldTypeDefFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new FieldTypeDefID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
+	}
+
+	///<summary></summary>
+	public async Task<string> Name()
+	{
+		if (CachedName != null)
+			return CachedName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("name", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+}
+
 ///<summary>A definition of a custom interface defined in a Module.</summary>
 public sealed class InterfaceTypeDef : BaseClient
 {
@@ -2265,6 +2487,33 @@ public sealed class ListTypeDef : BaseClient
 	}
 }
 
+///<summary>Module source that that originates from a path locally relative to an arbitrary directory.</summary>
+public sealed class LocalModuleSource : BaseClient
+{
+	internal LocalModuleSourceID? CachedId { private get; init; }
+	internal string? CachedSourceSubpath { private get; init; }
+
+	///<summary>A unique identifier for this LocalModuleSource.</summary>
+	public async Task<LocalModuleSourceID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
+	public async Task<string> SourceSubpath()
+	{
+		if (CachedSourceSubpath != null)
+			return CachedSourceSubpath;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("sourceSubpath", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+}
+
 ///<summary>A Dagger module.</summary>
 public sealed class Module : BaseClient
 {
@@ -2273,7 +2522,6 @@ public sealed class Module : BaseClient
 	internal string? CachedName { private get; init; }
 	internal string? CachedSdk { private get; init; }
 	internal Void? CachedServe { private get; init; }
-	internal string? CachedSourceDirectorySubpath { private get; init; }
 
 	///<summary>A unique identifier for this Module.</summary>
 	public async Task<ModuleID> Id()
@@ -2295,29 +2543,30 @@ public sealed class Module : BaseClient
 	}
 
 	///<summary></summary>
-	public async Task<ImmutableArray<string>> DependencyConfig()
+	public async Task<ImmutableArray<ModuleDependency>> DependencyConfig()
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("dependencyConfig", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new ModuleDependency { QueryTree = ImmutableList.Create(new Operation("loadModuleDependencyFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new ModuleDependencyID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
-	public async Task<string?> Description()
+	public async Task<string> Description()
 	{
 		if (CachedDescription != null)
 			return CachedDescription;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 
-	///<summary></summary>
-	public GeneratedCode GetGeneratedCode()
+	///<summary>The module's root directory containing the config file for it and its source (possibly as a subdir). It includes any generated code or updated config files created after initial load, but not any files/directories that were unchanged after sdk codegen was run.</summary>
+	public Directory GeneratedSourceRootDirectory()
 	{
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("generatedCode", _arguments_);
-		return new GeneratedCode
+		var _newQueryTree_ = QueryTree.Add("generatedSourceRootDirectory", _arguments_);
+		return new Directory
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -2365,6 +2614,18 @@ public sealed class Module : BaseClient
 	}
 
 	///<summary></summary>
+	public Container Runtime()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("runtime", _arguments_);
+		return new Container
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary></summary>
 	public async Task<string> Sdk()
 	{
 		if (CachedSdk != null)
@@ -2385,25 +2646,43 @@ public sealed class Module : BaseClient
 	}
 
 	///<summary></summary>
-	public Directory SourceDirectory()
+	public ModuleSource Source()
 	{
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("sourceDirectory", _arguments_);
-		return new Directory
+		var _newQueryTree_ = QueryTree.Add("source", _arguments_);
+		return new ModuleSource
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
 		};
 	}
 
-	///<summary></summary>
-	public async Task<string> SourceDirectorySubpath()
+	///<summary>Update the module configuration to use the given dependencies.</summary>
+	///<param name = "Dependencies">The dependency modules to install.</param>
+	public Module WithDependencies(IEnumerable<ModuleDependency> dependencies)
 	{
-		if (CachedSourceDirectorySubpath != null)
-			return CachedSourceDirectorySubpath;
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("sourceDirectorySubpath", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+		_arguments_ = new OperationArgument("dependencies", ArrayOperationArgumentValue.Create(dependencies, element => new ReferenceOperationArgumentValue(element)), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withDependencies", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Retrieves the module with the given description</summary>
+	///<param name = "Description">The description to set</param>
+	public Module WithDescription(string description)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("description", new StringOperationArgumentValue(description), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withDescription", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
 	}
 
 	///<summary>This module plus the given Interface type and associated functions</summary>
@@ -2413,6 +2692,20 @@ public sealed class Module : BaseClient
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("iface", new ReferenceOperationArgumentValue(iface), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withInterface", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Update the module configuration to use the given name.</summary>
+	///<param name = "Name">The name to use.</param>
+	public Module WithName(string name)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withName", _arguments_);
 		return new Module
 		{
 			QueryTree = _newQueryTree_,
@@ -2434,15 +2727,26 @@ public sealed class Module : BaseClient
 		};
 	}
 
-	///<summary>Retrieves the module with basic configuration loaded, ready for initialization.</summary>
-	///<param name = "Directory">The directory containing the module's source code.</param>
-	///<param name = "Subpath"><para>An optional subpath of the directory which contains the module's source code.</para><para>This is needed when the module code is in a subdirectory but requires parent directories to be loaded in order to execute. For example, the module source code may need a go.mod, project.toml, package.json, etc. file from a parent directory.</para><para>If not set, the module source code is loaded from the root of the directory.</para></param>
-	public Module WithSource(Directory directory, string? subpath = null)
+	///<summary>Update the module configuration to use the given SDK.</summary>
+	///<param name = "Sdk">The SDK to use.</param>
+	public Module WithSDK(string sdk)
 	{
 		OperationArgument? _arguments_ = null;
-		_arguments_ = new OperationArgument("directory", new ReferenceOperationArgumentValue(directory), _arguments_);
-		if (subpath != null)
-			_arguments_ = new OperationArgument("subpath", new StringOperationArgumentValue(subpath), _arguments_);
+		_arguments_ = new OperationArgument("sdk", new StringOperationArgumentValue(sdk), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withSDK", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Retrieves the module with basic configuration loaded if present.</summary>
+	///<param name = "Source">The module source to initialize from.</param>
+	public Module WithSource(ModuleSource source)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("source", new ReferenceOperationArgumentValue(source), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withSource", _arguments_);
 		return new Module
 		{
@@ -2452,46 +2756,20 @@ public sealed class Module : BaseClient
 	}
 }
 
-///<summary>Static configuration for a module (e.g. parsed contents of dagger.json)</summary>
-public sealed class ModuleConfig : BaseClient
+///<summary>The configuration of dependency of a module.</summary>
+public sealed class ModuleDependency : BaseClient
 {
-	internal ModuleConfigID? CachedId { private get; init; }
+	internal ModuleDependencyID? CachedId { private get; init; }
 	internal string? CachedName { private get; init; }
-	internal string? CachedRoot { private get; init; }
-	internal string? CachedSdk { private get; init; }
 
-	///<summary>A unique identifier for this ModuleConfig.</summary>
-	public async Task<ModuleConfigID> Id()
+	///<summary>A unique identifier for this ModuleDependency.</summary>
+	public async Task<ModuleDependencyID> Id()
 	{
 		if (CachedId != null)
 			return CachedId;
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
-	}
-
-	///<summary></summary>
-	public async Task<ImmutableArray<string>> Dependencies()
-	{
-		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("dependencies", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
-	}
-
-	///<summary></summary>
-	public async Task<ImmutableArray<string>> Exclude()
-	{
-		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("exclude", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
-	}
-
-	///<summary></summary>
-	public async Task<ImmutableArray<string>> Include()
-	{
-		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("include", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ImmutableArray<string>>();
 	}
 
 	///<summary></summary>
@@ -2505,22 +2783,150 @@ public sealed class ModuleConfig : BaseClient
 	}
 
 	///<summary></summary>
-	public async Task<string> Root()
+	public ModuleSource Source()
 	{
-		if (CachedRoot != null)
-			return CachedRoot;
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("root", _arguments_);
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+		var _newQueryTree_ = QueryTree.Add("source", _arguments_);
+		return new ModuleSource
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+}
+
+///<summary>The source needed to load and run a module, along with any metadata about the source such as versions/urls/etc.</summary>
+public sealed class ModuleSource : BaseClient
+{
+	internal ModuleSourceID? CachedId { private get; init; }
+	internal string? CachedAsString { private get; init; }
+	internal ModuleSourceKind? CachedKind { private get; init; }
+	internal string? CachedModuleName { private get; init; }
+	internal string? CachedSubpath { private get; init; }
+
+	///<summary>A unique identifier for this ModuleSource.</summary>
+	public async Task<ModuleSourceID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
 	///<summary></summary>
-	public async Task<string> Sdk()
+	public GitModuleSource AsGitSource()
 	{
-		if (CachedSdk != null)
-			return CachedSdk;
 		OperationArgument? _arguments_ = null;
-		var _newQueryTree_ = QueryTree.Add("sdk", _arguments_);
+		var _newQueryTree_ = QueryTree.Add("asGitSource", _arguments_);
+		return new GitModuleSource
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary></summary>
+	public LocalModuleSource AsLocalSource()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("asLocalSource", _arguments_);
+		return new LocalModuleSource
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load the source as a module. If this is a local source, the parent directory must have been provided during module source creation</summary>
+	public Module AsModule()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("asModule", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>A human readable ref string representation of this module source.</summary>
+	public async Task<string> AsString()
+	{
+		if (CachedAsString != null)
+			return CachedAsString;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("asString", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>The directory containing the actual module's source code, as determined from the root directory and subpath.</summary>
+	///<param name = "Path">The path from the source directory to select.</param>
+	public Directory Directory(string path)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("path", new StringOperationArgumentValue(path), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("directory", _arguments_);
+		return new Directory
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary></summary>
+	public async Task<ModuleSourceKind> Kind()
+	{
+		if (CachedKind != null)
+			return CachedKind.Value;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("kind", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<ModuleSourceKind>();
+	}
+
+	///<summary>If set, the name of the module this source references</summary>
+	public async Task<string> ModuleName()
+	{
+		if (CachedModuleName != null)
+			return CachedModuleName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("moduleName", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>Resolve the provided module source arg as a dependency relative to this module source.</summary>
+	///<param name = "Dep">The dependency module source to resolve.</param>
+	public ModuleSource ResolveDependency(ModuleSource dep)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("dep", new ReferenceOperationArgumentValue(dep), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("resolveDependency", _arguments_);
+		return new ModuleSource
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary></summary>
+	public Directory RootDirectory()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("rootDirectory", _arguments_);
+		return new Directory
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>The path to the module subdirectory containing the actual module's source code.</summary>
+	public async Task<string> Subpath()
+	{
+		if (CachedSubpath != null)
+			return CachedSubpath;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("subpath", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
 	}
 }
@@ -2609,6 +3015,7 @@ public sealed class Port : BaseClient
 {
 	internal PortID? CachedId { private get; init; }
 	internal string? CachedDescription { private get; init; }
+	internal bool? CachedExperimentalSkipHealthcheck { private get; init; }
 	internal int? CachedPort { private get; init; }
 	internal NetworkProtocol? CachedProtocol { private get; init; }
 
@@ -2630,6 +3037,16 @@ public sealed class Port : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+	}
+
+	///<summary></summary>
+	public async Task<bool> IsExperimentalSkipHealthcheck()
+	{
+		if (CachedExperimentalSkipHealthcheck != null)
+			return CachedExperimentalSkipHealthcheck.Value;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("experimentalSkipHealthcheck", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<bool>();
 	}
 
 	///<summary></summary>
@@ -2734,11 +3151,11 @@ public sealed class Client : BaseClient
 	}
 
 	///<summary>The module currently being served in the session, if any.</summary>
-	public Module CurrentModule()
+	public CurrentModule GetCurrentModule()
 	{
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("currentModule", _arguments_);
-		return new Module
+		return new CurrentModule
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -2905,6 +3322,20 @@ public sealed class Client : BaseClient
 		};
 	}
 
+	///<summary>Load a CurrentModule from its ID.</summary>
+	///<param name = "Id"></param>
+	public CurrentModule LoadCurrentModuleFromID(CurrentModuleID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadCurrentModuleFromID", _arguments_);
+		return new CurrentModule
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
 	///<summary>Load a Directory from its ID.</summary>
 	///<param name = "Id"></param>
 	public Directory LoadDirectoryFromID(DirectoryID id)
@@ -3031,6 +3462,20 @@ public sealed class Client : BaseClient
 		};
 	}
 
+	///<summary>Load a GitModuleSource from its ID.</summary>
+	///<param name = "Id"></param>
+	public GitModuleSource LoadGitModuleSourceFromID(GitModuleSourceID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadGitModuleSourceFromID", _arguments_);
+		return new GitModuleSource
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
 	///<summary>Load a GitRef from its ID.</summary>
 	///<param name = "Id"></param>
 	public GitRef LoadGitRefFromID(GitRefID id)
@@ -3067,6 +3512,20 @@ public sealed class Client : BaseClient
 		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("loadHostFromID", _arguments_);
 		return new Host
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a InputTypeDef from its ID.</summary>
+	///<param name = "Id"></param>
+	public InputTypeDef LoadInputTypeDefFromID(InputTypeDefID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadInputTypeDefFromID", _arguments_);
+		return new InputTypeDef
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -3115,14 +3574,28 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load a ModuleConfig from its ID.</summary>
+	///<summary>Load a LocalModuleSource from its ID.</summary>
 	///<param name = "Id"></param>
-	public ModuleConfig LoadModuleConfigFromID(ModuleConfigID id)
+	public LocalModuleSource LoadLocalModuleSourceFromID(LocalModuleSourceID id)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
-		var _newQueryTree_ = QueryTree.Add("loadModuleConfigFromID", _arguments_);
-		return new ModuleConfig
+		var _newQueryTree_ = QueryTree.Add("loadLocalModuleSourceFromID", _arguments_);
+		return new LocalModuleSource
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a ModuleDependency from its ID.</summary>
+	///<param name = "Id"></param>
+	public ModuleDependency LoadModuleDependencyFromID(ModuleDependencyID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadModuleDependencyFromID", _arguments_);
+		return new ModuleDependency
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -3137,6 +3610,20 @@ public sealed class Client : BaseClient
 		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("loadModuleFromID", _arguments_);
 		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Load a ModuleSource from its ID.</summary>
+	///<param name = "Id"></param>
+	public ModuleSource LoadModuleSourceFromID(ModuleSourceID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadModuleSourceFromID", _arguments_);
+		return new ModuleSource
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -3213,6 +3700,20 @@ public sealed class Client : BaseClient
 		};
 	}
 
+	///<summary>Load a Terminal from its ID.</summary>
+	///<param name = "Id"></param>
+	public Terminal LoadTerminalFromID(TerminalID id)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("id", new StringOperationArgumentValue(id?.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("loadTerminalFromID", _arguments_);
+		return new Terminal
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
 	///<summary>Load a TypeDef from its ID.</summary>
 	///<param name = "Id"></param>
 	public TypeDef LoadTypeDefFromID(TypeDefID id)
@@ -3239,17 +3740,37 @@ public sealed class Client : BaseClient
 		};
 	}
 
-	///<summary>Load the static configuration for a module from the given source directory and optional subpath.</summary>
-	///<param name = "SourceDirectory"></param>
-	///<param name = "Subpath"></param>
-	public ModuleConfig ModuleConfig(Directory sourceDirectory, string? subpath = null)
+	///<summary>Create a new module dependency configuration from a module source and name</summary>
+	///<param name = "Source">The source of the dependency</param>
+	///<param name = "Name">If set, the name to use for the dependency. Otherwise, once installed to a parent module, the name of the dependency module will be used by default.</param>
+	public ModuleDependency ModuleDependency(ModuleSource source, string? name = null)
 	{
 		OperationArgument? _arguments_ = null;
-		_arguments_ = new OperationArgument("sourceDirectory", new ReferenceOperationArgumentValue(sourceDirectory), _arguments_);
-		if (subpath != null)
-			_arguments_ = new OperationArgument("subpath", new StringOperationArgumentValue(subpath), _arguments_);
-		var _newQueryTree_ = QueryTree.Add("moduleConfig", _arguments_);
-		return new ModuleConfig
+		_arguments_ = new OperationArgument("source", new ReferenceOperationArgumentValue(source), _arguments_);
+		if (name != null)
+			_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("moduleDependency", _arguments_);
+		return new ModuleDependency
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Create a new module source instance from a source ref string.</summary>
+	///<param name = "RefString">The string ref representation of the module source</param>
+	///<param name = "RootDirectory">An explicitly set root directory for the module source. This is required to load local sources as modules; other source types implicitly encode the root directory and do not require this.</param>
+	///<param name = "Stable">If true, enforce that the source is a stable version for source kinds that support versioning.</param>
+	public ModuleSource ModuleSource(string refString, Directory? rootDirectory = null, bool? stable = null)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("refString", new StringOperationArgumentValue(refString), _arguments_);
+		if (rootDirectory != null)
+			_arguments_ = new OperationArgument("rootDirectory", new ReferenceOperationArgumentValue(rootDirectory), _arguments_);
+		if (stable != null)
+			_arguments_ = new OperationArgument("stable", EnumOperationArgumentValue.Create(stable.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("moduleSource", _arguments_);
+		return new ModuleSource
 		{
 			QueryTree = _newQueryTree_,
 			Context = Context
@@ -3374,6 +3895,7 @@ public sealed class Service : BaseClient
 	internal string? CachedHostname { private get; init; }
 	internal ServiceID? CachedStart { private get; init; }
 	internal ServiceID? CachedStop { private get; init; }
+	internal Void? CachedUp { private get; init; }
 
 	///<summary>A unique identifier for this Service.</summary>
 	public async Task<ServiceID> Id()
@@ -3430,12 +3952,31 @@ public sealed class Service : BaseClient
 	}
 
 	///<summary>Stop the service.</summary>
-	public async Task<Service> Stop()
+	///<param name = "Kill">Immediately kill the service without waiting for a graceful exit</param>
+	public async Task<Service> Stop(bool? kill = null)
 	{
 		OperationArgument? _arguments_ = null;
+		if (kill != null)
+			_arguments_ = new OperationArgument("kill", EnumOperationArgumentValue.Create(kill.Value), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("stop", _arguments_);
 		await ComputeQuery(_newQueryTree_, await Context.Connection());
 		return this;
+	}
+
+	///<summary>Creates a tunnel that forwards traffic from the caller's network to this service.</summary>
+	///<param name = "Ports"></param>
+	///<param name = "Native"></param>
+	public async Task<Void?> Up(IEnumerable<PortForward>? ports = null, bool? native = null)
+	{
+		if (CachedUp != null)
+			return CachedUp;
+		OperationArgument? _arguments_ = null;
+		if (ports != null)
+			_arguments_ = new OperationArgument("ports", ArrayOperationArgumentValue.Create(ports, element => new ObjectOperationArgumentValue(element.AsOperationArguments())), _arguments_);
+		if (native != null)
+			_arguments_ = new OperationArgument("native", EnumOperationArgumentValue.Create(native.Value), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("up", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 }
 
@@ -3455,6 +3996,33 @@ public sealed class Socket : BaseClient
 	}
 }
 
+///<summary>An interactive terminal that clients can connect to.</summary>
+public sealed class Terminal : BaseClient
+{
+	internal TerminalID? CachedId { private get; init; }
+	internal string? CachedWebsocketEndpoint { private get; init; }
+
+	///<summary>A unique identifier for this Terminal.</summary>
+	public async Task<TerminalID> Id()
+	{
+		if (CachedId != null)
+			return CachedId;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
+		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary>An http endpoint at which this terminal can be connected to over a websocket.</summary>
+	public async Task<string> WebsocketEndpoint()
+	{
+		if (CachedWebsocketEndpoint != null)
+			return CachedWebsocketEndpoint;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("websocketEndpoint", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+}
+
 ///<summary>A definition of a parameter or return type in a Module.</summary>
 public sealed class TypeDef : BaseClient
 {
@@ -3470,6 +4038,18 @@ public sealed class TypeDef : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("id", _arguments_);
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
+	}
+
+	///<summary></summary>
+	public InputTypeDef AsInput()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("asInput", _arguments_);
+		return new InputTypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
 	}
 
 	///<summary></summary>

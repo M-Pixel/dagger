@@ -14,7 +14,7 @@ defmodule Dagger.Module do
       selection =
         select(
           selection,
-          "dependencies dependencyConfig description generatedCode id initialize interfaces name objects sdk serve sourceDirectory sourceDirectorySubpath withInterface withObject withSource"
+          "dependencies dependencyConfig description generatedSourceRootDirectory id initialize interfaces name objects runtime sdk serve source withDependencies withDescription withInterface withName withObject withSDK withSource"
         )
 
       with {:ok, data} <- execute(selection, module.client) do
@@ -32,16 +32,27 @@ defmodule Dagger.Module do
 
   (
     @doc ""
-    @spec dependency_config(t()) :: {:ok, [Dagger.String.t()]} | {:error, term()}
+    @spec dependency_config(t()) :: {:ok, [Dagger.ModuleDependency.t()]} | {:error, term()}
     def dependency_config(%__MODULE__{} = module) do
       selection = select(module.selection, "dependencyConfig")
-      execute(selection, module.client)
+      selection = select(selection, "id name source")
+
+      with {:ok, data} <- execute(selection, module.client) do
+        {:ok,
+         data
+         |> Enum.map(fn value ->
+           elem_selection = Dagger.QueryBuilder.Selection.query()
+           elem_selection = select(elem_selection, "loadModuleDependencyFromID")
+           elem_selection = arg(elem_selection, "id", value["id"])
+           %Dagger.ModuleDependency{selection: elem_selection, client: module.client}
+         end)}
+      end
     end
   )
 
   (
     @doc ""
-    @spec description(t()) :: {:ok, Dagger.String.t() | nil} | {:error, term()}
+    @spec description(t()) :: {:ok, Dagger.String.t()} | {:error, term()}
     def description(%__MODULE__{} = module) do
       selection = select(module.selection, "description")
       execute(selection, module.client)
@@ -49,11 +60,11 @@ defmodule Dagger.Module do
   )
 
   (
-    @doc ""
-    @spec generated_code(t()) :: Dagger.GeneratedCode.t()
-    def generated_code(%__MODULE__{} = module) do
-      selection = select(module.selection, "generatedCode")
-      %Dagger.GeneratedCode{selection: selection, client: module.client}
+    @doc "The module's root directory containing the config file for it and its source (possibly as a subdir). It includes any generated code or updated config files created after initial load, but not any files/directories that were unchanged after sdk codegen was run."
+    @spec generated_source_root_directory(t()) :: Dagger.Directory.t()
+    def generated_source_root_directory(%__MODULE__{} = module) do
+      selection = select(module.selection, "generatedSourceRootDirectory")
+      %Dagger.Directory{selection: selection, client: module.client}
     end
   )
 
@@ -84,7 +95,7 @@ defmodule Dagger.Module do
       selection =
         select(
           selection,
-          "asInterface asList asObject id kind optional withConstructor withField withFunction withInterface withKind withListOf withObject withOptional"
+          "asInput asInterface asList asObject id kind optional withConstructor withField withFunction withInterface withKind withListOf withObject withOptional"
         )
 
       with {:ok, data} <- execute(selection, module.client) do
@@ -118,7 +129,7 @@ defmodule Dagger.Module do
       selection =
         select(
           selection,
-          "asInterface asList asObject id kind optional withConstructor withField withFunction withInterface withKind withListOf withObject withOptional"
+          "asInput asInterface asList asObject id kind optional withConstructor withField withFunction withInterface withKind withListOf withObject withOptional"
         )
 
       with {:ok, data} <- execute(selection, module.client) do
@@ -131,6 +142,15 @@ defmodule Dagger.Module do
            %Dagger.TypeDef{selection: elem_selection, client: module.client}
          end)}
       end
+    end
+  )
+
+  (
+    @doc ""
+    @spec runtime(t()) :: Dagger.Container.t()
+    def runtime(%__MODULE__{} = module) do
+      selection = select(module.selection, "runtime")
+      %Dagger.Container{selection: selection, client: module.client}
     end
   )
 
@@ -154,19 +174,30 @@ defmodule Dagger.Module do
 
   (
     @doc ""
-    @spec source_directory(t()) :: Dagger.Directory.t()
-    def source_directory(%__MODULE__{} = module) do
-      selection = select(module.selection, "sourceDirectory")
-      %Dagger.Directory{selection: selection, client: module.client}
+    @spec source(t()) :: Dagger.ModuleSource.t()
+    def source(%__MODULE__{} = module) do
+      selection = select(module.selection, "source")
+      %Dagger.ModuleSource{selection: selection, client: module.client}
     end
   )
 
   (
-    @doc ""
-    @spec source_directory_subpath(t()) :: {:ok, Dagger.String.t()} | {:error, term()}
-    def source_directory_subpath(%__MODULE__{} = module) do
-      selection = select(module.selection, "sourceDirectorySubpath")
-      execute(selection, module.client)
+    @doc "Update the module configuration to use the given dependencies.\n\n## Required Arguments\n\n* `dependencies` - The dependency modules to install."
+    @spec with_dependencies(t(), [Dagger.ModuleDependencyID.t()]) :: Dagger.Module.t()
+    def with_dependencies(%__MODULE__{} = module, dependencies) do
+      selection = select(module.selection, "withDependencies")
+      selection = arg(selection, "dependencies", dependencies)
+      %Dagger.Module{selection: selection, client: module.client}
+    end
+  )
+
+  (
+    @doc "Retrieves the module with the given description\n\n## Required Arguments\n\n* `description` - The description to set"
+    @spec with_description(t(), Dagger.String.t()) :: Dagger.Module.t()
+    def with_description(%__MODULE__{} = module, description) do
+      selection = select(module.selection, "withDescription")
+      selection = arg(selection, "description", description)
+      %Dagger.Module{selection: selection, client: module.client}
     end
   )
 
@@ -181,6 +212,16 @@ defmodule Dagger.Module do
         selection = arg(selection, "iface", id)
       )
 
+      %Dagger.Module{selection: selection, client: module.client}
+    end
+  )
+
+  (
+    @doc "Update the module configuration to use the given name.\n\n## Required Arguments\n\n* `name` - The name to use."
+    @spec with_name(t(), Dagger.String.t()) :: Dagger.Module.t()
+    def with_name(%__MODULE__{} = module, name) do
+      selection = select(module.selection, "withName")
+      selection = arg(selection, "name", name)
       %Dagger.Module{selection: selection, client: module.client}
     end
   )
@@ -201,23 +242,21 @@ defmodule Dagger.Module do
   )
 
   (
-    @doc "Retrieves the module with basic configuration loaded, ready for initialization.\n\n## Required Arguments\n\n* `directory` - The directory containing the module's source code.\n\n## Optional Arguments\n\n* `subpath` - An optional subpath of the directory which contains the module's source code.\n\nThis is needed when the module code is in a subdirectory but requires parent directories to be loaded in order to execute. For example, the module source code may need a go.mod, project.toml, package.json, etc. file from a parent directory.\n\nIf not set, the module source code is loaded from the root of the directory."
-    @spec with_source(t(), Dagger.Directory.t(), keyword()) :: Dagger.Module.t()
-    def with_source(%__MODULE__{} = module, directory, optional_args \\ []) do
+    @doc "Update the module configuration to use the given SDK.\n\n## Required Arguments\n\n* `sdk` - The SDK to use."
+    @spec with_sdk(t(), Dagger.String.t()) :: Dagger.Module.t()
+    def with_sdk(%__MODULE__{} = module, sdk) do
+      selection = select(module.selection, "withSDK")
+      selection = arg(selection, "sdk", sdk)
+      %Dagger.Module{selection: selection, client: module.client}
+    end
+  )
+
+  (
+    @doc "Retrieves the module with basic configuration loaded if present.\n\n## Required Arguments\n\n* `source` - The module source to initialize from."
+    @spec with_source(t(), Dagger.ModuleSource.t()) :: Dagger.Module.t()
+    def with_source(%__MODULE__{} = module, source) do
       selection = select(module.selection, "withSource")
-
-      (
-        {:ok, id} = Dagger.Directory.id(directory)
-        selection = arg(selection, "directory", id)
-      )
-
-      selection =
-        if is_nil(optional_args[:subpath]) do
-          selection
-        else
-          arg(selection, "subpath", optional_args[:subpath])
-        end
-
+      selection = arg(selection, "source", source)
       %Dagger.Module{selection: selection, client: module.client}
     end
   )

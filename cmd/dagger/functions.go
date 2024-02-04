@@ -20,29 +20,37 @@ import (
 )
 
 const (
-	Directory string = "Directory"
-	Container string = "Container"
-	File      string = "File"
-	Secret    string = "Secret"
-	Service   string = "Service"
+	Directory   string = "Directory"
+	Container   string = "Container"
+	File        string = "File"
+	Secret      string = "Secret"
+	Service     string = "Service"
+	Terminal    string = "Terminal"
+	PortForward string = "PortForward"
+	CacheVolume string = "CacheVolume"
 )
 
 var funcGroup = &cobra.Group{
 	ID:    "functions",
-	Title: "Functions",
+	Title: "Function Commands",
 }
 
 var funcCmds = FuncCommands{
 	funcListCmd,
 	callCmd,
-	shellCmd,
-	downloadCmd,
-	upCmd,
 }
 
 var funcListCmd = &FuncCommand{
-	Name:  "functions",
+	Name:  "functions [flags] [FUNCTION]...",
 	Short: `List available functions`,
+	Long: strings.ReplaceAll(`List available functions in a module.
+
+This is similar to ´dagger call --help´, but only focused on showing the
+available functions.
+`,
+		"´",
+		"`",
+	),
 	Execute: func(fc *FuncCommand, cmd *cobra.Command) error {
 		tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', tabwriter.DiscardEmptyColumns)
 		var o functionProvider = fc.mod.GetMainObject()
@@ -94,30 +102,6 @@ var funcListCmd = &FuncCommand{
 	},
 }
 
-func printReturnType(returnType *modTypeDef) (n string) {
-	defer func() {
-		if !returnType.Optional {
-			n += "!"
-		}
-	}()
-	switch returnType.Kind {
-	case dagger.StringKind:
-		return "String"
-	case dagger.IntegerKind:
-		return "Int"
-	case dagger.BooleanKind:
-		return "Boolean"
-	case dagger.ObjectKind:
-		return returnType.AsObject.Name
-	case dagger.InterfaceKind:
-		return returnType.AsInterface.Name
-	case dagger.ListKind:
-		return fmt.Sprintf("[%s]", printReturnType(returnType.AsList.ElementTypeDef))
-	default:
-		return ""
-	}
-}
-
 type FuncCommands []*FuncCommand
 
 func (fcs FuncCommands) AddFlagSet(flags *pflag.FlagSet) {
@@ -127,7 +111,6 @@ func (fcs FuncCommands) AddFlagSet(flags *pflag.FlagSet) {
 }
 
 func (fcs FuncCommands) AddParent(rootCmd *cobra.Command) {
-	rootCmd.AddGroup(funcGroup)
 	rootCmd.AddCommand(fcs.All()...)
 }
 
@@ -234,28 +217,22 @@ type FuncCommand struct {
 
 func (fc *FuncCommand) Command() *cobra.Command {
 	if fc.cmd == nil {
-		use := fmt.Sprintf("%s [flags] [command [flags]]...", fc.Name)
-		disableFlagsInUse := true
-
-		if fc.Execute != nil {
-			use = fc.Name
-			disableFlagsInUse = false
-		}
-
 		fc.cmd = &cobra.Command{
-			Use:     use,
+			Use:     fc.Name,
 			Aliases: fc.Aliases,
 			Short:   fc.Short,
 			Long:    fc.Long,
 			Example: fc.Example,
-			GroupID: funcGroup.ID,
-			Hidden:  true, // for now, remove once we're ready for primetime
+			GroupID: moduleGroup.ID,
+			Annotations: map[string]string{
+				"experimental": "",
+			},
 
 			// We need to disable flag parsing because it'll act on --help
 			// and validate the args before we have a chance to add the
 			// subcommands.
 			DisableFlagParsing:    true,
-			DisableFlagsInUseLine: disableFlagsInUse,
+			DisableFlagsInUseLine: true,
 
 			PreRunE: func(c *cobra.Command, a []string) error {
 				// Recover what DisableFlagParsing disabled.
@@ -406,13 +383,18 @@ func (fc *FuncCommand) load(c *cobra.Command, a []string, vtx *progrock.VertexRe
 	}()
 
 	load := vtx.Task("loading module")
-	mod, err := loadMod(ctx, dag)
+	modConf, err := getDefaultModuleConfiguration(ctx, dag, "")
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get configured module: %w", err)
+	}
+	if !modConf.FullyInitialized() {
+		return nil, nil, fmt.Errorf("module at source dir %q doesn't exist or is invalid", modConf.LocalSourcePath)
+	}
+	mod := modConf.Mod.Initialize()
+	_, err = mod.Serve(ctx)
 	load.Done(err)
 	if err != nil {
 		return nil, nil, err
-	}
-	if mod == nil {
-		return nil, nil, fmt.Errorf("no module specified and no default module found in current directory")
 	}
 
 	load = vtx.Task("loading objects")
@@ -493,6 +475,7 @@ func (fc *FuncCommand) traverse(c *cobra.Command) (*cobra.Command, []string, err
 
 func (fc *FuncCommand) addSubCommands(cmd *cobra.Command, dag *dagger.Client, fnProvider functionProvider) {
 	if fnProvider != nil {
+		cmd.AddGroup(funcGroup)
 		for _, fn := range fnProvider.GetFunctions() {
 			subCmd := fc.makeSubCmd(dag, fn)
 			cmd.AddCommand(subCmd)
@@ -502,8 +485,10 @@ func (fc *FuncCommand) addSubCommands(cmd *cobra.Command, dag *dagger.Client, fn
 
 func (fc *FuncCommand) makeSubCmd(dag *dagger.Client, fn *modFunction) *cobra.Command {
 	newCmd := &cobra.Command{
-		Use:   cliName(fn.Name),
-		Short: fn.Description,
+		Use:     cliName(fn.Name),
+		Short:   strings.SplitN(fn.Description, "\n", 2)[0],
+		Long:    fn.Description,
+		GroupID: funcGroup.ID,
 		PreRunE: func(cmd *cobra.Command, args []string) (err error) {
 			if err := fc.addArgsForFunction(cmd, args, fn, dag); err != nil {
 				return err

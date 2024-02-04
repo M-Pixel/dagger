@@ -33,6 +33,7 @@ import (
 	"github.com/moby/buildkit/util/entitlements"
 	bkworker "github.com/moby/buildkit/worker"
 	"github.com/opencontainers/go-digest"
+	"github.com/vito/progrock"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc/metadata"
 )
@@ -65,9 +66,10 @@ type ResolveCacheExporterFunc func(ctx context.Context, g bksession.Group) (remo
 // Client is dagger's internal interface to buildkit APIs
 type Client struct {
 	Opts
-	session   *bksession.Session
-	job       *bksolver.Job
-	llbBridge bkfrontend.FrontendLLBBridge
+	session     *bksession.Session
+	job         *bksolver.Job
+	llbBridge   bkfrontend.FrontendLLBBridge
+	bk2progrock BK2Progrock
 
 	clientMu              sync.RWMutex
 	clientIDToSecretToken map[string]string
@@ -82,6 +84,9 @@ type Client struct {
 	closeCtx context.Context
 	cancel   context.CancelFunc
 	closeMu  sync.RWMutex
+
+	execMetadata   map[digest.Digest]ContainerExecUncachedMetadata
+	execMetadataMu sync.Mutex
 }
 
 func NewClient(ctx context.Context, opts Opts) (*Client, error) {
@@ -93,6 +98,7 @@ func NewClient(ctx context.Context, opts Opts) (*Client, error) {
 		containers:            make(map[bkgw.Container]struct{}),
 		closeCtx:              closeCtx,
 		cancel:                cancel,
+		execMetadata:          make(map[digest.Digest]ContainerExecUncachedMetadata),
 	}
 
 	session, err := client.newSession(ctx)
@@ -114,8 +120,9 @@ func NewClient(ctx context.Context, opts Opts) (*Client, error) {
 	}
 	client.job.SetValue(entitlementsJobKey, entitlementSet)
 
-	client.llbBridge = client.LLBSolver.Bridge(client.job)
-	client.llbBridge = recordingGateway{client.llbBridge}
+	gw := &recordingGateway{llbBridge: client.LLBSolver.Bridge(client.job)}
+	client.llbBridge = gw
+	client.bk2progrock = gw
 
 	client.dialer = &net.Dialer{}
 
@@ -248,12 +255,26 @@ func (c *Client) Solve(ctx context.Context, req bkgw.SolveRequest) (_ *Result, r
 			if execOp.Meta.ProxyEnv == nil {
 				execOp.Meta.ProxyEnv = &bksolverpb.ProxyEnv{}
 			}
+
+			// If we already solved for this execop in this dagger session, use
+			// it's uncached metadata to preserve the same vertex digest.
+			// This results in buildkit's solver de-duping the op, instead of
+			// the scheduler's edge merge.
+			c.execMetadataMu.Lock()
+			execMeta, ok := c.execMetadata[*execOp.OpDigest]
+			if !ok {
+				execMeta = ContainerExecUncachedMetadata{
+					ParentClientIDs: clientMetadata.ClientIDs(),
+					ServerID:        clientMetadata.ServerID,
+					ProgSockPath:    c.ProgSockPath,
+					ProgParent:      progrock.FromContext(ctx).Parent,
+				}
+				c.execMetadata[*execOp.OpDigest] = execMeta
+			}
+			c.execMetadataMu.Unlock()
+
 			var err error
-			execOp.Meta.ProxyEnv.FtpProxy, err = ContainerExecUncachedMetadata{
-				ParentClientIDs: clientMetadata.ClientIDs(),
-				ServerID:        clientMetadata.ServerID,
-				ProgSockPath:    c.ProgSockPath,
-			}.ToPBFtpProxyVal()
+			execOp.Meta.ProxyEnv.FtpProxy, err = execMeta.ToPBFtpProxyVal()
 			if err != nil {
 				return err
 			}
@@ -368,7 +389,8 @@ func (c *Client) NewContainer(ctx context.Context, req bkgw.NewContainerRequest)
 	// using context.Background so it continues running until exit or when c.Close() is called
 	ctr, err := bkcontainer.NewContainer(
 		context.Background(),
-		c.Worker,
+		c.Worker.CacheManager(),
+		c.Worker.Executor(),
 		c.SessionManager,
 		bksession.NewGroup(c.ID()),
 		ctrReq,
@@ -389,8 +411,32 @@ func (c *Client) NewContainer(ctx context.Context, req bkgw.NewContainerRequest)
 	return ctr, nil
 }
 
-func (c *Client) WriteStatusesTo(ctx context.Context, ch chan *bkclient.SolveStatus) error {
-	return c.job.Status(ctx, ch)
+func (c *Client) WriteStatusesTo(ctx context.Context, recorder *progrock.Recorder) {
+	statusCh := make(chan *bkclient.SolveStatus, 8)
+	go func() {
+		err := c.job.Status(ctx, statusCh)
+		if err != nil {
+			bklog.G(ctx).WithError(err).Error("failed to write status updates")
+		}
+	}()
+	go func() {
+		defer func() {
+			// drain channel on error
+			for range statusCh {
+			}
+		}()
+		for {
+			status, ok := <-statusCh
+			if !ok {
+				return
+			}
+			err := recorder.Record(c.bk2progrock.ConvertStatus(status))
+			if err != nil {
+				bklog.G(ctx).WithError(err).Error("failed to record status update")
+				return
+			}
+		}
+	}()
 }
 
 func (c *Client) RegisterClient(clientID, clientHostname, secretToken string) error {
@@ -655,6 +701,12 @@ func (c *Client) ListenHostToContainer(
 		sendL.Lock()
 		err := listener.CloseSend()
 		sendL.Unlock()
+		connsL.Lock()
+		for _, conn := range conns {
+			conn.Close()
+		}
+		clear(conns)
+		connsL.Unlock()
 		if err == nil {
 			wg.Wait()
 		}
@@ -686,7 +738,9 @@ func withOutgoingContext(ctx context.Context) context.Context {
 type ContainerExecUncachedMetadata struct {
 	ParentClientIDs []string `json:"parentClientIDs,omitempty"`
 	ServerID        string   `json:"serverID,omitempty"`
-	ProgSockPath    string   `json:"progSockPath,omitempty"`
+	// Progrock propagation
+	ProgSockPath string `json:"progSockPath,omitempty"`
+	ProgParent   string `json:"progParent,omitempty"`
 }
 
 func (md ContainerExecUncachedMetadata) ToPBFtpProxyVal() (string, error) {

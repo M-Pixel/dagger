@@ -41,3 +41,31 @@ func collectInputsSlice[T dagql.Type](inputs []dagql.InputObject[T]) []T {
 	}
 	return ts
 }
+
+func collectArrayInput[T any, I dagql.Input](in dagql.ArrayInput[I], conv func(I) T) []T {
+	ts := make([]T, len(in))
+	for i, v := range in {
+		ts[i] = conv(v)
+	}
+	return ts
+}
+
+func collectIDObjects[T dagql.Typed](ctx context.Context, srv *dagql.Server, ids []dagql.ID[T]) ([]T, error) {
+	ts := make([]T, len(ids))
+	for i, id := range ids {
+		inst, err := id.Load(ctx, srv)
+		if err != nil {
+			return nil, err
+		}
+		ts[i] = inst.Self
+	}
+	return ts, nil
+}
+
+func asArrayInput[T any, I dagql.Input](ts []T, conv func(T) I) dagql.ArrayInput[I] {
+	ins := make(dagql.ArrayInput[I], len(ts))
+	for i, v := range ts {
+		ins[i] = conv(v)
+	}
+	return ins
+}

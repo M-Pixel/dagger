@@ -34,6 +34,10 @@ func GetCustomFlagValue(name string) DaggerValue {
 		return &secretValue{}
 	case Service:
 		return &serviceValue{}
+	case PortForward:
+		return &portForwardValue{}
+	case CacheVolume:
+		return &cacheVolumeValue{}
 	}
 	return nil
 }
@@ -51,6 +55,10 @@ func GetCustomFlagValueSlice(name string) DaggerValue {
 		return &sliceValue[*secretValue]{}
 	case Service:
 		return &sliceValue[*serviceValue]{}
+	case PortForward:
+		return &sliceValue[*portForwardValue]{}
+	case CacheVolume:
+		return &sliceValue[*cacheVolumeValue]{}
 	}
 	return nil
 }
@@ -177,23 +185,6 @@ func (v *directoryValue) String() string {
 	return v.address
 }
 
-func parseGit(urlStr string) (*gitutil.GitURL, error) {
-	// FIXME: handle tarball-over-http (where http(s):// is scheme but not a git repo)
-	u, err := gitutil.ParseURL(urlStr)
-	if err != nil {
-		return nil, err
-	}
-	if u.Fragment == nil {
-		u.Fragment = &gitutil.GitURLFragment{}
-	}
-	if u.Fragment.Ref == "" {
-		// FIXME: default branch can be remotely looked up, but that would
-		// require 1) a context, 2) a way to return an error, 3) more time than I have :)
-		u.Fragment.Ref = "main"
-	}
-	return u, nil
-}
-
 func (v *directoryValue) Get(_ context.Context, dag *dagger.Client) (any, error) {
 	if v.String() == "" {
 		return nil, fmt.Errorf("directory address cannot be empty")
@@ -219,6 +210,23 @@ func (v *directoryValue) Get(_ context.Context, dag *dagger.Client) (any, error)
 	vStr := v.String()
 	vStr = strings.TrimPrefix(vStr, "file://")
 	return dag.Host().Directory(vStr), nil
+}
+
+func parseGit(urlStr string) (*gitutil.GitURL, error) {
+	// FIXME: handle tarball-over-http (where http(s):// is scheme but not a git repo)
+	u, err := gitutil.ParseURL(urlStr)
+	if err != nil {
+		return nil, err
+	}
+	if u.Fragment == nil {
+		u.Fragment = &gitutil.GitURLFragment{}
+	}
+	if u.Fragment.Ref == "" {
+		// FIXME: default branch can be remotely looked up, but that would
+		// require 1) a context, 2) a way to return an error, 3) more time than I have :)
+		u.Fragment.Ref = "main"
+	}
+	return u, nil
 }
 
 // fileValue is a pflag.Value that builds a dagger.File from a host path.
@@ -397,6 +405,81 @@ func (v *serviceValue) Get(ctx context.Context, c *dagger.Client) (any, error) {
 	return svc, nil
 }
 
+// portForwardValue is a pflag.Value that builds a dagger.
+type portForwardValue struct {
+	frontend int
+	backend  int
+}
+
+func (v *portForwardValue) Type() string {
+	return PortForward
+}
+
+func (v *portForwardValue) Set(s string) error {
+	if s == "" {
+		return fmt.Errorf("portForward setting cannot be empty")
+	}
+
+	frontendStr, backendStr, ok := strings.Cut(s, ":")
+	if !ok {
+		return fmt.Errorf("portForward setting not in the form of frontend:backend: %q", s)
+	}
+
+	frontend, err := strconv.Atoi(frontendStr)
+	if err != nil {
+		return fmt.Errorf("portForward frontend not a valid integer: %q", frontendStr)
+	}
+	v.frontend = frontend
+
+	backend, err := strconv.Atoi(backendStr)
+	if err != nil {
+		return fmt.Errorf("portForward backend not a valid integer: %q", backendStr)
+	}
+	v.backend = backend
+
+	return nil
+}
+
+func (v *portForwardValue) String() string {
+	return fmt.Sprintf("%d:%d", v.frontend, v.backend)
+}
+
+func (v *portForwardValue) Get(_ context.Context, c *dagger.Client) (any, error) {
+	return &dagger.PortForward{
+		Frontend: v.frontend,
+		Backend:  v.backend,
+	}, nil
+}
+
+// cacheVolumeValue is a pflag.Value that builds a dagger.CacheVolume from a
+// volume name.
+type cacheVolumeValue struct {
+	name string
+}
+
+func (v *cacheVolumeValue) Type() string {
+	return CacheVolume
+}
+
+func (v *cacheVolumeValue) Set(s string) error {
+	if s == "" {
+		return fmt.Errorf("cacheVolume name cannot be empty")
+	}
+	v.name = s
+	return nil
+}
+
+func (v *cacheVolumeValue) String() string {
+	return v.name
+}
+
+func (v *cacheVolumeValue) Get(_ context.Context, dag *dagger.Client) (any, error) {
+	if v.String() == "" {
+		return nil, fmt.Errorf("cacheVolume name cannot be empty")
+	}
+	return dag.CacheVolume(v.name), nil
+}
+
 // AddFlag adds a flag appropriate for the argument type. Should return a
 // pointer to the value.
 func (r *modFunctionArg) AddFlag(flags *pflag.FlagSet, dag *dagger.Client) (any, error) {
@@ -431,6 +514,17 @@ func (r *modFunctionArg) AddFlag(flags *pflag.FlagSet, dag *dagger.Client) (any,
 		// TODO: default to JSON?
 		return nil, fmt.Errorf("unsupported object type %q for flag: %s", objName, name)
 
+	case dagger.InputKind:
+		inputName := r.TypeDef.AsInput.Name
+
+		if val := GetCustomFlagValue(inputName); val != nil {
+			flags.Var(val, name, usage)
+			return val, nil
+		}
+
+		// TODO: default to JSON?
+		return nil, fmt.Errorf("unsupported input type %q for flag: %s", inputName, name)
+
 	case dagger.ListKind:
 		elementType := r.TypeDef.AsList.ElementTypeDef
 
@@ -457,6 +551,17 @@ func (r *modFunctionArg) AddFlag(flags *pflag.FlagSet, dag *dagger.Client) (any,
 
 			// TODO: default to JSON?
 			return nil, fmt.Errorf("unsupported list of objects %q for flag: %s", objName, name)
+
+		case dagger.InputKind:
+			inputName := elementType.AsInput.Name
+
+			if val := GetCustomFlagValueSlice(inputName); val != nil {
+				flags.Var(val, name, usage)
+				return val, nil
+			}
+
+			// TODO: default to JSON?
+			return nil, fmt.Errorf("unsupported list of input type %q for flag: %s", inputName, name)
 
 		case dagger.ListKind:
 			return nil, fmt.Errorf("unsupported list of lists for flag: %s", name)

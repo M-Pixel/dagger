@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"dagger.io/dagger"
@@ -62,7 +63,7 @@ func (t TypeScript) Lint(ctx context.Context) error {
 	})
 
 	eg.Go(func() error {
-		return util.LintGeneratedCode(func() error {
+		return util.LintGeneratedCode("sdk:typescript:generate", func() error {
 			return t.Generate(gctx)
 		}, typescriptGeneratedAPIPath)
 	})
@@ -142,27 +143,31 @@ func (t TypeScript) Publish(ctx context.Context, tag string) error {
 
 	c = c.Pipeline("sdk").Pipeline("typescript").Pipeline("publish")
 
-	var (
-		version = strings.TrimPrefix(tag, "sdk/typescript/v")
-		token   = os.Getenv("NPM_TOKEN")
-	)
+	version := strings.TrimPrefix(tag, "sdk/typescript/v")
 
-	build := nodeJsBase(c).WithExec([]string{"npm", "run", "build"})
+	dryRun, _ := strconv.ParseBool(os.Getenv("DRY_RUN"))
+
+	// build and set version
+	build := nodeJsBase(c).
+		WithExec([]string{"npm", "run", "build"}).
+		WithExec([]string{"npm", "version", version})
 
 	// configure .npmrc
-	npmrc := fmt.Sprintf(`//registry.npmjs.org/:_authToken=%s
+	if !dryRun {
+		token := util.GetHostEnv("NPM_TOKEN")
+		npmrc := fmt.Sprintf(`//registry.npmjs.org/:_authToken=%s
 registry=https://registry.npmjs.org/
 always-auth=true`, token)
-	if err = os.WriteFile("sdk/typescript/.npmrc", []byte(npmrc), 0o600); err != nil {
-		return err
+		build = build.WithMountedSecret(".npmrc", c.SetSecret("npmrc", npmrc))
 	}
 
-	// set version & publish
-	_, err = build.
-		WithExec([]string{"npm", "version", version}).
-		WithExec([]string{"npm", "publish", "--access", "public"}).
-		Sync(ctx)
+	// publish
+	publish := build.WithExec([]string{"npm", "publish", "--access", "public"})
+	if dryRun {
+		publish = build.WithExec([]string{"npm", "publish", "--access", "public", "--dry-run"})
+	}
 
+	_, err = publish.Sync(ctx)
 	return err
 }
 
