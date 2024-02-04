@@ -86,8 +86,9 @@ static class Functions
 		else
 			typeReference = typeReference.OfType!;
 
-		if (isInput && typeReference.Name != null && typeReference.Name.EndsWith("ID"))
-			typeReference = typeReference with { Name = string.Intern(typeReference.Name[..^2]) };
+		string? typeName = isInput && typeReference.Name != null
+			? TrimIDSuffix(typeReference.Name)
+			: typeReference.Name;
 
 		return typeReference.Kind switch
 		{
@@ -96,16 +97,16 @@ static class Functions
 				(
 					TypeArgumentList(SingletonSeparatedList(FormatType(typeReference.OfType!, isInput)))
 				),
-			Introspection.TypeKind.SCALAR => typeReference.Name switch
+			Introspection.TypeKind.SCALAR => typeName switch
 			{
 				nameof(Scalar.String) => PredefinedType(Token(SyntaxKind.StringKeyword)),
 				nameof(Scalar.Int) => PredefinedType(Token(SyntaxKind.IntKeyword)),
 				nameof(Scalar.Float) => PredefinedType(Token(SyntaxKind.FloatKeyword)),
 				nameof(Scalar.Boolean) => PredefinedType(Token(SyntaxKind.BoolKeyword)),
-				_ => IdentifierName(FormatName(typeReference.Name!))
+				_ => IdentifierName(FormatName(typeName!))
 			},
 			Introspection.TypeKind.OBJECT or Introspection.TypeKind.INPUT_OBJECT or Introspection.TypeKind.ENUM =>
-				IdentifierName(FormatName(typeReference.Name!)),
+				IdentifierName(FormatName(typeName!)),
 			_ => throw new Exception("Unexpected type kind " + typeReference.Kind)
 		};
 	}
@@ -330,4 +331,24 @@ static class Functions
 			comments = comments.Prepend(XmlSummaryElement(XmlParagraphs(field.Description)));
 		return syntax.AddDocumentationComments(comments);
 	}
+
+	public static string TrimIDSuffix(string typeName) => typeName.EndsWith("ID") ? typeName[..^2] : typeName;
+
+	public static ExpressionSyntax NewQueryTreeFromID(TypeReference type, ExpressionSyntax idExpression) =>
+		InvocationExpression(MemberAccessExpression("ImmutableList", "Create"))
+			.AddArgumentListArguments
+			(
+				ObjectCreationExpression("Operation")
+					.AddArgumentListArguments
+					(
+						LiteralExpression($"load{TrimIDSuffix(type.ResolveName())}FromID"),
+						ObjectCreationExpression("OperationArgument")
+							.AddArgumentListArguments
+							(
+								LiteralExpression("id"),
+								ObjectCreationExpression("StringOperationArgumentValue")
+									.AddArgumentListArguments(idExpression)
+							)
+					)
+			);
 }

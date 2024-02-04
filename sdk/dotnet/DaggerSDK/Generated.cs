@@ -298,7 +298,7 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("envVariables", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new EnvVariable { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<EnvVariableID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new EnvVariable { QueryTree = ImmutableList.Create(new Operation("loadEnvVariableFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new EnvVariableID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary><para>EXPERIMENTAL API! Subject to change/removal at any time.</para><para>Configures all available GPUs on the host to be accessible to this container.</para><para>This currently works for Nvidia devices only.</para></summary>
@@ -354,7 +354,7 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("exposedPorts", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<PortID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = ImmutableList.Create(new Operation("loadPortFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new PortID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary><para>Retrieves a file at the given path.</para><para>Mounts are included.</para></summary>
@@ -430,7 +430,7 @@ public sealed class Container : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("labels", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Label { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<LabelID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Label { QueryTree = ImmutableList.Create(new Operation("loadLabelFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new LabelID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary>Retrieves the list of paths where a directory is mounted.</summary>
@@ -1596,7 +1596,7 @@ public sealed class Function : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("args", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionArg { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionArgID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionArg { QueryTree = ImmutableList.Create(new Operation("loadFunctionArgFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new FunctionArgID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -1754,7 +1754,7 @@ public sealed class FunctionCall : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("inputArgs", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionCallArgValue { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionCallArgValueID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FunctionCallArgValue { QueryTree = ImmutableList.Create(new Operation("loadFunctionCallArgValueFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new FunctionCallArgValueID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2164,7 +2164,7 @@ public sealed class InterfaceTypeDef : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("functions", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = ImmutableList.Create(new Operation("loadFunctionFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new FunctionID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2280,7 +2280,7 @@ public sealed class Module : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("dependencies", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Module { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<ModuleID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Module { QueryTree = ImmutableList.Create(new Operation("loadModuleFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new ModuleID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2331,7 +2331,7 @@ public sealed class Module : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("interfaces", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = ImmutableList.Create(new Operation("loadTypeDefFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new TypeDefID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2350,7 +2350,7 @@ public sealed class Module : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("objects", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = ImmutableList.Create(new Operation("loadTypeDefFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new TypeDefID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2560,7 +2560,7 @@ public sealed class ObjectTypeDef : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("fields", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FieldTypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FieldTypeDefID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new FieldTypeDef { QueryTree = ImmutableList.Create(new Operation("loadFieldTypeDefFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new FieldTypeDefID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2569,7 +2569,7 @@ public sealed class ObjectTypeDef : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("functions", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = ImmutableList.Create(new Operation("loadFunctionFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new FunctionID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary></summary>
@@ -2740,7 +2740,7 @@ public sealed class Client : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("currentTypeDefs", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = ImmutableList.Create(new Operation("loadTypeDefFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new TypeDefID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary>The default platform of the engine.</summary>
@@ -3406,7 +3406,7 @@ public sealed class Service : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("ports", _arguments_);
 		_newQueryTree_ = _newQueryTree_.Add("id");
-		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<PortID>() }).ToImmutableArray();
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Port { QueryTree = ImmutableList.Create(new Operation("loadPortFromID", new OperationArgument("id", new StringOperationArgumentValue(json.GetProperty("id").Deserialize<string>())))), Context = Context, CachedId = new PortID(json.GetProperty("id").Deserialize<string>()) }).ToImmutableArray();
 	}
 
 	///<summary><para>Start the service and wait for its health checks to succeed.</para><para>Services bound to a Container do not need to be manually started.</para></summary>

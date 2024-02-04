@@ -47,7 +47,8 @@ static class SolvableMethod
 		body = body.AddStatements(Method.AppendQueryTree(field));
 
 		// Add subfields
-		if (field.Type.IsList() && IsListOfObject(field.Type))
+		bool isListOfObject = field.Type.IsList() && IsListOfObject(field.Type);
+		if (isListOfObject)
 			body = body.AddStatements
 			(
 				ExpressionStatement
@@ -83,7 +84,7 @@ static class SolvableMethod
 				ReturnStatement(ThisExpression())
 			)
 
-			: !(field.Type.IsList() && IsListOfObject(field.Type))
+			: !isListOfObject
 			? body.AddStatements
 			(
 				ReturnStatement
@@ -124,9 +125,22 @@ static class SolvableMethod
 							)
 								.WithInitializer
 								(
-									new(string, ExpressionSyntax)[]
+									new[]
 									{
-										("QueryTree", IdentifierName("QueryTree")),
+										(
+											"QueryTree",
+											NewQueryTreeFromID
+											(
+												GetArrayType(field),
+												InvocationExpression(MemberAccessExpression("json", "GetProperty"))
+													.AddArgumentListArgument("id")
+													.ChainInvocation
+													(
+														"Deserialize",
+														PredefinedType(Token(SyntaxKind.StringKeyword))
+													)
+											)
+										),
 										("Context", IdentifierName("Context"))
 									}
 									.Concat
@@ -134,16 +148,27 @@ static class SolvableMethod
 										GetArrayField(schema, field).Select<Field, (string, ExpressionSyntax)>
 										(
 											innerField =>
-											(
-												"Cached" + FormatName(innerField.Name),
-												InvocationExpression(MemberAccessExpression("json", "GetProperty"))
-													.AddArgumentListArgument(innerField.Name)
-													.ChainInvocation
+											{
+												InvocationExpressionSyntax jsonPropertyExpression =
+													InvocationExpression(MemberAccessExpression("json", "GetProperty"))
+														.AddArgumentListArgument(innerField.Name);
+												ExpressionSyntax valueExpression = IsCustomScalar(innerField.Type)
+													? ObjectCreationExpression(FormatType(innerField.Type, false))
+														.AddArgumentListArguments
+														(
+															jsonPropertyExpression.ChainInvocation
+															(
+																"Deserialize",
+																PredefinedType(Token(SyntaxKind.StringKeyword))
+															)
+														)
+													: jsonPropertyExpression.ChainInvocation
 													(
 														"Deserialize",
 														FormatType(innerField.Type, isInput: false)
-													)
-											)
+													);
+												return ("Cached" + FormatName(innerField.Name), valueExpression);
+											}
 										)
 									)
 								)
