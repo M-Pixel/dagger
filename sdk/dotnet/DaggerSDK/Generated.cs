@@ -121,6 +121,7 @@ public enum TypeDefKind
 {
 	BooleanKind,
 	IntegerKind,
+	InterfaceKind,
 	ListKind,
 	ObjectKind,
 	StringKind,
@@ -536,11 +537,10 @@ public sealed class Container : BaseClient
 
 	///<summary>Configures default arguments for future commands.</summary>
 	///<param name = "Args">Arguments to prepend to future executions (e.g., ["-v", "--no-cache"]).</param>
-	public Container WithDefaultArgs(IEnumerable<string>? args = null)
+	public Container WithDefaultArgs(IEnumerable<string> args)
 	{
 		OperationArgument? _arguments_ = null;
-		if (args != null)
-			_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
+		_arguments_ = new OperationArgument("args", ArrayOperationArgumentValue.Create(args, element => new StringOperationArgumentValue(element)), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withDefaultArgs", _arguments_);
 		return new Container
 		{
@@ -2056,6 +2056,53 @@ public sealed class Host : BaseClient
 	}
 }
 
+///<summary>A definition of a custom interface defined in a Module.</summary>
+public sealed class InterfaceTypeDef : BaseClient
+{
+	internal string? CachedDescription { private get; init; }
+	internal string? CachedName { private get; init; }
+	internal string? CachedSourceModuleName { private get; init; }
+
+	///<summary>The doc string for the interface, if any</summary>
+	public async Task<string?> Description()
+	{
+		if (CachedDescription != null)
+			return CachedDescription;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("description", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+	}
+
+	///<summary>Functions defined on this interface, if any</summary>
+	public async Task<ImmutableArray<Function>> Functions()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("functions", _arguments_);
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new Function { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<FunctionID>() }).ToImmutableArray();
+	}
+
+	///<summary>The name of the interface</summary>
+	public async Task<string> Name()
+	{
+		if (CachedName != null)
+			return CachedName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("name", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>If this InterfaceTypeDef is associated with a Module, the name of the module. Unset otherwise.</summary>
+	public async Task<string?> SourceModuleName()
+	{
+		if (CachedSourceModuleName != null)
+			return CachedSourceModuleName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("sourceModuleName", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
+	}
+}
+
 ///<summary>A simple key value object that represents a label.</summary>
 public sealed class Label : BaseClient
 {
@@ -2158,6 +2205,15 @@ public sealed class Module : BaseClient
 		};
 	}
 
+	///<summary>Interfaces served by this module</summary>
+	public async Task<ImmutableArray<TypeDef>> Interfaces()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("interfaces", _arguments_);
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
+	}
+
 	///<summary>The name of the module</summary>
 	public async Task<string> Name()
 	{
@@ -2217,6 +2273,20 @@ public sealed class Module : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("sourceDirectorySubPath", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>This module plus the given Interface type and associated functions</summary>
+	///<param name = "Iface"></param>
+	public Module WithInterface(TypeDef iface)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("iface", new ReferenceOperationArgumentValue(iface), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withInterface", _arguments_);
+		return new Module
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
 	}
 
 	///<summary>This module plus the given Object type and associated functions</summary>
@@ -2301,6 +2371,7 @@ public sealed class ObjectTypeDef : BaseClient
 {
 	internal string? CachedDescription { private get; init; }
 	internal string? CachedName { private get; init; }
+	internal string? CachedSourceModuleName { private get; init; }
 
 	///<summary>The function used to construct new instances of this object, if any</summary>
 	public Function Constructor()
@@ -2350,6 +2421,16 @@ public sealed class ObjectTypeDef : BaseClient
 		OperationArgument? _arguments_ = null;
 		var _newQueryTree_ = QueryTree.Add("name", _arguments_);
 		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>();
+	}
+
+	///<summary>If this ObjectTypeDef is associated with a Module, the name of the module. Unset otherwise.</summary>
+	public async Task<string?> SourceModuleName()
+	{
+		if (CachedSourceModuleName != null)
+			return CachedSourceModuleName;
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("sourceModuleName", _arguments_);
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string?>();
 	}
 }
 
@@ -2461,6 +2542,15 @@ public sealed class Client : BaseClient
 			QueryTree = _newQueryTree_,
 			Context = Context
 		};
+	}
+
+	///<summary>The TypeDef representations of the objects currently being served in the session.</summary>
+	public async Task<ImmutableArray<TypeDef>> CurrentTypeDefs()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("currentTypeDefs", _arguments_);
+		_newQueryTree_ = _newQueryTree_.Add("id");
+		return (await ComputeQuery(_newQueryTree_, await Context.Connection())).EnumerateArray().Select(json => new TypeDef { QueryTree = QueryTree, Context = Context, CachedId = json.GetProperty("id").Deserialize<TypeDefID>() }).ToImmutableArray();
 	}
 
 	///<summary>The default platform of the builder.</summary>
@@ -3029,6 +3119,18 @@ public sealed class TypeDef : BaseClient
 		return new((await ComputeQuery(_newQueryTree_, await Context.Connection())).Deserialize<string>());
 	}
 
+	///<summary>If kind is INTERFACE, the interface-specific type definition. If kind is not INTERFACE, this will be null.</summary>
+	public InterfaceTypeDef AsInterface()
+	{
+		OperationArgument? _arguments_ = null;
+		var _newQueryTree_ = QueryTree.Add("asInterface", _arguments_);
+		return new InterfaceTypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
 	///<summary>If kind is LIST, the list-specific type definition. If kind is not LIST, this will be null.</summary>
 	public ListTypeDef AsList()
 	{
@@ -3106,13 +3208,30 @@ public sealed class TypeDef : BaseClient
 		};
 	}
 
-	///<summary>Adds a function for an Object TypeDef, failing if the type is not an object.</summary>
+	///<summary>Adds a function for an Object or Interface TypeDef, failing if the type is not one of those kinds.</summary>
 	///<param name = "Function"></param>
 	public TypeDef WithFunction(Function function)
 	{
 		OperationArgument? _arguments_ = null;
 		_arguments_ = new OperationArgument("function", new ReferenceOperationArgumentValue(function), _arguments_);
 		var _newQueryTree_ = QueryTree.Add("withFunction", _arguments_);
+		return new TypeDef
+		{
+			QueryTree = _newQueryTree_,
+			Context = Context
+		};
+	}
+
+	///<summary>Returns a TypeDef of kind Interface with the provided name.</summary>
+	///<param name = "Name"></param>
+	///<param name = "Description"></param>
+	public TypeDef WithInterface(string name, string? description = null)
+	{
+		OperationArgument? _arguments_ = null;
+		_arguments_ = new OperationArgument("name", new StringOperationArgumentValue(name), _arguments_);
+		if (description != null)
+			_arguments_ = new OperationArgument("description", new StringOperationArgumentValue(description), _arguments_);
+		var _newQueryTree_ = QueryTree.Add("withInterface", _arguments_);
 		return new TypeDef
 		{
 			QueryTree = _newQueryTree_,

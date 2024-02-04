@@ -3,8 +3,8 @@ module github.com/dagger/dagger/internal/mage
 go 1.21
 
 require (
-	dagger.io/dagger v0.9.4
-	github.com/dagger/dagger v0.9.4
+	dagger.io/dagger v0.9.5
+	github.com/dagger/dagger v0.9.5
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/hexops/gotextdiff v1.0.3
 	github.com/magefile/mage v1.15.0
@@ -21,7 +21,7 @@ require (
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/vektah/gqlparser/v2 v2.5.6 // indirect
-	golang.org/x/sys v0.14.0 // indirect
+	golang.org/x/sys v0.15.0 // indirect
 )
 
 replace github.com/dagger/dagger => ../../
