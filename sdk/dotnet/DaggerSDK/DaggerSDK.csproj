@@ -8,7 +8,7 @@
     <AssemblyName>Dagger.SDK</AssemblyName>
     <RootNamespace>Dagger</RootNamespace>
     <PackageId>MaxPixel.Dagger.SDK</PackageId>
-    <Version>0.0.2</Version>
+    <Version>0.0.3</Version>
     <Title>Dagger SDK</Title>
     <Authors>Max Pixel, Andrea Luzzardi, Gerhard Lazu, Nabeel Sulieman, Helder Correia, Justin Chadwell, Erik Sipsma, Tom Chauveau, Alex Suraci, Vikram Vaswani, Guillaume de Rouville, Jffarge, Michael Tyson, Benjamin Strasser, David Flanagan</Authors>
     <Description>Alpha preview of a C# Dagger SDK</Description>

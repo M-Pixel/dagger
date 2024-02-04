@@ -47,6 +47,7 @@ public static class GraphQLClientFactory
 			"Basic",
 			Convert.ToBase64String(Encoding.UTF8.GetBytes($"{configuration.SessionToken}:"))
 		);
+		result.HttpClient.Timeout = Timeout.InfiniteTimeSpan;
 		return result;
 	}
 }
