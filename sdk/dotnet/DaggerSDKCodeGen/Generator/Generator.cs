@@ -41,14 +41,14 @@ abstract class Generator
 	{
 		GraphQLResponse<Response> introspectionResponse = await client.SendQueryAsync<Response>
 		(
-			await File.ReadAllTextAsync("../../../cmd/codegen/introspection/introspection.graphql")
+			await System.IO.File.ReadAllTextAsync("../../../cmd/codegen/introspection/introspection.graphql")
 		);
 		return introspectionResponse.Data.Schema;
 	}
 
 	public static async Task Overlay(CompilationUnitSyntax overlay, string outputDirectory)
 	{
-		await using StreamWriter writer = File.CreateText(Path.Combine(outputDirectory, "Generated.cs"));
+		await using StreamWriter writer = System.IO.File.CreateText(Path.Combine(outputDirectory, "Generated.cs"));
 		overlay.NormalizeWhitespace("\t", "\n").WriteTo(writer);
 	}
 }

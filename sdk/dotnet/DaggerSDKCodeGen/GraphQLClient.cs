@@ -25,7 +25,7 @@ static class Bootstrap
 				)
 				{
 					string maybeExecutablePath = Path.Combine(directory, "bin", "dagger");
-					if (File.Exists(maybeExecutablePath))
+					if (System.IO.File.Exists(maybeExecutablePath))
 					{
 						executablePath = maybeExecutablePath;
 						break;
