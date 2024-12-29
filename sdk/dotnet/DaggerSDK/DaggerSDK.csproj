@@ -17,6 +17,7 @@
     <RepositoryUrl>https://github.com/M-Pixel/dagger</RepositoryUrl>
     <RepositoryType>Git</RepositoryType>
     <PackageIcon>dagger-icon.png</PackageIcon>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
