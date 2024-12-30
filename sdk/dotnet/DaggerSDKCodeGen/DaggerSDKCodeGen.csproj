@@ -8,6 +8,7 @@
     <LangVersion>12</LangVersion>
     <AssemblyName>Dagger.CodeGen</AssemblyName>
     <RootNamespace>Dagger</RootNamespace>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
