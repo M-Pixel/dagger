@@ -39,10 +39,10 @@ abstract class Generator
 
 	public static async Task<Schema> Introspect(IGraphQLClient client)
 	{
-		GraphQLResponse<Response> introspectionResponse = await client.SendQueryAsync<Response>
-		(
-			await System.IO.File.ReadAllTextAsync("../../../cmd/codegen/introspection/introspection.graphql")
-		);
+		await using Stream stdin = Console.OpenStandardInput();
+		using StreamReader queryReader = new(stdin);
+		GraphQLResponse<Response> introspectionResponse =
+			await client.SendQueryAsync<Response>(await queryReader.ReadToEndAsync());
 		return introspectionResponse.Data.Schema;
 	}
 
