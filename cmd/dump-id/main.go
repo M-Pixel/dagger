@@ -5,10 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/dagger/dagger/dagql/idproto"
+	"github.com/dagger/dagger/dagql/call"
 	"github.com/dagger/dagger/dagql/idtui"
-	"github.com/vito/progrock"
-	"github.com/vito/progrock/ui"
 )
 
 func main() {
@@ -16,12 +14,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	var idp idproto.ID
+	var idp call.ID
 	if err := idp.Decode(strings.TrimSpace(string(bytes))); err != nil {
 		panic(err)
 	}
-	out := ui.NewOutput(os.Stdout)
-	if err := idtui.DebugRenderID(out, progrock.DefaultUI(), &idp, 0); err != nil {
+
+	if err := new(idtui.Dump).DumpID(idtui.NewOutput(os.Stdout), &idp); err != nil {
 		panic(err)
 	}
 }

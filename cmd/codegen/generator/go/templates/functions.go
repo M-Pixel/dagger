@@ -19,47 +19,54 @@ import (
 func GoTemplateFuncs(
 	ctx context.Context,
 	schema *introspection.Schema,
+	schemaVersion string,
 	moduleName string,
+	moduleParent string,
 	pkg *packages.Package,
 	fset *token.FileSet,
 	pass int,
 ) template.FuncMap {
 	return goTemplateFuncs{
-		CommonFunctions: generator.NewCommonFunctions(&FormatTypeFunc{}),
+		CommonFunctions: generator.NewCommonFunctions(schemaVersion, &FormatTypeFunc{}),
 		ctx:             ctx,
 		moduleName:      moduleName,
+		moduleParent:    moduleParent,
 		modulePkg:       pkg,
 		moduleFset:      fset,
 		schema:          schema,
+		schemaVersion:   schemaVersion,
 		pass:            pass,
 	}.FuncMap()
 }
 
 type goTemplateFuncs struct {
 	*generator.CommonFunctions
-	ctx        context.Context
-	moduleName string
-	modulePkg  *packages.Package
-	moduleFset *token.FileSet
-	schema     *introspection.Schema
-	pass       int
+	ctx           context.Context
+	moduleName    string
+	moduleParent  string
+	modulePkg     *packages.Package
+	moduleFset    *token.FileSet
+	schema        *introspection.Schema
+	schemaVersion string
+	pass          int
 }
 
 func (funcs goTemplateFuncs) FuncMap() template.FuncMap {
 	return template.FuncMap{
 		// common
-		"FormatReturnType": funcs.FormatReturnType,
-		"FormatInputType":  funcs.FormatInputType,
-		"FormatOutputType": funcs.FormatOutputType,
-		"GetArrayField":    funcs.GetArrayField,
-		"IsListOfObject":   funcs.IsListOfObject,
-		"ToLowerCase":      funcs.ToLowerCase,
-		"ToUpperCase":      funcs.ToUpperCase,
-		"ConvertID":        funcs.ConvertID,
-		"IsSelfChainable":  funcs.IsSelfChainable,
-		"IsIDableObject":   funcs.IsIDableObject,
-		"InnerType":        funcs.InnerType,
-		"ObjectName":       funcs.ObjectName,
+		"FormatReturnType":          funcs.FormatReturnType,
+		"FormatInputType":           funcs.FormatInputType,
+		"FormatOutputType":          funcs.FormatOutputType,
+		"GetArrayField":             funcs.GetArrayField,
+		"IsListOfObject":            funcs.IsListOfObject,
+		"ToLowerCase":               funcs.ToLowerCase,
+		"ToUpperCase":               funcs.ToUpperCase,
+		"ConvertID":                 funcs.ConvertID,
+		"IsSelfChainable":           funcs.IsSelfChainable,
+		"IsIDableObject":            funcs.IsIDableObject,
+		"InnerType":                 funcs.InnerType,
+		"ObjectName":                funcs.ObjectName,
+		"CheckVersionCompatibility": funcs.CheckVersionCompatibility,
 
 		// go specific
 		"Comment":                 funcs.comment,
@@ -69,6 +76,8 @@ func (funcs goTemplateFuncs) FuncMap() template.FuncMap {
 		"SortEnumFields":          funcs.sortEnumFields,
 		"FieldOptionsStructName":  funcs.fieldOptionsStructName,
 		"FieldFunction":           funcs.fieldFunction,
+		"IsArgOptional":           funcs.isArgOptional,
+		"HasOptionals":            funcs.hasOptionals,
 		"IsEnum":                  funcs.isEnum,
 		"IsPointer":               funcs.isPointer,
 		"FormatArrayField":        funcs.formatArrayField,
@@ -76,6 +85,7 @@ func (funcs goTemplateFuncs) FuncMap() template.FuncMap {
 		"IsPartial":               funcs.isPartial,
 		"IsModuleCode":            funcs.isModuleCode,
 		"ModuleMainSrc":           funcs.moduleMainSrc,
+		"ModuleRelPath":           funcs.moduleRelPath,
 	}
 }
 
@@ -111,7 +121,7 @@ func (funcs goTemplateFuncs) formatDeprecation(s string) string {
 func (funcs goTemplateFuncs) isEnum(t introspection.Type) bool {
 	return t.Kind == introspection.TypeKindEnum &&
 		// We ignore the internal GraphQL enums
-		!strings.HasPrefix(t.Name, "__")
+		!strings.HasPrefix(t.Name, "_")
 }
 
 // isPointer returns true if value is a pointer.
@@ -139,10 +149,14 @@ func formatName(s string) string {
 }
 
 // formatEnum formats a GraphQL Enum value into a Go equivalent
-// Example: `fooId` -> `FooID`
-func (funcs goTemplateFuncs) formatEnum(s string) string {
-	s = strings.ToLower(s)
-	return strcase.ToCamel(s)
+// Example: `FOO_VALUE` -> `FooValue`, `FooValue` -> `FooValue`
+func (funcs goTemplateFuncs) formatEnum(parent string, s string) string {
+	if parent == "" {
+		// legacy path - terrible, removes all the casing :(
+		s = strings.ToLower(s)
+	}
+	s = strcase.ToCamel(s)
+	return parent + s
 }
 
 func (funcs goTemplateFuncs) sortEnumFields(s []introspection.EnumValue) []introspection.EnumValue {
@@ -183,9 +197,34 @@ func (funcs goTemplateFuncs) fieldOptionsStructName(f introspection.Field, scope
 	return scope + formatName(f.ParentObject.Name) + formatName(f.Name) + "Opts"
 }
 
+// hasOptionals returns true if a field has optional arguments
+//
+// Note: This is only necessary to simplify backwards compatibility of a breaking change.
+func (funcs goTemplateFuncs) hasOptionals(i introspection.InputValues) bool {
+	if funcs.CheckVersionCompatibility("v0.13.0") {
+		return i.HasOptionals()
+	}
+	for _, v := range i {
+		if funcs.isArgOptional(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// isArgOptional returns true if a field argument is optional
+//
+// Note: This is only necessary to simplify backwards compatibility of a breaking change.
+func (funcs goTemplateFuncs) isArgOptional(arg introspection.InputValue) bool {
+	if funcs.CheckVersionCompatibility("v0.13.0") {
+		return arg.IsOptional()
+	}
+	return arg.TypeRef.IsOptional()
+}
+
 // fieldFunction converts a field into a function signature
 // Example: `contents: String!` -> `func (r *File) Contents(ctx context.Context) (string, error)`
-func (funcs goTemplateFuncs) fieldFunction(f introspection.Field, topLevel bool, scopes ...string) (string, error) {
+func (funcs goTemplateFuncs) fieldFunction(f introspection.Field, topLevel bool, supportsVoid bool, scopes ...string) (string, error) {
 	// don't create methods on query for the env itself,
 	// e.g. don't create `func (r *DAG) Go() *Go` in the Go env's codegen
 	// TODO(vito): still needed? we codegen against the module's schema view,
@@ -210,7 +249,7 @@ func (funcs goTemplateFuncs) fieldFunction(f introspection.Field, topLevel bool,
 		args = append(args, "ctx context.Context")
 	}
 	for _, arg := range f.Args {
-		if arg.TypeRef.IsOptional() {
+		if funcs.isArgOptional(arg) {
 			continue
 		}
 
@@ -232,7 +271,7 @@ func (funcs goTemplateFuncs) fieldFunction(f introspection.Field, topLevel bool,
 	}
 
 	// Options (e.g. DirectoryContentsOptions -> <Object><Field>Options)
-	if f.Args.HasOptionals() {
+	if funcs.hasOptionals(f.Args) {
 		args = append(
 			args,
 			fmt.Sprintf("opts ...%s", funcs.fieldOptionsStructName(f, scopes...)),
@@ -244,9 +283,12 @@ func (funcs goTemplateFuncs) fieldFunction(f introspection.Field, topLevel bool,
 	if err != nil {
 		return "", err
 	}
-	if f.TypeRef.IsScalar() || f.TypeRef.IsList() {
+	switch {
+	case supportsVoid && f.TypeRef.IsVoid():
+		retType = "error"
+	case f.TypeRef.IsScalar() || f.TypeRef.IsList():
 		retType = fmt.Sprintf("(%s, error)", retType)
-	} else {
+	default:
 		retType = "*" + retType
 	}
 	signature += " " + retType

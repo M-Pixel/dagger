@@ -1,19 +1,19 @@
-import { object, func, field } from "@dagger.io/dagger"
+import { object, func } from "@dagger.io/dagger";
 
-@object
-class Test {
-  @func
+@object()
+export class Test {
+  @func()
   fn(): CustomObject {
-    return new CustomObject("NOOOO!!!!")
+    return new CustomObject("NOOOO!!!!");
   }
 }
 
-@object
-class CustomObject {
-  @field
-  ID: string
+@object()
+export class CustomObject {
+  @func()
+  ID: string;
 
   constructor(id: string) {
-    this.ID = id
+    this.ID = id;
   }
 }

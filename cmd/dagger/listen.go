@@ -3,17 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"os"
 	"time"
 
-	"dagger.io/dagger"
-	"github.com/dagger/dagger/engine/client"
 	"github.com/rs/cors"
 	"github.com/spf13/cobra"
-	"github.com/vito/progrock"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
+
+	"dagger.io/dagger"
+	"github.com/dagger/dagger/engine/client"
 )
 
 var (
@@ -23,7 +25,7 @@ var (
 )
 
 var listenCmd = &cobra.Command{
-	Use:     "listen",
+	Use:     "listen [options]",
 	Aliases: []string{"l"},
 	RunE:    optionalModCmdWrapper(Listen, os.Getenv("DAGGER_SESSION_TOKEN")),
 	Hidden:  true,
@@ -36,16 +38,8 @@ func init() {
 	listenCmd.Flags().BoolVar(&allowCORS, "allow-cors", false, "allow Cross-Origin Resource Sharing (CORS) requests")
 }
 
-func Listen(ctx context.Context, engineClient *client.Client, _ *dagger.Module, _ *cobra.Command, _ []string) error {
-	rec := progrock.FromContext(ctx)
-
-	var stderr io.Writer
-	if silent {
-		stderr = os.Stderr
-	} else {
-		vtx := rec.Vertex("listen", "listen")
-		stderr = vtx.Stderr()
-	}
+func Listen(ctx context.Context, engineClient *client.Client, _ *dagger.Module, cmd *cobra.Command, _ []string) error {
+	stderr := cmd.OutOrStderr()
 
 	sessionL, err := net.Listen("tcp", listenAddress)
 	if err != nil {
@@ -54,14 +48,28 @@ func Listen(ctx context.Context, engineClient *client.Client, _ *dagger.Module, 
 	defer sessionL.Close()
 
 	var handler http.Handler = engineClient
+
 	if allowCORS {
 		handler = cors.AllowAll().Handler(handler)
 	}
+
+	handler = otelhttp.NewHandler(handler, "listen", otelhttp.WithSpanNameFormatter(func(o string, r *http.Request) string {
+		return fmt.Sprintf("%s: HTTP %s %s", o, r.Method, r.URL.Path)
+	}))
+
+	http2Srv := &http2.Server{}
+	handler = h2c.NewHandler(handler, http2Srv)
 
 	srv := &http.Server{
 		Handler: handler,
 		// Gosec G112: prevent slowloris attacks
 		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext: func(_ net.Listener) context.Context {
+			return ctx
+		},
+	}
+	if err := http2.ConfigureServer(srv, http2Srv); err != nil {
+		return fmt.Errorf("http2 server configuration: %w", err)
 	}
 
 	go func() {

@@ -1,3 +1,4 @@
+import pathlib
 from datetime import datetime
 from textwrap import dedent
 
@@ -12,22 +13,17 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(scope="module")
-def anyio_backend():
-    return "asyncio"
-
-
 @pytest.fixture(autouse=True, scope="module")
 async def _connection():
     async with dagger.connection(dagger.Config(retry=None)):
         yield
 
 
-async def test_container():
-    alpine = dag.container().from_("alpine:3.16.2")
+async def test_container(alpine_image: str, alpine_version: str):
+    alpine = dag.container().from_(alpine_image)
     version = await alpine.with_exec(["cat", "/etc/alpine-release"]).stdout()
 
-    assert version == "3.16.2\n"
+    assert version == f"{alpine_version}\n"
 
 
 async def test_git_repository():
@@ -41,16 +37,16 @@ async def test_container_build():
     repo = dag.git("https://github.com/dagger/dagger").tag("v0.3.0").tree()
     dagger_img = dag.container().build(repo)
 
-    out = await dagger_img.with_exec(["version"]).stdout()
+    out = await dagger_img.with_exec(["dagger", "version"]).stdout()
 
     words = out.strip().split(" ")
 
     assert words[0] == "dagger"
 
 
-async def test_input_arg():
-    dockerfile = """\
-    FROM alpine:3.16.2
+async def test_input_arg(alpine_image: str):
+    dockerfile = f"""\
+    FROM {alpine_image}
     ARG SPAM=spam
     ENV SPAM=$SPAM
     CMD printenv
@@ -61,6 +57,7 @@ async def test_input_arg():
             dag.directory().with_new_file("Dockerfile", dockerfile),
             build_args=[dagger.BuildArg("SPAM", "egg")],
         )
+        .with_exec([])
         .stdout()
     )
     assert "SPAM=egg" in out
@@ -73,10 +70,10 @@ async def test_optionals_in_input_fields():
 
 
 @pytest.mark.parametrize("val", ["spam", ""])
-async def test_container_with_env_variable(val):
+async def test_container_with_env_variable(alpine_image: str, val: str):
     out = await (
         dag.container()
-        .from_("alpine:3.16.2")
+        .from_(alpine_image)
         .with_env_variable("FOO", val)
         .with_exec(["sh", "-c", "echo -n $FOO"])
         .stdout()
@@ -84,16 +81,14 @@ async def test_container_with_env_variable(val):
     assert out == val
 
 
-async def test_container_with_mounted_directory():
+async def test_container_with_mounted_directory(alpine_image: str):
     dir_ = (
         dag.directory()
         .with_new_file("hello.txt", "Hello, world!")
         .with_new_file("goodbye.txt", "Goodbye, world!")
     )
 
-    container = (
-        dag.container().from_("alpine:3.16.2").with_mounted_directory("/mnt", dir_)
-    )
+    container = dag.container().from_(alpine_image).with_mounted_directory("/mnt", dir_)
 
     out = await container.with_exec(["ls", "/mnt"]).stdout()
 
@@ -105,13 +100,13 @@ async def test_container_with_mounted_directory():
     )
 
 
-async def test_container_with_mounted_cache():
+async def test_container_with_mounted_cache(alpine_image: str):
     cache_key = "example-cache"
     filename = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     container = (
         dag.container()
-        .from_("alpine:3.16.2")
+        .from_(alpine_image)
         .with_mounted_cache("/cache", dag.cache_volume(cache_key))
     )
 
@@ -146,13 +141,13 @@ async def test_host_directory():
     assert "Dagger" in readme
 
 
-async def test_object_sequence(tmp_path):
+async def test_object_sequence(alpine_image: str, tmp_path: pathlib.Path):
     # Test that a sequence of objects doesn't fail.
     # In this case, we're using Container.export's
     # platform_variants which is a Sequence[Container].
     variants = [
         dag.container(platform=dagger.Platform(platform))
-        .from_("alpine:3.16.2")
+        .from_(alpine_image)
         .with_exec(["uname", "-m"])
         for platform in ("linux/amd64", "linux/arm64")
     ]
@@ -162,7 +157,7 @@ async def test_object_sequence(tmp_path):
     )
 
 
-async def test_container_with():
+async def test_container_with(alpine_image: str):
     def env(ctr: dagger.Container):
         return ctr.with_env_variable("FOO", "bar")
 
@@ -174,7 +169,7 @@ async def test_container_with():
 
     await (
         dag.container()
-        .from_("alpine:3.16.2")
+        .from_(alpine_image)
         .with_(env)
         .with_(secret("baz"))
         .with_exec(["sh", "-c", "test $FOO = bar && test $TOKEN = baz"])
@@ -182,8 +177,8 @@ async def test_container_with():
     )
 
 
-async def test_container_sync():
-    base = dag.container().from_("alpine:3.16.2")
+async def test_container_sync(alpine_image: str):
+    base = dag.container().from_(alpine_image)
 
     # short cirtcut
     with pytest.raises(dagger.QueryError, match="foobar"):
@@ -194,8 +189,8 @@ async def test_container_sync():
     assert out == "spam\n"
 
 
-async def test_container_awaitable():
-    base = dag.container().from_("alpine:3.16.2")
+async def test_container_awaitable(alpine_image: str):
+    base = dag.container().from_(alpine_image)
 
     # short cirtcut
     with pytest.raises(dagger.QueryError, match="foobar"):
@@ -220,31 +215,6 @@ async def test_directory_sync():
     assert entries == ["foo"]
 
 
-async def test_return_list_of_objects():
-    envs = await dag.container().from_("alpine:3.16.2").env_variables()
+async def test_return_list_of_objects(alpine_image: str):
+    envs = await dag.container().from_(alpine_image).env_variables()
     assert await envs[0].name() == "PATH"
-
-
-async def test_env_variable_set(mocker):
-    """Check if private properties can be set manually."""
-    ctx = mocker.MagicMock()
-    ctx.select.return_value = ctx
-    ctx.execute = mocker.AsyncMock(return_value="BAR")
-
-    env_var = dagger.EnvVariable(ctx)
-    env_var._name = "FOO"
-    env_var._value = "foo"
-
-    ctx.select.assert_not_called()
-    assert await env_var.name() == "FOO"
-    assert await env_var.value() == "foo"
-
-
-async def test_env_variable_empty(mocker):
-    """Check if private properties don't interrupt normal flow if not set."""
-    ctx = mocker.MagicMock()
-    ctx.select.return_value = ctx
-    ctx.execute = mocker.AsyncMock(return_value="BAR")
-
-    env_var = dagger.EnvVariable(ctx)
-    assert await env_var.name() == "BAR"

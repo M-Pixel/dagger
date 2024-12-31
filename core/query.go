@@ -4,67 +4,102 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/containerd/containerd/content"
+	bkclient "github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/util/leaseutil"
+	"github.com/vektah/gqlparser/v2/ast"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/dagger/dagger/auth"
-	"github.com/dagger/dagger/core/pipeline"
 	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
+	"github.com/dagger/dagger/dagql/call"
 	"github.com/dagger/dagger/engine"
 	"github.com/dagger/dagger/engine/buildkit"
-	"github.com/moby/buildkit/util/leaseutil"
-	"github.com/opencontainers/go-digest"
-	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/dagger/dagger/engine/server/resource"
 )
 
 // Query forms the root of the DAG and houses all necessary state and
 // dependencies for evaluating queries.
 type Query struct {
-	Buildkit *buildkit.Client
-
-	// The current pipeline.
-	Pipeline pipeline.Path
-
-	ProgrockSocketPath string
-
-	Services *Services
-
-	Secrets *SecretStore
-
-	Auth *auth.RegistryAuthProvider
-
-	OCIStore     content.Store
-	LeaseManager *leaseutil.Manager
-
-	// The default platform.
-	Platform Platform
-
-	// The default deps of every user module (currently just core)
-	DefaultDeps *ModDeps
-
-	// The DagQL query cache.
-	Cache dagql.Cache
-
-	// The metadata of client calls.
-	// For the special case of the main client caller, the key is just empty string.
-	// This is never explicitly deleted from; instead it will just be garbage collected
-	// when this server for the session shuts down
-	clientCallContext map[digest.Digest]*ClientCallContext
-	clientCallMu      *sync.RWMutex
-
-	// the http endpoints being served (as a map since APIs like shellEndpoint can add more)
-	endpoints  map[string]http.Handler
-	endpointMu *sync.RWMutex
+	Server
 }
 
-func NewRoot() *Query {
-	return &Query{
-		clientCallContext: map[digest.Digest]*ClientCallContext{},
-		clientCallMu:      &sync.RWMutex{},
-		endpoints:         map[string]http.Handler{},
-		endpointMu:        &sync.RWMutex{},
-	}
+var ErrNoCurrentModule = fmt.Errorf("no current module")
+
+// APIs from the server+session+client that are needed by core APIs
+type Server interface {
+	// Stitch in the given module to the list being served to the current client
+	ServeModule(context.Context, *Module) error
+
+	// If the current client is coming from a function, return the module that function is from
+	CurrentModule(context.Context) (*Module, error)
+
+	// If the current client is coming from a function, return the function call metadata
+	CurrentFunctionCall(context.Context) (*FunctionCall, error)
+
+	// Return the list of deps being served to the current client
+	CurrentServedDeps(context.Context) (*ModDeps, error)
+
+	// The ClientID of the main client caller (i.e. the one who created the session, typically the CLI
+	// invoked by the user)
+	MainClientCallerID(context.Context) (string, error)
+
+	// The default deps of every user module (currently just core)
+	DefaultDeps(context.Context) (*ModDeps, error)
+
+	// The DagQL query cache for the current client's session
+	Cache(context.Context) (dagql.Cache, error)
+
+	// Mix in this http endpoint+handler to the current client's session
+	MuxEndpoint(context.Context, string, http.Handler) error
+
+	// The secret store for the current client
+	Secrets(context.Context) (*SecretStore, error)
+
+	// The socket store for the current client
+	Sockets(context.Context) (*SocketStore, error)
+
+	// Add client-isolated resources like secrets, sockets, etc. to the current client's session based
+	// on anything embedded in the given ID. skipTopLevel, if true, will result in the leaf selection
+	// of the ID to be skipped when walking the ID to find these resources.
+	AddClientResourcesFromID(ctx context.Context, id *resource.ID, sourceClientID string, skipTopLevel bool) error
+
+	// The auth provider for the current client
+	Auth(context.Context) (*auth.RegistryAuthProvider, error)
+
+	// The buildkit APIs for the current client
+	Buildkit(context.Context) (*buildkit.Client, error)
+
+	// The services for the current client's session
+	Services(context.Context) (*Services, error)
+
+	// The default platform for the engine as a whole
+	Platform() Platform
+
+	// The content store for the engine as a whole
+	OCIStore() content.Store
+
+	// The lease manager for the engine as a whole
+	LeaseManager() *leaseutil.Manager
+
+	// Return all the cache entries in the local cache. No support for filtering yet.
+	EngineLocalCacheEntries(context.Context) (*EngineCacheEntrySet, error)
+
+	// Prune everything that is releasable in the local cache. No support for filtering yet.
+	PruneEngineLocalCacheEntries(context.Context) (*EngineCacheEntrySet, error)
+
+	// The default local cache policy to use for automatic local cache GC.
+	EngineLocalCachePolicy() bkclient.PruneInfo
+
+	// The nearest ancestor client that is not a module (either a caller from the host like the CLI
+	// or a nested exec). Useful for figuring out where local sources should be resolved from through
+	// chains of dependency modules.
+	NonModuleParentClientMetadata(context.Context) (*engine.ClientMetadata, error)
+}
+
+func NewRoot(srv Server) *Query {
+	return &Query{Server: srv}
 }
 
 func (*Query) Type() *ast.Type {
@@ -82,169 +117,14 @@ func (q Query) Clone() *Query {
 	return &q
 }
 
-func (q *Query) MuxEndpoint(ctx context.Context, path string, handler http.Handler) error {
-	q.endpointMu.Lock()
-	defer q.endpointMu.Unlock()
-	q.endpoints[path] = handler
-	return nil
-}
-
-func (q *Query) MuxEndpoints(mux *http.ServeMux) {
-	q.endpointMu.RLock()
-	defer q.endpointMu.RUnlock()
-	for path, handler := range q.endpoints {
-		mux.Handle(path, handler)
-	}
-}
-
-type ClientCallContext struct {
-	// the DAG of modules being served to this client
-	Deps *ModDeps
-
-	// If the client is itself from a function call in a user module, these are set with the
-	// metadata of that ongoing function call
-	ModID  *idproto.ID
-	FnCall *FunctionCall
-
-	ProgrockParent string
-}
-
-func (q *Query) ClientCallContext(clientDigest digest.Digest) (*ClientCallContext, bool) {
-	q.clientCallMu.RLock()
-	defer q.clientCallMu.RUnlock()
-	ctx, ok := q.clientCallContext[clientDigest]
-	return ctx, ok
-}
-
-func (q *Query) InstallDefaultClientContext(deps *ModDeps) {
-	q.clientCallMu.Lock()
-	defer q.clientCallMu.Unlock()
-
-	q.DefaultDeps = deps
-
-	q.clientCallContext[""] = &ClientCallContext{
-		Deps: deps,
-	}
-}
-
-func (q *Query) ServeModuleToMainClient(ctx context.Context, modMeta dagql.Instance[*Module]) error {
-	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
-	if err != nil {
-		return err
-	}
-	if clientMetadata.ModuleCallerDigest != "" {
-		return fmt.Errorf("cannot serve module to client %s", clientMetadata.ClientID)
-	}
-
-	mod := modMeta.Self
-
-	q.clientCallMu.Lock()
-	defer q.clientCallMu.Unlock()
-	callCtx, ok := q.clientCallContext[""]
-	if !ok {
-		return fmt.Errorf("client call not found")
-	}
-	callCtx.Deps = callCtx.Deps.Append(mod)
-	return nil
-}
-
-func (q *Query) RegisterFunctionCall(
-	dgst digest.Digest,
-	deps *ModDeps,
-	modID *idproto.ID,
-	call *FunctionCall,
-	progrockParent string,
-) error {
-	if dgst == "" {
-		return fmt.Errorf("cannot register function call with empty digest")
-	}
-
-	q.clientCallMu.Lock()
-	defer q.clientCallMu.Unlock()
-	_, ok := q.clientCallContext[dgst]
-	if ok {
-		return nil
-	}
-	q.clientCallContext[dgst] = &ClientCallContext{
-		Deps:           deps,
-		ModID:          modID,
-		FnCall:         call,
-		ProgrockParent: progrockParent,
-	}
-	return nil
-}
-
-func (q *Query) CurrentModule(ctx context.Context) (dagql.ID[*Module], error) {
-	var id dagql.ID[*Module]
-	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
-	if err != nil {
-		return id, err
-	}
-	if clientMetadata.ModuleCallerDigest == "" {
-		return id, fmt.Errorf("no current module for main client caller")
-	}
-
-	q.clientCallMu.RLock()
-	defer q.clientCallMu.RUnlock()
-	callCtx, ok := q.clientCallContext[clientMetadata.ModuleCallerDigest]
-	if !ok {
-		return id, fmt.Errorf("client call %s not found", clientMetadata.ModuleCallerDigest)
-	}
-	return dagql.NewID[*Module](callCtx.ModID), nil
-}
-
-func (q *Query) CurrentFunctionCall(ctx context.Context) (*FunctionCall, error) {
-	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if clientMetadata.ModuleCallerDigest == "" {
-		return nil, fmt.Errorf("no current function call for main client caller")
-	}
-
-	q.clientCallMu.RLock()
-	defer q.clientCallMu.RUnlock()
-	callCtx, ok := q.clientCallContext[clientMetadata.ModuleCallerDigest]
-	if !ok {
-		return nil, fmt.Errorf("client call %s not found", clientMetadata.ModuleCallerDigest)
-	}
-
-	return callCtx.FnCall, nil
-}
-
-func (q *Query) CurrentServedDeps(ctx context.Context) (*ModDeps, error) {
-	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	callCtx, ok := q.clientCallContext[clientMetadata.ModuleCallerDigest]
-	if !ok {
-		return nil, fmt.Errorf("client call %s not found", clientMetadata.ModuleCallerDigest)
-	}
-	return callCtx.Deps, nil
-}
-
-func (q *Query) WithPipeline(name, desc string, labels []pipeline.Label) *Query {
-	q = q.Clone()
-	q.Pipeline = q.Pipeline.Add(pipeline.Pipeline{
-		Name:        name,
-		Description: desc,
-		Labels:      labels,
-	})
-	return q
+func (q *Query) WithPipeline(name, desc string) *Query {
+	return q.Clone()
 }
 
 func (q *Query) NewContainer(platform Platform) *Container {
 	return &Container{
 		Query:    q,
 		Platform: platform,
-	}
-}
-
-func (q *Query) NewSecret(name string) *Secret {
-	return &Secret{
-		Query: q,
-		Name:  name,
 	}
 }
 
@@ -260,26 +140,28 @@ func (q *Query) NewModule() *Module {
 	}
 }
 
-func (q *Query) NewContainerService(ctr *Container) *Service {
+func (q *Query) NewContainerService(ctx context.Context, ctr *Container) *Service {
 	return &Service{
+		Creator:   trace.SpanContextFromContext(ctx),
 		Query:     q,
 		Container: ctr,
 	}
 }
 
-func (q *Query) NewTunnelService(upstream dagql.Instance[*Service], ports []PortForward) *Service {
+func (q *Query) NewTunnelService(ctx context.Context, upstream dagql.Instance[*Service], ports []PortForward) *Service {
 	return &Service{
+		Creator:        trace.SpanContextFromContext(ctx),
 		Query:          q,
 		TunnelUpstream: &upstream,
 		TunnelPorts:    ports,
 	}
 }
 
-func (q *Query) NewHostService(upstream string, ports []PortForward) *Service {
+func (q *Query) NewHostService(ctx context.Context, socks []*Socket) *Service {
 	return &Service{
-		Query:        q,
-		HostUpstream: upstream,
-		HostPorts:    ports,
+		Creator:     trace.SpanContextFromContext(ctx),
+		Query:       q,
+		HostSockets: socks,
 	}
 }
 
@@ -287,18 +169,38 @@ func (q *Query) NewHostService(upstream string, ports []PortForward) *Service {
 //
 // The returned ModDeps extends the inner DefaultDeps with all modules found in
 // the ID, loaded by using the DefaultDeps schema.
-func (q *Query) IDDeps(ctx context.Context, id *idproto.ID) (*ModDeps, error) {
-	bootstrap, err := q.DefaultDeps.Schema(ctx)
+func (q *Query) IDDeps(ctx context.Context, id *call.ID) (*ModDeps, error) {
+	defaultDeps, err := q.DefaultDeps(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("default deps: %w", err)
+	}
+
+	bootstrap, err := defaultDeps.Schema(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap schema: %w", err)
 	}
-	deps := q.DefaultDeps
+	deps := defaultDeps
 	for _, modID := range id.Modules() {
-		mod, err := dagql.NewID[*Module](modID).Load(ctx, bootstrap)
+		mod, err := dagql.NewID[*Module](modID.ID()).Load(ctx, bootstrap)
 		if err != nil {
 			return nil, fmt.Errorf("load source mod: %w", err)
 		}
 		deps = deps.Append(mod.Self)
 	}
 	return deps, nil
+}
+
+func (q *Query) RequireMainClient(ctx context.Context) error {
+	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get client metadata: %w", err)
+	}
+	mainClientCallerID, err := q.MainClientCallerID(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get main client caller ID: %w", err)
+	}
+	if clientMetadata.ClientID != mainClientCallerID {
+		return fmt.Errorf("only the main client can call this function")
+	}
+	return nil
 }

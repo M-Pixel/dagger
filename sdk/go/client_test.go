@@ -55,7 +55,7 @@ func TestGit(t *testing.T) {
 	readmeID, err := readmeFile.ID(ctx)
 	require.NoError(t, err)
 
-	otherReadme, err := c.File(readmeID).Contents(ctx)
+	otherReadme, err := c.LoadFileFromID(readmeID).Contents(ctx)
 	require.NoError(t, err)
 	require.Equal(t, readme, otherReadme)
 }
@@ -88,9 +88,7 @@ func TestContainer(t *testing.T) {
 	id, err := alpine.ID(ctx)
 	require.NoError(t, err)
 	contents, err = c.
-		Container(ContainerOpts{
-			ID: id,
-		}).
+		LoadContainerFromID(id).
 		File("/etc/alpine-release").
 		Contents(ctx)
 	require.NoError(t, err)
@@ -242,8 +240,6 @@ func TestExecError(t *testing.T) {
 		require.Equal(t, outMsg, exErr.Stdout)
 		require.Equal(t, errMsg, exErr.Stderr)
 
-		require.Contains(t, exErr.Error(), outMsg)
-		require.Contains(t, exErr.Error(), errMsg)
 		require.NotContains(t, exErr.Message(), outMsg)
 		require.NotContains(t, exErr.Message(), errMsg)
 

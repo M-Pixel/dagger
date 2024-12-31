@@ -51,3 +51,21 @@ $ elixir ci.exs
 ```
 
 Where `ci.exs` contains Elixir script above.
+
+## Using with Dagger Function
+
+The SDK support the Dagger Function by initiate it with:
+
+```shell
+$ dagger init --sdk=elixir <name>
+```
+
+**CAUTIONS**: Please note that `dagger` version 0.11.6 and earlier are not
+compatible with the runtime on `main` branch. If you are using `dagger` v0.11.6, please pin the sdk to `github.com/dagger/dagger/sdk/elixir/runtime@sdk/elixir/v0.11.6`
+instead.
+
+The SDK will generate 2 modules inside the `dagger` directory (or the destination defined
+by `--source` during call `dagger init`):
+
+1. The `dagger` SDK itself.
+2. The package `<name>` that contains your functions.

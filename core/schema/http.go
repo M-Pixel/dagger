@@ -3,12 +3,13 @@ package schema
 import (
 	"context"
 
+	"github.com/moby/buildkit/client/llb"
+	"github.com/opencontainers/go-digest"
+
 	"github.com/dagger/dagger/core"
 	"github.com/dagger/dagger/dagql"
 	"github.com/dagger/dagger/engine"
 	"github.com/dagger/dagger/engine/sources/httpdns"
-	"github.com/moby/buildkit/client/llb"
-	"github.com/opencontainers/go-digest"
 )
 
 var _ SchemaResolvers = &httpSchema{}
@@ -59,26 +60,11 @@ func (s *httpSchema) http(ctx context.Context, parent *core.Query, args httpArgs
 		llb.Filename(filename),
 	}
 
-	useDNS := len(svcs) > 0
-
 	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
-	if err == nil && !useDNS {
-		useDNS = len(clientMetadata.ParentClientIDs) > 0
+	if err != nil {
+		return nil, err
 	}
 
-	var st llb.State
-	if useDNS {
-		// NB: only configure search domains if we're directly using a service, or
-		// if we're nested.
-		//
-		// we have to be a bit selective here to avoid breaking Dockerfile builds
-		// that use a Buildkit frontend (# syntax = ...).
-		//
-		// TODO: add API cap
-		st = httpdns.State(args.URL, clientMetadata.ClientIDs(), opts...)
-	} else {
-		st = llb.HTTP(args.URL, opts...)
-	}
-
-	return core.NewFileSt(ctx, parent, st, filename, parent.Platform, svcs)
+	st := httpdns.HTTP(args.URL, clientMetadata.SessionID, opts...)
+	return core.NewFileSt(ctx, parent, st, filename, parent.Platform(), svcs)
 }

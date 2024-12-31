@@ -1,0 +1,12 @@
+{
+  "name": "typescript-sdk-dev",
+  "sdk": "typescript",
+  "dependencies": [
+    {
+      "name": "node",
+      "source": "node"
+    }
+  ],
+  "source": ".",
+  "engineVersion": "v0.12.7"
+}

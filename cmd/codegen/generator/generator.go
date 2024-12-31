@@ -24,23 +24,29 @@ const (
 )
 
 type Config struct {
-	// Language supported by this codegen infra.
+	// Lang is the language supported by this codegen infra.
 	Lang SDKLang
 
-	// Destination directory for generated code.
+	// OutputDir is the path to place generated code.
 	OutputDir string
 
-	// Name of the module to generate code for
-	ModuleName           string
-	ModuleSourceRootPath string
+	// ModuleName is the module name to generate code for.
+	ModuleName string
+	// ModuleContextPath is the subpath in OutputDir to where a module root can be found.
+	ModuleContextPath string
+	// ModuleParentPath is the path from the module root to the context directory
+	ModuleParentPath string
 
-	// Optional pre-computed introspection json string
+	// IntrospectionJSON is an optional pre-computed introspection json string.
 	IntrospectionJSON string
+
+	// Merge indicates whether to merge the module deps with the existing project.
+	Merge *bool
 }
 
 type Generator interface {
 	// Generate runs codegen and returns a map of default filename to content for that file.
-	Generate(ctx context.Context, schema *introspection.Schema) (*GeneratedState, error)
+	Generate(ctx context.Context, schema *introspection.Schema, schemaVersion string) (*GeneratedState, error)
 }
 
 type GeneratedState struct {
@@ -53,10 +59,10 @@ type GeneratedState struct {
 	// Go code.
 	PostCommands []*exec.Cmd
 
-	// NeedSync indicates that the code needs to be generated again. This can
-	// happen if the codegen spat out templates that depend on generated types.
-	// In that case the codegen needs to be run again with both the templates and
-	// the initially generated types available.
+	// NeedRegenerate indicates that the code needs to be generated again. This
+	// can happen if the codegen spat out templates that depend on generated
+	// types. In that case the codegen needs to be run again with both the
+	// templates and the initially generated types available.
 	NeedRegenerate bool
 }
 
@@ -70,7 +76,7 @@ func SetSchemaParents(schema *introspection.Schema) {
 }
 
 // Introspect gets the Dagger Schema
-func Introspect(ctx context.Context, dag *dagger.Client) (*introspection.Schema, error) {
+func Introspect(ctx context.Context, dag *dagger.Client) (*introspection.Schema, string, error) {
 	var introspectionResp introspection.Response
 	err := dag.Do(ctx, &dagger.Request{
 		Query:  introspection.Query,
@@ -79,10 +85,10 @@ func Introspect(ctx context.Context, dag *dagger.Client) (*introspection.Schema,
 		Data: &introspectionResp,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("introspection query: %w", err)
+		return nil, "", fmt.Errorf("introspection query: %w", err)
 	}
 
-	return introspectionResp.Schema, nil
+	return introspectionResp.Schema, introspectionResp.SchemaVersion, nil
 }
 
 func Overlay(ctx context.Context, logsW io.Writer, overlay fs.FS, outputDir string) (rerr error) {
@@ -92,6 +98,7 @@ func Overlay(ctx context.Context, logsW io.Writer, overlay fs.FS, outputDir stri
 		}
 		if d.IsDir() {
 			if _, err := os.Stat(filepath.Join(outputDir, path)); err == nil {
+				fmt.Fprintln(logsW, "creating directory", path, "[skipped]")
 				return nil
 			}
 			fmt.Fprintln(logsW, "creating directory", path)
@@ -113,11 +120,12 @@ func Overlay(ctx context.Context, logsW io.Writer, overlay fs.FS, outputDir stri
 			needsWrite = string(oldContent) != string(newContent)
 		}
 
-		if needsWrite {
-			fmt.Fprintln(logsW, "writing", path)
-			return os.WriteFile(outPath, newContent, 0o600)
+		if !needsWrite {
+			fmt.Fprintln(logsW, "writing", path, "[skipped]")
+			return nil
 		}
 
-		return nil
+		fmt.Fprintln(logsW, "writing", path)
+		return os.WriteFile(outPath, newContent, 0o600)
 	})
 }

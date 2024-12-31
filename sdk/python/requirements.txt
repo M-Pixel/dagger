@@ -1,4 +1,0 @@
--r requirements/proj.txt
--r requirements/docs.txt
--r requirements/lint.txt
--r requirements/test.txt

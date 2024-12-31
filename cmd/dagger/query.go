@@ -8,11 +8,12 @@ import (
 	"os"
 	"strings"
 
-	"dagger.io/dagger"
-	"github.com/dagger/dagger/engine/client"
 	"github.com/spf13/cobra"
-	"github.com/vito/progrock"
 	"golang.org/x/term"
+
+	"dagger.io/dagger"
+	"github.com/dagger/dagger/dagql/idtui"
+	"github.com/dagger/dagger/engine/client"
 )
 
 var (
@@ -22,7 +23,7 @@ var (
 )
 
 var queryCmd = &cobra.Command{
-	Use:     "query [flags] [OPERATION]",
+	Use:     "query [options] [operation]",
 	Aliases: []string{"q"},
 	Short:   "Send API queries to a dagger engine",
 	Long: `Send API queries to a dagger engine.
@@ -47,15 +48,18 @@ EOF
 	GroupID: execGroup.ID,
 	Args:    cobra.MaximumNArgs(1), // operation can be specified
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if isPrintTraceLinkEnabled(cmd.Annotations) {
+			cmd.SetContext(idtui.WithPrintTraceLink(cmd.Context(), true))
+		}
+
 		return optionalModCmdWrapper(Query, "")(cmd, args)
+	},
+	Annotations: map[string]string{
+		printTraceLinkKey: "true",
 	},
 }
 
-func Query(ctx context.Context, engineClient *client.Client, _ *dagger.Module, _ *cobra.Command, args []string) (rerr error) {
-	rec := progrock.FromContext(ctx)
-	vtx := rec.Vertex("query", "query", progrock.Focused())
-	defer func() { vtx.Done(rerr) }()
-
+func Query(ctx context.Context, engineClient *client.Client, _ *dagger.Module, cmd *cobra.Command, args []string) (rerr error) {
 	res, err := runQuery(ctx, engineClient, args)
 	if err != nil {
 		return err
@@ -64,16 +68,7 @@ func Query(ctx context.Context, engineClient *client.Client, _ *dagger.Module, _
 	if err != nil {
 		return err
 	}
-
-	var out io.Writer
-	if !term.IsTerminal(int(os.Stdout.Fd())) {
-		out = os.Stdout
-	} else {
-		out = vtx.Stdout()
-	}
-
-	fmt.Fprintf(out, "%s\n", result)
-
+	fmt.Fprintf(cmd.OutOrStdout(), "%s\n", result)
 	return nil
 }
 
@@ -128,37 +123,6 @@ func getKVInput(kvs []string) map[string]interface{} {
 }
 
 func init() {
-	// changing usage template so examples are displayed below flags
-	queryCmd.SetUsageTemplate(`Usage:{{if .Runnable}}
-  {{.UseLine}}{{end}}{{if .HasAvailableSubCommands}}
-  {{.CommandPath}} [command]{{end}}{{if gt (len .Aliases) 0}}
-
-Aliases:
-  {{.NameAndAliases}}{{end}}{{if .HasAvailableSubCommands}}{{$cmds := .Commands}}{{if eq (len .Groups) 0}}
-
-Available Commands:{{range $cmds}}{{if (or .IsAvailableCommand (eq .Name "help"))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{else}}{{range $group := .Groups}}
-
-{{.Title}}{{range $cmds}}{{if (and (eq .GroupID $group.ID) (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{if not .AllChildCommandsHaveGroup}}
-
-Additional Commands:{{range $cmds}}{{if (and (eq .GroupID "") (or .IsAvailableCommand (eq .Name "help")))}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}{{end}}{{end}}{{if .HasAvailableLocalFlags}}
-
-Flags:
-{{.LocalFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasAvailableInheritedFlags}}{{if .HasExample}}
-
-Examples:
-{{.Example}}{{end}}
-Global Flags:
-{{.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{if .HasHelpSubCommands}}
-
-Additional help topics:{{range .Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .CommandPath .CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}{{if .HasAvailableSubCommands}}
-
-Use "{{.CommandPath}} [command] --help" for more information about a command.{{end}}
-`)
-
 	queryCmd.Flags().StringVar(&queryFile, "doc", "", "Read query from file (defaults to reading from stdin)")
 	queryCmd.Flags().StringSliceVar(&queryVarsInput, "var", nil, "List of query variables, in key=value format")
 	queryCmd.Flags().StringVar(&queryVarsJSONInput, "var-json", "", "Query variables in JSON format (overrides --var)")

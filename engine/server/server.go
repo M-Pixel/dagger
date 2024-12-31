@@ -1,446 +1,637 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
-	"github.com/dagger/dagger/auth"
-	"github.com/dagger/dagger/core"
-	"github.com/dagger/dagger/core/pipeline"
-	"github.com/dagger/dagger/core/schema"
+	"github.com/containerd/containerd/content"
+	localcontentstore "github.com/containerd/containerd/content/local"
+	"github.com/containerd/containerd/diff/apply"
+	"github.com/containerd/containerd/diff/walking"
+	ctdmetadata "github.com/containerd/containerd/metadata"
+	"github.com/containerd/containerd/remotes/docker"
+	ctdsnapshot "github.com/containerd/containerd/snapshots"
+	"github.com/containerd/go-runc"
+	"github.com/containerd/platforms"
+	"github.com/dagger/dagger/engine/config"
+	controlapi "github.com/moby/buildkit/api/services/control"
+	apitypes "github.com/moby/buildkit/api/types"
+	bkcache "github.com/moby/buildkit/cache"
+	"github.com/moby/buildkit/cache/metadata"
+	"github.com/moby/buildkit/cache/remotecache"
+	"github.com/moby/buildkit/cache/remotecache/azblob"
+	"github.com/moby/buildkit/cache/remotecache/gha"
+	inlineremotecache "github.com/moby/buildkit/cache/remotecache/inline"
+	localremotecache "github.com/moby/buildkit/cache/remotecache/local"
+	registryremotecache "github.com/moby/buildkit/cache/remotecache/registry"
+	s3remotecache "github.com/moby/buildkit/cache/remotecache/s3"
+	bkclient "github.com/moby/buildkit/client"
+	bkconfig "github.com/moby/buildkit/cmd/buildkitd/config"
+	"github.com/moby/buildkit/executor/oci"
+	"github.com/moby/buildkit/frontend"
+	dockerfile "github.com/moby/buildkit/frontend/dockerfile/builder"
+	"github.com/moby/buildkit/frontend/gateway"
+	"github.com/moby/buildkit/frontend/gateway/forwarder"
+	bksession "github.com/moby/buildkit/session"
+	containerdsnapshot "github.com/moby/buildkit/snapshot/containerd"
+	"github.com/moby/buildkit/solver"
+	"github.com/moby/buildkit/solver/bboltcachestorage"
+	"github.com/moby/buildkit/solver/llbsolver/mounts"
+	"github.com/moby/buildkit/solver/pb"
+	"github.com/moby/buildkit/source"
+	srcgit "github.com/moby/buildkit/source/git"
+	srchttp "github.com/moby/buildkit/source/http"
+	"github.com/moby/buildkit/util/archutil"
+	"github.com/moby/buildkit/util/entitlements"
+	"github.com/moby/buildkit/util/leaseutil"
+	"github.com/moby/buildkit/util/network"
+	"github.com/moby/buildkit/util/network/cniprovider"
+	"github.com/moby/buildkit/util/network/netproviders"
+	"github.com/moby/buildkit/util/resolver"
+	"github.com/moby/buildkit/util/throttle"
+	"github.com/moby/buildkit/util/winlayers"
+	"github.com/moby/buildkit/version"
+	bkworker "github.com/moby/buildkit/worker"
+	"github.com/moby/buildkit/worker/base"
+	wlabel "github.com/moby/buildkit/worker/label"
+	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/sirupsen/logrus"
+	bolt "go.etcd.io/bbolt"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
+
 	"github.com/dagger/dagger/engine"
 	"github.com/dagger/dagger/engine/buildkit"
-	bksession "github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/util/bklog"
-	bkworker "github.com/moby/buildkit/worker"
-	"github.com/sirupsen/logrus"
-	"github.com/vito/progrock"
+	daggercache "github.com/dagger/dagger/engine/cache"
+	"github.com/dagger/dagger/engine/clientdb"
+	"github.com/dagger/dagger/engine/distconsts"
+	"github.com/dagger/dagger/engine/slog"
+	"github.com/dagger/dagger/engine/sources/blob"
+	"github.com/dagger/dagger/engine/sources/gitdns"
+	"github.com/dagger/dagger/engine/sources/httpdns"
+	"github.com/dagger/dagger/engine/sources/local"
 )
 
-type DaggerServer struct {
-	serverID string
-	bkClient *buildkit.Client
-	worker   bkworker.Worker
+const (
+	daggerCacheServiceURL = "https://api.dagger.cloud/magicache"
+)
 
-	schema      *schema.APIServer
-	recorder    *progrock.Recorder
-	progCleanup func() error
+type Server struct {
+	controlapi.UnimplementedControlServer
+	engineName string
 
-	doneCh    chan struct{}
-	closeOnce sync.Once
+	//
+	// state directory/db paths
+	//
 
-	connectedClients int
-	clientMu         sync.RWMutex
+	rootDir           string
+	solverCacheDBPath string
+
+	workerRootDir         string
+	snapshotterRootDir    string
+	contentStoreRootDir   string
+	containerdMetaDBPath  string
+	workerCacheMetaDBPath string
+	buildkitMountPoolDir  string
+	executorRootDir       string
+	clientDBDir           string
+
+	//
+	// buildkit+containerd entities/DBs
+	//
+
+	baseWorker            *base.Worker
+	worker                *buildkit.Worker
+	workerCacheMetaDB     *metadata.Store
+	workerCache           bkcache.Manager
+	workerSourceManager   *source.Manager
+	workerDefaultGCPolicy bkclient.PruneInfo
+
+	bkSessionManager *bksession.Manager
+
+	solver               *solver.Solver
+	solverCacheDB        *bboltcachestorage.Store
+	SolverCache          daggercache.Manager
+	containerdMetaBoltDB *bolt.DB
+	containerdMetaDB     *ctdmetadata.DB
+	localContentStore    content.Store
+	contentStore         *containerdsnapshot.Store
+
+	snapshotter     ctdsnapshot.Snapshotter
+	snapshotterName string
+	leaseManager    *leaseutil.Manager
+
+	frontends map[string]frontend.Frontend
+
+	cacheExporters map[string]remotecache.ResolveCacheExporterFunc
+	cacheImporters map[string]remotecache.ResolveCacheImporterFunc
+
+	//
+	// worker/executor-specific config+state
+	//
+
+	runc             *runc.Runc
+	cgroupParent     string
+	networkProviders map[pb.NetMode]network.Provider
+	processMode      oci.ProcessMode
+	dns              *oci.DNSConfig
+	apparmorProfile  string
+	selinux          bool
+	entitlements     entitlements.Set
+	parallelismSem   *semaphore.Weighted
+	enabledPlatforms []ocispecs.Platform
+	defaultPlatform  ocispecs.Platform
+	registryHosts    docker.RegistryHosts
+
+	//
+	// telemetry config+state
+	//
+
+	telemetryPubSub *PubSub
+	buildkitLogSink io.Writer
+
+	//
+	// gc related
+	//
+	throttledGC                  func()
+	throttledReleaseUnreferenced func()
+	gcmu                         sync.Mutex
+
+	//
+	// session+client state
+	//
+	daggerSessions   map[string]*daggerSession // session id -> session state
+	daggerSessionsMu sync.RWMutex
+	clientDBs        *clientdb.DBs
 }
 
-func NewDaggerServer(
-	ctx context.Context,
-	bkClient *buildkit.Client,
-	worker bkworker.Worker,
-	caller bksession.Caller,
-	serverID string,
-	secretStore *core.SecretStore,
-	authProvider *auth.RegistryAuthProvider,
-	rootLabels []pipeline.Label,
-) (*DaggerServer, error) {
-	srv := &DaggerServer{
-		serverID: serverID,
-		bkClient: bkClient,
-		worker:   worker,
-		doneCh:   make(chan struct{}, 1),
+type NewServerOpts struct {
+	Name           string
+	Config         *config.Config
+	BuildkitConfig *bkconfig.Config
+}
+
+//nolint:gocyclo
+func NewServer(ctx context.Context, opts *NewServerOpts) (*Server, error) {
+	cfg := opts.Config
+	bkcfg := opts.BuildkitConfig
+	ociCfg := bkcfg.Workers.OCI
+
+	srv := &Server{
+		engineName: opts.Name,
+
+		rootDir: bkcfg.Root,
+
+		frontends: map[string]frontend.Frontend{},
+
+		cgroupParent:    ociCfg.DefaultCgroupParent,
+		processMode:     oci.ProcessSandbox,
+		apparmorProfile: ociCfg.ApparmorProfile,
+		selinux:         ociCfg.SELinux,
+		entitlements:    entitlements.Set{},
+		dns: &oci.DNSConfig{
+			Nameservers:   bkcfg.DNS.Nameservers,
+			Options:       bkcfg.DNS.Options,
+			SearchDomains: bkcfg.DNS.SearchDomains,
+		},
+
+		daggerSessions: make(map[string]*daggerSession),
 	}
 
-	clientConn := caller.Conn()
-	progClient := progrock.NewProgressServiceClient(clientConn)
-	progUpdates, err := progClient.WriteUpdates(ctx)
+	//
+	// setup directories and paths
+	//
+
+	var err error
+	srv.rootDir, err = filepath.Abs(srv.rootDir)
+	if err != nil {
+		return nil, err
+	}
+	srv.rootDir, err = filepath.EvalSymlinks(srv.rootDir)
+	if err != nil {
+		return nil, err
+	}
+	srv.solverCacheDBPath = filepath.Join(srv.rootDir, "cache.db")
+
+	srv.workerRootDir = filepath.Join(srv.rootDir, "worker")
+	if err := os.MkdirAll(srv.workerRootDir, 0700); err != nil {
+		return nil, err
+	}
+	srv.snapshotterRootDir = filepath.Join(srv.workerRootDir, "snapshots")
+	srv.contentStoreRootDir = filepath.Join(srv.workerRootDir, "content")
+	srv.containerdMetaDBPath = filepath.Join(srv.workerRootDir, "containerdmeta.db")
+	srv.workerCacheMetaDBPath = filepath.Join(srv.workerRootDir, "metadata_v2.db")
+	srv.buildkitMountPoolDir = filepath.Join(srv.workerRootDir, "cachemounts")
+
+	srv.executorRootDir = filepath.Join(srv.workerRootDir, "executor")
+	if err := os.MkdirAll(srv.executorRootDir, 0o711); err != nil {
+		return nil, err
+	}
+	// clean up old hosts/resolv.conf file. ignore errors
+	os.RemoveAll(filepath.Join(srv.executorRootDir, "hosts"))
+	os.RemoveAll(filepath.Join(srv.executorRootDir, "resolv.conf"))
+
+	// set up client DBs, and the telemetry pub/sub which writes to it
+	srv.clientDBDir = filepath.Join(srv.workerRootDir, "clientdbs")
+	srv.clientDBs = clientdb.NewDBs(srv.clientDBDir)
+	srv.telemetryPubSub = NewPubSub(srv)
+
+	//
+	// setup config derived from engine config
+	//
+
+	for _, entStr := range bkcfg.Entitlements {
+		ent, err := entitlements.Parse(entStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse entitlement %s: %w", entStr, err)
+		}
+		srv.entitlements[ent] = struct{}{}
+	}
+	if cfg.Security.InsecureRootCapabilities != nil {
+		// override from engine.toml if we set it in *our* config
+		if *cfg.Security.InsecureRootCapabilities {
+			srv.entitlements[entitlements.EntitlementSecurityInsecure] = struct{}{}
+		} else {
+			delete(srv.entitlements, entitlements.EntitlementSecurityInsecure)
+		}
+	}
+
+	srv.defaultPlatform = platforms.Normalize(platforms.DefaultSpec())
+	if platformsStr := ociCfg.Platforms; len(platformsStr) != 0 {
+		var err error
+		srv.enabledPlatforms, err = parsePlatforms(platformsStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid platforms: %w", err)
+		}
+	}
+	if len(srv.enabledPlatforms) == 0 {
+		srv.enabledPlatforms = []ocispecs.Platform{srv.defaultPlatform}
+	}
+
+	srv.registryHosts = resolver.NewRegistryConfig(bkcfg.Registries)
+
+	if slog.Default().Enabled(ctx, slog.LevelExtraDebug) {
+		srv.buildkitLogSink = os.Stderr
+	}
+
+	//
+	// setup various buildkit/containerd entities and DBs
+	//
+
+	srv.bkSessionManager, err = bksession.NewManager()
 	if err != nil {
 		return nil, err
 	}
 
-	progWriter, progCleanup, err := buildkit.ProgrockForwarder(bkClient.ProgSockPath, progrock.MultiWriter{
-		progrock.NewRPCWriter(clientConn, progUpdates),
-		buildkit.ProgrockLogrusWriter{},
+	srv.snapshotter, srv.snapshotterName, err = newSnapshotter(srv.snapshotterRootDir, ociCfg, srv.bkSessionManager, srv.registryHosts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create snapshotter: %w", err)
+	}
+
+	srv.localContentStore, err = localcontentstore.NewStore(srv.contentStoreRootDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create content store: %w", err)
+	}
+
+	srv.containerdMetaBoltDB, err = bolt.Open(srv.containerdMetaDBPath, 0644, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open metadata db: %w", err)
+	}
+
+	srv.containerdMetaDB = ctdmetadata.NewDB(srv.containerdMetaBoltDB, srv.localContentStore, map[string]ctdsnapshot.Snapshotter{
+		srv.snapshotterName: srv.snapshotter,
+	})
+	if err := srv.containerdMetaDB.Init(context.TODO()); err != nil {
+		return nil, fmt.Errorf("failed to init metadata db: %w", err)
+	}
+
+	srv.leaseManager = leaseutil.WithNamespace(ctdmetadata.NewLeaseManager(srv.containerdMetaDB), "buildkit")
+	srv.workerCacheMetaDB, err = metadata.NewStore(srv.workerCacheMetaDBPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metadata store: %w", err)
+	}
+
+	srv.contentStore = containerdsnapshot.NewContentStore(srv.containerdMetaDB.ContentStore(), "buildkit")
+
+	//
+	// setup worker+executor
+	//
+
+	srv.runc = &runc.Runc{
+		Command:      distconsts.RuncPath,
+		Log:          filepath.Join(srv.executorRootDir, "runc-log.json"),
+		LogFormat:    runc.JSON,
+		Setpgid:      true,
+		PdeathSignal: syscall.SIGKILL,
+	}
+
+	var npResolvedMode string
+	srv.networkProviders, npResolvedMode, err = netproviders.Providers(netproviders.Opt{
+		Mode: bkcfg.Workers.OCI.NetworkConfig.Mode,
+		CNI: cniprovider.Opt{
+			Root:       srv.rootDir,
+			ConfigPath: bkcfg.Workers.OCI.CNIConfigPath,
+			BinaryDir:  bkcfg.Workers.OCI.CNIBinaryPath,
+			PoolSize:   bkcfg.Workers.OCI.CNIPoolSize,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create network providers: %w", err)
+	}
+
+	if ociCfg.MaxParallelism > 0 {
+		srv.parallelismSem = semaphore.NewWeighted(int64(ociCfg.MaxParallelism))
+		ociCfg.Labels["maxParallelism"] = strconv.Itoa(ociCfg.MaxParallelism)
+	}
+
+	baseLabels := map[string]string{
+		wlabel.Executor:       "oci",
+		wlabel.Snapshotter:    srv.snapshotterName,
+		wlabel.Network:        npResolvedMode,
+		wlabel.OCIProcessMode: srv.processMode.String(),
+		wlabel.SELinuxEnabled: strconv.FormatBool(ociCfg.SELinux),
+	}
+	if ociCfg.ApparmorProfile != "" {
+		baseLabels[wlabel.ApparmorProfile] = ociCfg.ApparmorProfile
+	}
+	if hostname, err := os.Hostname(); err != nil {
+		baseLabels[wlabel.Hostname] = "unknown"
+	} else {
+		baseLabels[wlabel.Hostname] = hostname
+	}
+	for k, v := range ociCfg.Labels {
+		baseLabels[k] = v
+	}
+	workerID, err := base.ID(srv.workerRootDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worker ID: %w", err)
+	}
+
+	srv.baseWorker, err = base.NewWorker(ctx, base.WorkerOpt{
+		ID:        workerID,
+		Labels:    baseLabels,
+		Platforms: srv.enabledPlatforms,
+		GCPolicy:  getGCPolicy(*cfg, ociCfg.GCConfig, srv.rootDir),
+		BuildkitVersion: bkclient.BuildkitVersion{
+			Package:  version.Package,
+			Version:  version.Version,
+			Revision: version.Revision,
+		},
+		NetworkProviders: srv.networkProviders,
+		Executor:         nil, // not needed yet, set in clientWorker
+		Snapshotter: containerdsnapshot.NewSnapshotter(
+			srv.snapshotterName,
+			srv.containerdMetaDB.Snapshotter(srv.snapshotterName),
+			"buildkit",
+			nil, // no idmapping
+		),
+		ContentStore:    srv.contentStore,
+		Applier:         winlayers.NewFileSystemApplierWithWindows(srv.contentStore, apply.NewFileSystemApplier(srv.contentStore)),
+		Differ:          winlayers.NewWalkingDiffWithWindows(srv.contentStore, walking.NewWalkingDiff(srv.contentStore)),
+		ImageStore:      nil, // explicitly, because that's what upstream does too
+		RegistryHosts:   srv.registryHosts,
+		IdentityMapping: nil, // no idmapping
+		LeaseManager:    srv.leaseManager,
+		GarbageCollect:  srv.containerdMetaDB.GarbageCollect,
+		ParallelismSem:  srv.parallelismSem,
+		MetadataStore:   srv.workerCacheMetaDB,
+		Root:            srv.rootDir,
+		MountPoolRoot:   srv.buildkitMountPoolDir,
+		ResourceMonitor: nil, // we don't use it
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create base worker: %w", err)
+	}
+	srv.workerCache = srv.baseWorker.CacheMgr
+	srv.workerSourceManager = srv.baseWorker.SourceManager
+	srv.workerDefaultGCPolicy = getDefaultGCPolicy(*cfg, ociCfg.GCConfig, srv.rootDir)
+
+	logrus.Infof("found worker %q, labels=%v, platforms=%v", workerID, baseLabels, FormatPlatforms(srv.enabledPlatforms))
+	archutil.WarnIfUnsupported(srv.enabledPlatforms)
+
+	// registerDaggerCustomSources adds Dagger's custom sources to the worker.
+	hs, err := httpdns.NewSource(httpdns.Opt{
+		Opt: srchttp.Opt{
+			CacheAccessor: srv.workerCache,
+		},
+		BaseDNSConfig: srv.dns,
 	})
 	if err != nil {
 		return nil, err
 	}
-	srv.progCleanup = progCleanup
+	srv.workerSourceManager.Register(hs)
 
-	progrockLabels := []*progrock.Label{}
-	for _, label := range rootLabels {
-		progrockLabels = append(progrockLabels, &progrock.Label{
-			Name:  label.Name,
-			Value: label.Value,
-		})
-	}
-	srv.recorder = progrock.NewRecorder(progWriter, progrock.WithLabels(progrockLabels...))
-
-	// NOTE: context.Background is used because if the provided context is canceled, buildkit can
-	// leave internal progress contexts open and leak goroutines.
-	bkClient.WriteStatusesTo(context.Background(), srv.recorder)
-
-	apiSchema, err := schema.New(ctx, schema.InitializeArgs{
-		BuildkitClient: srv.bkClient,
-		Platform:       srv.worker.Platforms(true)[0],
-		ProgSockPath:   bkClient.ProgSockPath,
-		OCIStore:       srv.worker.ContentStore(),
-		LeaseManager:   srv.worker.LeaseManager(),
-		Secrets:        secretStore,
-		Auth:           authProvider,
+	gs, err := gitdns.NewSource(gitdns.Opt{
+		Opt: srcgit.Opt{
+			CacheAccessor: srv.workerCache,
+		},
+		BaseDNSConfig: srv.dns,
 	})
 	if err != nil {
 		return nil, err
 	}
-	srv.schema = apiSchema
+	srv.workerSourceManager.Register(gs)
+
+	bs, err := blob.NewSource(blob.Opt{
+		CacheAccessor: srv.workerCache,
+	})
+	if err != nil {
+		return nil, err
+	}
+	srv.workerSourceManager.Register(bs)
+
+	ls, err := local.NewSource(local.Opt{
+		CacheAccessor: srv.workerCache,
+	})
+	if err != nil {
+		return nil, err
+	}
+	srv.workerSourceManager.Register(ls)
+
+	srv.worker = buildkit.NewWorker(&buildkit.NewWorkerOpts{
+		WorkerRoot:       srv.workerRootDir,
+		ExecutorRoot:     srv.executorRootDir,
+		BaseWorker:       srv.baseWorker,
+		TelemetryPubSub:  srv.telemetryPubSub,
+		BKSessionManager: srv.bkSessionManager,
+		SessionHandler:   srv,
+
+		Runc:                srv.runc,
+		DefaultCgroupParent: srv.cgroupParent,
+		ProcessMode:         srv.processMode,
+		IDMapping:           nil, // no idmapping
+		DNSConfig:           srv.dns,
+		ApparmorProfile:     srv.apparmorProfile,
+		SELinux:             srv.selinux,
+		Entitlements:        srv.entitlements,
+		NetworkProviders:    srv.networkProviders,
+		ParallelismSem:      srv.parallelismSem,
+		WorkerCache:         srv.workerCache,
+	})
+
+	//
+	// setup solver
+	//
+
+	baseWorkerController, err := buildkit.AsWorkerController(srv.worker)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create worker controller: %w", err)
+	}
+	srv.frontends["dockerfile.v0"] = forwarder.NewGatewayForwarder(baseWorkerController.Infos(), dockerfile.Build)
+	frontendGateway, err := gateway.NewGatewayFrontend(baseWorkerController.Infos(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gateway frontend: %w", err)
+	}
+	srv.frontends["gateway.v0"] = frontendGateway
+
+	srv.solverCacheDB, err = bboltcachestorage.NewStore(srv.solverCacheDBPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheServiceURL := os.Getenv("_EXPERIMENTAL_DAGGER_CACHESERVICE_URL")
+	cacheServiceToken := os.Getenv("_EXPERIMENTAL_DAGGER_CACHESERVICE_TOKEN")
+	// add DAGGER_CLOUD_TOKEN in a backwards compat way.
+	// TODO: deprecate in a future release
+	if v, ok := os.LookupEnv("DAGGER_CLOUD_TOKEN"); ok {
+		cacheServiceToken = v
+	}
+
+	if cacheServiceURL == "" {
+		cacheServiceURL = daggerCacheServiceURL
+	}
+	srv.SolverCache, err = daggercache.NewManager(ctx, daggercache.ManagerConfig{
+		KeyStore:     srv.solverCacheDB,
+		ResultStore:  bkworker.NewCacheResultStorage(baseWorkerController),
+		Worker:       srv.baseWorker,
+		MountManager: mounts.NewMountManager("dagger-cache", srv.workerCache, srv.bkSessionManager),
+		ServiceURL:   cacheServiceURL,
+		Token:        cacheServiceToken,
+		EngineID:     opts.Name,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	srv.cacheExporters = map[string]remotecache.ResolveCacheExporterFunc{
+		"registry": registryremotecache.ResolveCacheExporterFunc(srv.bkSessionManager, srv.registryHosts),
+		"local":    localremotecache.ResolveCacheExporterFunc(srv.bkSessionManager),
+		"inline":   inlineremotecache.ResolveCacheExporterFunc(),
+		"gha":      gha.ResolveCacheExporterFunc(),
+		"s3":       s3remotecache.ResolveCacheExporterFunc(),
+		"azblob":   azblob.ResolveCacheExporterFunc(),
+	}
+	srv.cacheImporters = map[string]remotecache.ResolveCacheImporterFunc{
+		"registry": registryremotecache.ResolveCacheImporterFunc(srv.bkSessionManager, srv.contentStore, srv.registryHosts),
+		"local":    localremotecache.ResolveCacheImporterFunc(srv.bkSessionManager),
+		"gha":      gha.ResolveCacheImporterFunc(),
+		"s3":       s3remotecache.ResolveCacheImporterFunc(),
+		"azblob":   azblob.ResolveCacheImporterFunc(),
+	}
+
+	srv.solver = solver.NewSolver(solver.SolverOpt{
+		ResolveOpFunc: func(vtx solver.Vertex, builder solver.Builder) (solver.Op, error) {
+			// passing nil bridge since it's only needed for BuildOp, which is never used and
+			// never should be used (it's a legacy API)
+			return srv.worker.ResolveOp(vtx, nil, srv.bkSessionManager)
+		},
+		DefaultCache: srv.SolverCache,
+	})
+
+	srv.throttledGC = throttle.After(time.Minute, srv.gc)
+	// use longer interval for releaseUnreferencedCache deleting links quickly is less important
+	srv.throttledReleaseUnreferenced = throttle.After(5*time.Minute, func() { srv.SolverCache.ReleaseUnreferenced(context.Background()) })
+	defer func() {
+		time.AfterFunc(time.Second, srv.throttledGC)
+	}()
+
+	// garbage collect client DBs
+	go srv.gcClientDBs()
+
 	return srv, nil
 }
 
-func (srv *DaggerServer) LogMetrics(l *logrus.Entry) *logrus.Entry {
-	srv.clientMu.RLock()
-	defer srv.clientMu.RUnlock()
-	return l.WithField(fmt.Sprintf("server-%s-client-count", srv.serverID), srv.connectedClients)
-}
+func (srv *Server) Close() error {
+	err := srv.baseWorker.Close()
 
-func (srv *DaggerServer) Close() {
-	defer srv.closeOnce.Do(func() {
-		close(srv.doneCh)
-	})
+	// note this *could* cause a panic in Session if it was still running, so
+	// the server should be shutdown first
+	srv.daggerSessionsMu.Lock()
+	daggerSessions := srv.daggerSessions
+	srv.daggerSessions = nil
+	srv.daggerSessionsMu.Unlock()
 
-	// mark all groups completed
-	srv.recorder.Complete()
-	// close the recorder so the UI exits
-	srv.recorder.Close()
-
-	srv.progCleanup()
-}
-
-func (srv *DaggerServer) Wait(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-srv.doneCh:
-		return nil
+	for _, s := range daggerSessions {
+		s.stateMu.Lock()
+		err = errors.Join(err, srv.removeDaggerSession(context.Background(), s))
+		s.stateMu.Unlock()
 	}
+	return err
 }
 
-func (srv *DaggerServer) ServeClientConn(
-	ctx context.Context,
-	clientMetadata *engine.ClientMetadata,
-	conn net.Conn,
-) error {
-	bklog.G(ctx).Trace("serve client conn")
-	defer bklog.G(ctx).Trace("done serving client conn")
-	srv.clientMu.Lock()
-	srv.connectedClients++
-	defer func() {
-		srv.clientMu.Lock()
-		srv.connectedClients--
-		srv.clientMu.Unlock()
-	}()
-	srv.clientMu.Unlock()
+func (srv *Server) Info(context.Context, *controlapi.InfoRequest) (*controlapi.InfoResponse, error) {
+	return &controlapi.InfoResponse{
+		BuildkitVersion: &apitypes.BuildkitVersion{
+			Package:  engine.Package,
+			Version:  engine.Version,
+			Revision: srv.engineName,
+		},
+	}, nil
+}
 
-	conn = newLogicalDeadlineConn(nopCloserConn{conn})
-	l := &singleConnListener{conn: conn, closeCh: make(chan struct{})}
-	go func() {
-		<-ctx.Done()
-		l.Close()
-	}()
-
-	// NOTE: not sure how inefficient making a new server per-request is, fix if it's meaningful.
-	// Maybe we could dynamically mux in more endpoints for each client or something
-	handler, handlerDone, err := srv.HTTPHandlerForClient(clientMetadata, conn, bklog.G(ctx))
-	if err != nil {
-		return fmt.Errorf("failed to create http handler: %w", err)
+func (srv *Server) ListWorkers(context.Context, *controlapi.ListWorkersRequest) (*controlapi.ListWorkersResponse, error) {
+	resp := &controlapi.ListWorkersResponse{
+		Record: []*apitypes.WorkerRecord{{
+			ID:        srv.worker.ID(),
+			Labels:    srv.worker.Labels(),
+			Platforms: pb.PlatformsFromSpec(srv.enabledPlatforms),
+		}},
 	}
-	defer func() {
-		<-handlerDone
-		bklog.G(ctx).Trace("handler done")
-	}()
-	httpSrv := http.Server{
-		Handler:           handler,
-		ReadHeaderTimeout: 30 * time.Second,
+	return resp, nil
+}
+
+func (srv *Server) LogMetrics(l *logrus.Entry) *logrus.Entry {
+	srv.daggerSessionsMu.RLock()
+	defer srv.daggerSessionsMu.RUnlock()
+	l = l.WithField("dagger-session-count", len(srv.daggerSessions))
+	/* TODO: FIX
+	for _, s := range srv.daggerSessions {
+		l = s.LogMetrics(l)
 	}
-	defer httpSrv.Close()
-	return httpSrv.Serve(l)
+	*/
+	return l
 }
 
-func (srv *DaggerServer) HTTPHandlerForClient(clientMetadata *engine.ClientMetadata, conn net.Conn, lg *logrus.Entry) (http.Handler, <-chan struct{}, error) {
-	doneCh := make(chan struct{})
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		defer close(doneCh)
-		req = req.WithContext(bklog.WithLogger(req.Context(), lg))
-		bklog.G(req.Context()).Debugf("http handler for client conn to path %s", req.URL.Path)
-		defer bklog.G(req.Context()).Debugf("http handler for client conn done: %s", clientMetadata.ClientID)
-
-		req = req.WithContext(progrock.ToContext(req.Context(), srv.recorder))
-		req = req.WithContext(engine.ContextWithClientMetadata(req.Context(), clientMetadata))
-
-		srv.schema.ServeHTTP(w, req)
-	}), doneCh, nil
+func (srv *Server) Register(server *grpc.Server) {
+	controlapi.RegisterControlServer(server, srv)
 }
 
-// converts a pre-existing net.Conn into a net.Listener that returns the conn and then blocks
-type singleConnListener struct {
-	conn      net.Conn
-	l         sync.Mutex
-	closeCh   chan struct{}
-	closeOnce sync.Once
-}
-
-func (l *singleConnListener) Accept() (net.Conn, error) {
-	l.l.Lock()
-	if l.conn == nil {
-		l.l.Unlock()
-		<-l.closeCh
-		return nil, io.ErrClosedPipe
-	}
-	defer l.l.Unlock()
-
-	c := l.conn
-	l.conn = nil
-	return c, nil
-}
-
-func (l *singleConnListener) Addr() net.Addr {
-	return nil
-}
-
-func (l *singleConnListener) Close() error {
-	l.closeOnce.Do(func() {
-		close(l.closeCh)
-	})
-	return nil
-}
-
-type nopCloserConn struct {
-	net.Conn
-}
-
-func (nopCloserConn) Close() error {
-	return nil
-}
-
-// TODO: could also implement this upstream on:
-// https://github.com/sipsma/buildkit/blob/fa11bf9e57a68e3b5252386fdf44042dd672949a/session/grpchijack/dial.go#L45-L45
-type withDeadlineConn struct {
-	conn          net.Conn
-	readDeadline  time.Time
-	readers       []func()
-	readBuf       *bytes.Buffer
-	readEOF       bool
-	readCond      *sync.Cond
-	writeDeadline time.Time
-	writers       []func()
-	writersL      sync.Mutex
-}
-
-func newLogicalDeadlineConn(inner net.Conn) net.Conn {
-	c := &withDeadlineConn{
-		conn:     inner,
-		readBuf:  new(bytes.Buffer),
-		readCond: sync.NewCond(new(sync.Mutex)),
-	}
-
-	go func() {
-		for {
-			buf := make([]byte, 32*1024)
-			n, err := inner.Read(buf)
-			if err != nil {
-				c.readCond.L.Lock()
-				c.readEOF = true
-				c.readCond.L.Unlock()
-				c.readCond.Broadcast()
-				return
-			}
-
-			c.readCond.L.Lock()
-			c.readBuf.Write(buf[0:n])
-			c.readCond.Broadcast()
-			c.readCond.L.Unlock()
+func (srv *Server) gcClientDBs() {
+	for range time.NewTicker(time.Minute).C {
+		if err := srv.clientDBs.GC(srv.activeClientIDs()); err != nil {
+			slog.Error("failed to GC client DBs", "error", err)
 		}
-	}()
-
-	return c
+	}
 }
 
-func (c *withDeadlineConn) Read(b []byte) (n int, err error) {
-	c.readCond.L.Lock()
+func (srv *Server) activeClientIDs() map[string]bool {
+	keep := map[string]bool{}
 
-	if c.readEOF {
-		c.readCond.L.Unlock()
-		return 0, io.EOF
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if !c.readDeadline.IsZero() {
-		if time.Now().After(c.readDeadline) {
-			c.readCond.L.Unlock()
-			// return early without calling inner Read
-			return 0, os.ErrDeadlineExceeded
+	srv.daggerSessionsMu.RLock()
+	for _, sess := range srv.daggerSessions {
+		for id := range sess.clients {
+			keep[id] = true
 		}
-
-		go func() {
-			dt := time.Until(c.readDeadline)
-			if dt > 0 {
-				time.Sleep(dt)
-			}
-
-			cancel()
-		}()
 	}
+	srv.daggerSessionsMu.RUnlock()
 
-	// Keep track of the reader so a future SetReadDeadline can interrupt it.
-	c.readers = append(c.readers, cancel)
-
-	c.readCond.L.Unlock()
-
-	// Start a goroutine for the actual Read operation
-	read := make(chan struct{})
-	var rN int
-	var rerr error
-	go func() {
-		defer close(read)
-
-		c.readCond.L.Lock()
-		defer c.readCond.L.Unlock()
-
-		for ctx.Err() == nil {
-			if c.readEOF {
-				rerr = io.EOF
-				break
-			}
-
-			n, _ := c.readBuf.Read(b) // ignore EOF here
-			if n > 0 {
-				rN = n
-				break
-			}
-
-			c.readCond.Wait()
-		}
-	}()
-
-	// Wait for either Read to complete or the timeout
-	select {
-	case <-read:
-		return rN, rerr
-	case <-ctx.Done():
-		return 0, os.ErrDeadlineExceeded
-	}
-}
-
-func (c *withDeadlineConn) Write(b []byte) (n int, err error) {
-	c.writersL.Lock()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if !c.writeDeadline.IsZero() {
-		if time.Now().After(c.writeDeadline) {
-			c.writersL.Unlock()
-			// return early without calling inner Write
-			return 0, os.ErrDeadlineExceeded
-		}
-
-		go func() {
-			dt := time.Until(c.writeDeadline)
-			if dt > 0 {
-				time.Sleep(dt)
-			}
-
-			cancel()
-		}()
-	}
-
-	// Keep track of the writer so a future SetWriteDeadline can interrupt it.
-	c.writers = append(c.writers, cancel)
-	c.writersL.Unlock()
-
-	// Start a goroutine for the actual Write operation
-	write := make(chan int, 1)
-	go func() {
-		n, err = c.conn.Write(b)
-		write <- 0
-	}()
-
-	// Wait for either Write to complete or the timeout
-	select {
-	case <-write:
-		return n, err
-	case <-ctx.Done():
-		return 0, os.ErrDeadlineExceeded
-	}
-}
-
-func (c *withDeadlineConn) Close() error {
-	return c.conn.Close()
-}
-
-func (c *withDeadlineConn) LocalAddr() net.Addr {
-	return c.conn.LocalAddr()
-}
-
-func (c *withDeadlineConn) RemoteAddr() net.Addr {
-	return c.conn.RemoteAddr()
-}
-
-func (c *withDeadlineConn) SetDeadline(t time.Time) error {
-	return errors.Join(
-		c.SetReadDeadline(t),
-		c.SetWriteDeadline(t),
-	)
-}
-
-func (c *withDeadlineConn) SetReadDeadline(t time.Time) error {
-	c.readCond.L.Lock()
-	c.readDeadline = t
-	readers := c.readers
-	c.readCond.L.Unlock()
-
-	if len(readers) > 0 && !t.IsZero() {
-		go func() {
-			dt := time.Until(c.readDeadline)
-			if dt > 0 {
-				time.Sleep(dt)
-			}
-
-			for _, cancel := range readers {
-				cancel()
-			}
-		}()
-	}
-
-	return nil
-}
-
-func (c *withDeadlineConn) SetWriteDeadline(t time.Time) error {
-	c.writersL.Lock()
-	c.writeDeadline = t
-	writers := c.writers
-	c.writersL.Unlock()
-
-	if len(writers) > 0 && !t.IsZero() {
-		go func() {
-			dt := time.Until(c.writeDeadline)
-			if dt > 0 {
-				time.Sleep(dt)
-			}
-
-			for _, cancel := range writers {
-				cancel()
-			}
-		}()
-	}
-
-	return nil
+	return keep
 }

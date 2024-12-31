@@ -3,6 +3,7 @@ package typescriptgenerator
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"sort"
 
 	"github.com/psanford/memfs"
@@ -19,7 +20,7 @@ type TypeScriptGenerator struct {
 }
 
 // Generate will generate the TypeScript SDK code and might modify the schema to reorder types in a alphanumeric fashion.
-func (g *TypeScriptGenerator) Generate(_ context.Context, schema *introspection.Schema) (*generator.GeneratedState, error) {
+func (g *TypeScriptGenerator) Generate(_ context.Context, schema *introspection.Schema, schemaVersion string) (*generator.GeneratedState, error) {
 	generator.SetSchema(schema)
 
 	sort.SliceStable(schema.Types, func(i, j int) bool {
@@ -42,16 +43,32 @@ func (g *TypeScriptGenerator) Generate(_ context.Context, schema *introspection.
 		})
 	}
 
-	tmpl := templates.New()
+	tmpl := templates.New(schemaVersion)
+	data := struct {
+		Schema        *introspection.Schema
+		SchemaVersion string
+		Types         []*introspection.Type
+	}{
+		Schema:        schema,
+		SchemaVersion: schemaVersion,
+		Types:         schema.Types,
+	}
 	var b bytes.Buffer
-	err := tmpl.ExecuteTemplate(&b, "api", schema.Types)
+	err := tmpl.ExecuteTemplate(&b, "api", data)
 	if err != nil {
 		return nil, err
 	}
 
 	mfs := memfs.New()
 
-	if err := mfs.WriteFile(ClientGenFile, b.Bytes(), 0600); err != nil {
+	target := ClientGenFile
+	if g.Config.ModuleName != "" {
+		target = filepath.Join(g.Config.ModuleContextPath, "sdk/src/api", ClientGenFile)
+	}
+	if err := mfs.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		return nil, err
+	}
+	if err := mfs.WriteFile(target, b.Bytes(), 0600); err != nil {
 		return nil, err
 	}
 

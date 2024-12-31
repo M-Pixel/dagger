@@ -1,27 +1,23 @@
 {
   "name": "python-sdk-dev",
-  "root": "..",
+  "engineVersion": "v0.14.0",
   "sdk": "python",
-  "include": [
-    "**/*.py",
-    "**/*.typed",
-    "**/pyproject.toml",
-    "**/*ruff.toml",
-    "LICENSE",
-    "README.md",
-    "hatch.toml",
-    "requirements/*.txt",
-    "docs/**/*.rst",
-    "dev/dagger.json"
-  ],
   "exclude": [
-    "docs/_build",
-    "**/.envrc",
-    "**/.direnv",
     "**/.venv",
-    "*/sdk"
+    "**/__pycache__",
+    "**/.*cache"
   ],
   "dependencies": [
-    "github.com/kpenfound/dagger-modules/dockerd@ec3133891c9cea4ec964c6fb597e62567dfecc7e"
-  ]
+    {
+      "name": "dockerd",
+      "source": "github.com/kpenfound/dagger-modules/dockerd@57352e06a1cfbcb5307c009d37c0201b2719b935",
+      "pin": "57352e06a1cfbcb5307c009d37c0201b2719b935"
+    },
+    {
+      "name": "wolfi",
+      "source": "../../../modules/wolfi",
+      "pin": ""
+    }
+  ],
+  "source": "."
 }

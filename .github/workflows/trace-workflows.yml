@@ -3,23 +3,16 @@ name: Trace GitHub Actions Workflows
 on:
   workflow_run:
     workflows:
-      - "Engine & CLI"
-      - "Go SDK"
-      - "Elixir SDK"
-      - "Java SDK"
-      - "Python SDK"
-      - "Rust SDK"
-      - "TypeScript SDK"
+      - "Alternative CI Runners"
+      - "Benchmark"
+      - "daggerverse-preview"
       - "Docs"
+      - "Engine & CLI"
+      - "Github"
       - "Helm"
-      - "Publish Helm Chart"
-      - "Publish Elixir SDK"
-      - "Publish Go SDK"
-      - "Publish PHP SDK"
-      - "Publish Python SDK"
+      - "Publish"
       - "Publish Rust SDK"
-      - "Publish TypeScript SDK"
-      - "Publish CLI & Engine"    
+      - "SDKs"
     types:
       - completed
 

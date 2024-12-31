@@ -8,6 +8,10 @@ import (
 	"net/http"
 
 	"github.com/Khan/genqlient/graphql"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
+	"dagger.io/dagger/telemetry"
 )
 
 type EngineConn interface {
@@ -17,11 +21,12 @@ type EngineConn interface {
 }
 
 type Config struct {
-	Workdir   string
-	LogOutput io.Writer
-	Conn      EngineConn
-
-	SkipCompatibilityCheck bool
+	Workdir         string
+	LogOutput       io.Writer
+	RunnerHost      string
+	Conn            EngineConn
+	VersionOverride string
+	Verbosity       int
 }
 
 type ConnectParams struct {
@@ -64,6 +69,13 @@ func Get(ctx context.Context, cfg *Config) (EngineConn, error) {
 	return conn, nil
 }
 
+func fallbackSpanContext(ctx context.Context) context.Context {
+	if trace.SpanContextFromContext(ctx).IsValid() {
+		return ctx
+	}
+	return telemetry.Propagator.Extract(ctx, telemetry.NewEnvCarrier(true))
+}
+
 func defaultHTTPClient(p *ConnectParams) *http.Client {
 	dialTransport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
@@ -73,6 +85,13 @@ func defaultHTTPClient(p *ConnectParams) *http.Client {
 	return &http.Client{
 		Transport: RoundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			r.SetBasicAuth(p.SessionToken, "")
+
+			// detect $TRACEPARENT set by 'dagger run'
+			r = r.WithContext(fallbackSpanContext(r.Context()))
+
+			// propagate span context via headers (i.e. for Dagger-in-Dagger)
+			telemetry.Propagator.Inject(r.Context(), propagation.HeaderCarrier(r.Header))
+
 			return dialTransport.RoundTrip(r)
 		}),
 	}

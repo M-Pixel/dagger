@@ -3,7 +3,6 @@ package gitdns
 import (
 	"path"
 
-	"github.com/dagger/dagger/engine/buildkit"
 	"github.com/moby/buildkit/client/llb"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/gitutil"
@@ -11,11 +10,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-const AttrNetConfig = "gitdns.netconfig"
-
 // Git is a helper mimicking the llb.Git function, but with the ability to
 // set additional attributes.
-func State(url, ref string, clientIDs []string, opts ...llb.GitOption) llb.State {
+func Git(url, ref string, namespace string, opts ...llb.GitOption) llb.State {
 	remote, err := gitutil.ParseURL(url)
 	if errors.Is(err, gitutil.ErrUnknownProtocol) {
 		url = "https://" + url
@@ -39,16 +36,6 @@ func State(url, ref string, clientIDs []string, opts ...llb.GitOption) llb.State
 			id += "#" + ref
 		}
 	}
-
-	// TODO(vito): replace when custom sources are supported
-	hack, err := buildkit.EncodeIDHack(DaggerGitURLHack{
-		Remote:    url,
-		ClientIDs: clientIDs,
-	})
-	if err != nil {
-		panic(err)
-	}
-	url = "git://" + hack
 
 	gi := &llb.GitInfo{
 		AuthHeaderSecret: "GIT_AUTH_HEADER",
@@ -87,6 +74,8 @@ func State(url, ref string, clientIDs []string, opts ...llb.GitOption) llb.State
 			attrs[pb.AttrMountSSHSock] = gi.MountSSHSock
 		}
 	}
+
+	attrs[AttrDNSNamespace] = namespace
 
 	source := llb.NewSource("git://"+id, attrs, gi.Constraints)
 	return llb.NewState(source.Output())

@@ -36,11 +36,12 @@ Common labels
 {{- define "dagger.labels" -}}
 helm.sh/chart: {{ include "dagger.chart" . }}
 {{ include "dagger.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
+app.kubernetes.io/version: v{{ .Chart.Version }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/part-of: {{ template "dagger.name" . }}
+{{- if .Values.engine.labels }}
+{{ toYaml .Values.engine.labels }}
+{{- end }}
 {{- end }}
 
 {{/*

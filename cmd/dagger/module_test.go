@@ -59,7 +59,7 @@ func TestParseGit(t *testing.T) {
 				Host:   "github.com",
 				Path:   "/shykes/daggerverse",
 				Fragment: &gitutil.GitURLFragment{
-					Ref: "main",
+					Ref: "",
 				},
 				Remote: "ssh://git@github.com/shykes/daggerverse",
 			},
@@ -72,7 +72,7 @@ func TestParseGit(t *testing.T) {
 				Host:   "github.com",
 				Path:   "/shykes/daggerverse.git",
 				Fragment: &gitutil.GitURLFragment{
-					Ref: "main",
+					Ref: "",
 				},
 				Remote: "ssh://git@github.com/shykes/daggerverse.git",
 			},
@@ -139,7 +139,7 @@ func TestParseGit(t *testing.T) {
 				Host:   "github.com",
 				Path:   "sipsma/daggerverse",
 				Fragment: &gitutil.GitURLFragment{
-					Ref: "main",
+					Ref: "",
 				},
 				Remote: "git@github.com:sipsma/daggerverse",
 			},
@@ -152,7 +152,7 @@ func TestParseGit(t *testing.T) {
 				Host:   "github.com",
 				Path:   "sipsma/daggerverse.git",
 				Fragment: &gitutil.GitURLFragment{
-					Ref: "main",
+					Ref: "",
 				},
 				Remote: "git@github.com:sipsma/daggerverse.git",
 			},
@@ -215,7 +215,7 @@ func TestParseGit(t *testing.T) {
 		tc := tc
 		t.Run(tc.urlStr, func(t *testing.T) {
 			t.Parallel()
-			parsedGit, err := parseGit(tc.urlStr)
+			parsedGit, err := parseGitURL(tc.urlStr)
 			require.NoError(t, err)
 			require.NotNil(t, parsedGit)
 			require.Equal(t, tc.want, parsedGit)

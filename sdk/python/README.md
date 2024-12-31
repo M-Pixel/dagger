@@ -53,11 +53,10 @@ async def main(args: list[str]):
             dag.container()
             .from_("python:alpine")
             .with_exec(["pip", "install", "cowsay"])
-            .with_entrypoint(["cowsay"])
         )
 
         # run cowsay with requested message
-        result = await ctr.with_exec(args).stdout()
+        result = await ctr.with_exec(["cowsay", *args]).stdout()
 
     print(result)
 
@@ -112,22 +111,22 @@ dagger call -m dev
 Run pytest in supported Python versions:
 
 ```shell
-dagger call -m dev tests
+dagger call -m dev test default
 ```
 
 Check for linting violations:
 ```shell
-dagger call -m dev lint check
+dagger call -m dev lint
 ```
 
 Re-format code following common styling conventions:
 ```shell
-dagger call -m dev lint format -o .
+dagger call -m dev format export --path=.
 ```
 
-Update pinned devevelopment dependencies:
+Update pinned development dependencies:
 ```shell
-dagger call -m dev lock -o .
+uv lock -U
 ```
 
 Build and preview the reference documentation:
@@ -136,17 +135,3 @@ dagger call -m dev docs preview up
 ```
 
 Add `--help` to any command to check all the available options.
-
-### Engine changes
-
-Testing and regenerating the client may fail if there’s changes in the engine code that haven’t been released yet. Prefix with `hack/dev` to build a new engine before executing pipelines:
-
-```shell
-../../hack/dev dagger call -m dev test
-```
-
-To re-generate the client (codegen) after changes to the API schema:
-
-```shell
-./hack/dev ./hack/make sdk:python:generate
-```

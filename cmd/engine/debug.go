@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/dagger/dagger/engine/server"
 	"github.com/mackerelio/go-osstat/cpu"
 	"github.com/mackerelio/go-osstat/loadavg"
 	"github.com/mackerelio/go-osstat/memory"
@@ -22,6 +21,8 @@ import (
 	"golang.org/x/exp/constraints"
 	"golang.org/x/net/trace"
 	"golang.org/x/sys/unix"
+
+	"github.com/dagger/dagger/engine/server"
 )
 
 func setupDebugHandlers(addr string) error {
@@ -82,12 +83,12 @@ func logTraceMetrics(ctx context.Context) {
 	}
 }
 
-func logMetrics(ctx context.Context, engineStateRootDir string, ctrl *server.BuildkitController) {
+func logMetrics(ctx context.Context, engineStateRootDir string, eng *server.Server) {
 	for range time.Tick(60 * time.Second) {
 		l := bklog.G(ctx)
 
 		// controller stats
-		l = ctrl.LogMetrics(l)
+		l = eng.LogMetrics(l)
 
 		// goroutine stats
 		l = l.WithField("goroutine-count", runtime.NumGoroutine())

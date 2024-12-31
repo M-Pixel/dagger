@@ -1,75 +1,86 @@
-type Client struct {
-	c graphql.Client
-	q *querybuilder.Selection
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"os"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.25.0"
+
+	"{{.PackageImport}}/internal/dagger"
+	"{{.PackageImport}}/internal/telemetry"
+	"{{.PackageImport}}/internal/querybuilder"
+)
+
+var dag = dagger.Connect()
+
+func Tracer() trace.Tracer {
+	return otel.Tracer("dagger.io/sdk.go")
 }
 
-var dag = initDag()
+// used for local MarshalJSON implementations
+var marshalCtx = context.Background()
 
-// initializing the var dag directly rather than using
-// an init func so that users can successfully use dag
-// in any global var initialization of their own code
-func initDag() *Client {
-  gqlClient, q := getClientParams()
-	return &Client{
-		c: gqlClient,
-		q: q,
-	}
+// called by main()
+func setMarshalContext(ctx context.Context) {
+	marshalCtx = ctx
+	dagger.SetMarshalContext(ctx)
 }
 
-func getClientParams() (graphql.Client, *querybuilder.Selection) {
-	portStr, ok := os.LookupEnv("DAGGER_SESSION_PORT")
-	if !ok {
-		panic("DAGGER_SESSION_PORT is not set")
-	}
-	port, err := strconv.Atoi(portStr)
-	if err != nil {
-		panic(fmt.Errorf("DAGGER_SESSION_PORT %q is invalid: %w", portStr, err))
-	}
+type DaggerObject = querybuilder.GraphQLMarshaller
 
-	sessionToken := os.Getenv("DAGGER_SESSION_TOKEN")
-	if sessionToken == "" {
-		panic("DAGGER_SESSION_TOKEN is not set")
-	}
+type ExecError = dagger.ExecError
 
-	host := fmt.Sprintf("127.0.0.1:%d", port)
+{{/* module aliases have been removed in v0.12.0 */}}
+{{ if not (CheckVersionCompatibility "v0.12.0") }}
+{{ range .Types }}
+{{ $name := .Name | FormatName }}
 
-	dialTransport := &http.Transport{
-		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-			return net.Dial("tcp", host)
-		},
-	}
-	httpClient := &http.Client{
-		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-			r.SetBasicAuth(sessionToken, "")
-			return dialTransport.RoundTrip(r)
-		}),
-	}
-	gqlClient := errorWrappedClient{graphql.NewClient(fmt.Sprintf("http://%s/query", host), httpClient)}
+{{ .Description | Comment }}
+type {{ $name }} = dagger.{{ $name }}
 
-	return gqlClient, querybuilder.Query()
+{{ if eq .Kind "OBJECT" }}
+{{- if . | IsSelfChainable }}
+type With{{ $name }}Func = dagger.With{{ $name }}Func
+{{ end }}
+{{ range $field := .Fields }}
+{{- if $field.Args.HasOptionals }}
+// {{ $field | FieldOptionsStructName }} contains options for {{ $name }}.{{ $field.Name | FormatName }}
+type {{ $field | FieldOptionsStructName }} = dagger.{{ $field | FieldOptionsStructName }}
+{{ end }}
+{{ end }}
+{{- end }}
+
+{{ if eq .Kind "ENUM" }}
+{{- $enumName := .Name }}
+const (
+	{{- range $index, $field := .EnumValues | SortEnumFields }}
+	{{ $field.Description | Comment }}
+	{{ $field.Name | FormatEnum "" }} {{ $enumName }} = dagger.{{ $field.Name | FormatEnum "" }}
+	{{ end }}
+)
+{{- end }}
+{{ end }}
+{{ end }}
+
+{{ if and IsModuleCode (not IsPartial) }}
+// ptr returns a pointer to the given value.
+func ptr[T any](v T) *T {
+	return &v
 }
 
-// TODO: pollutes namespace, move to non internal package in dagger.io/dagger
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return fn(req)
-}
-
-type errorWrappedClient struct {
-	graphql.Client
-}
-
-func (c errorWrappedClient) MakeRequest(ctx context.Context, req *graphql.Request, resp *graphql.Response) error {
-	err := c.Client.MakeRequest(ctx, req, resp)
-	if err != nil {
-		if e := getCustomError(err); e != nil {
-			return e
-		}
-		return err
-	}
-	return nil
+// convertSlice converts a slice of one type to a slice of another type using a
+// converter function
+func convertSlice[I any, O any](in []I, f func(I) O) []O {
+  out := make([]O, len(in))
+  for i, v := range in {
+    out[i] = f(v)
+  }
+  return out
 }
 
 {{ ModuleMainSrc }}
-
+{{ end }}

@@ -85,7 +85,7 @@ func weHaveToGoDeeper(ctx context.Context, c *dagger.Client, depth int, mode str
 	args = append(args, mirrorURL)
 
 	out, err := c.Container().
-		From("golang:1.20.6-alpine").
+		From("golang:1.23.2-alpine").
 		WithMountedCache("/go/pkg/mod", c.CacheVolume("go-mod")).
 		WithEnvVariable("GOMODCACHE", "/go/pkg/mod").
 		WithMountedCache("/go/build-cache", c.CacheVolume("go-build")).
@@ -107,13 +107,8 @@ func weHaveToGoDeeper(ctx context.Context, c *dagger.Client, depth int, mode str
 }
 
 func mirror(ctx context.Context, c *dagger.Client, mode, svcURL string) (*dagger.Service, string) {
-	srv := c.Container().
-		From("python:alpine").
-		WithWorkdir("/srv/www")
-
 	switch mode {
 	case "exec":
-		srv = srv.WithExec([]string{"wget", svcURL})
 		return httpService(ctx, c,
 			c.Container().
 				From("alpine:3.16.2").
@@ -124,7 +119,7 @@ func mirror(ctx context.Context, c *dagger.Client, mode, svcURL string) (*dagger
 		return httpService(ctx, c,
 			c.Directory().WithFile("index.html", c.HTTP(svcURL)))
 	case "git":
-		return gitService(ctx, c, c.Git(svcURL).Branch("main").Tree())
+		return gitService(ctx, c, c.Git(svcURL).Branch("main").Tree(dagger.GitRefTreeOpts{DiscardGitDir: true}))
 	default:
 		fatal(fmt.Errorf("unknown mode: %q", mode))
 		return nil, ""
@@ -160,7 +155,7 @@ func httpService(ctx context.Context, c *dagger.Client, dir *dagger.Directory) (
 		WithMountedDirectory("/srv/www", dir).
 		WithWorkdir("/srv/www").
 		WithExposedPort(8000).
-		WithExec([]string{"python", "-m", "http.server"}).
+		WithDefaultArgs([]string{"python", "-m", "http.server"}).
 		AsService()
 
 	httpURL, err := srv.Endpoint(ctx, dagger.ServiceEndpointOpts{
@@ -207,7 +202,7 @@ git daemon --verbose --export-all --base-path=/root/srv
 `).
 				File("start.sh")).
 		WithExposedPort(gitPort).
-		WithExec([]string{"sh", "/root/start.sh"}).
+		WithDefaultArgs([]string{"sh", "/root/start.sh"}).
 		AsService()
 
 	gitHost, err := gitDaemon.Hostname(ctx)

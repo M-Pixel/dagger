@@ -15,7 +15,8 @@ import (
 
 func (ps *parseState) parseGoStruct(t *types.Struct, named *types.Named) (*parsedObjectType, error) {
 	spec := &parsedObjectType{
-		goType: t,
+		goType:     t,
+		moduleName: ps.moduleName,
 	}
 
 	if named == nil {
@@ -33,7 +34,7 @@ func (ps *parseState) parseGoStruct(t *types.Struct, named *types.Named) (*parse
 
 	goFuncTypes := []*types.Func{}
 	methodSet := types.NewMethodSet(types.NewPointer(named))
-	for i := 0; i < methodSet.Len(); i++ {
+	for i := range methodSet.Len() {
 		methodObj := methodSet.At(i).Obj()
 
 		if ps.isDaggerGenerated(methodObj) {
@@ -71,31 +72,34 @@ func (ps *parseState) parseGoStruct(t *types.Struct, named *types.Named) (*parse
 	}
 
 	// get the comment above the struct (if any)
-	astSpec, err := ps.astSpecForNamedType(named)
+	astSpec, err := ps.astSpecForObj(named.Obj())
 	if err != nil {
 		return nil, fmt.Errorf("failed to find decl for named type %s: %w", spec.name, err)
 	}
-	spec.doc = astSpec.Doc.Text()
+	if doc := docForAstSpec(astSpec); doc != nil {
+		spec.doc = doc.Text()
+	}
 
-	astStructType, ok := astSpec.Type.(*ast.StructType)
+	spec.sourceMap = ps.sourceMap(astSpec)
+
+	astTypeSpec, ok := astSpec.(*ast.TypeSpec)
 	if !ok {
-		return nil, fmt.Errorf("expected type spec to be a struct, got %T", astSpec.Type)
+		return nil, fmt.Errorf("expected type spec, got %T", astSpec)
+	}
+	astStructType, ok := astTypeSpec.Type.(*ast.StructType)
+	if !ok {
+		return nil, fmt.Errorf("expected type spec to be a struct, got %T", astTypeSpec.Type)
 	}
 
 	// Fill out the static fields of the struct (if any)
 	astFields := unpackASTFields(astStructType.Fields)
-	for i := 0; i < t.NumFields(); i++ {
+	for i := range t.NumFields() {
 		field := t.Field(i)
 		if !field.Exported() {
 			continue
 		}
 
 		fieldSpec := &fieldSpec{goType: field.Type()}
-		if _, optional, err := ps.isOptionalWrapper(fieldSpec.goType); err != nil {
-			return nil, err
-		} else if optional {
-			return nil, fmt.Errorf("optional type wrapper not allowed in struct field %s", field.Name())
-		}
 		fieldSpec.typeSpec, err = ps.parseGoTypeReference(fieldSpec.goType, nil, false)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse field type: %w", err)
@@ -134,6 +138,8 @@ func (ps *parseState) parseGoStruct(t *types.Struct, named *types.Named) (*parse
 
 		fieldSpec.doc = comment
 
+		fieldSpec.sourceMap = ps.sourceMap(astFields[i])
+
 		spec.fields = append(spec.fields, fieldSpec)
 	}
 
@@ -148,8 +154,10 @@ func (ps *parseState) parseGoStruct(t *types.Struct, named *types.Named) (*parse
 }
 
 type parsedObjectType struct {
-	name string
-	doc  string
+	name       string
+	moduleName string
+	doc        string
+	sourceMap  *sourceMap
 
 	fields      []*fieldSpec
 	methods     []*funcTypeSpec
@@ -168,8 +176,11 @@ func (spec *parsedObjectType) TypeDefCode() (*Statement, error) {
 	if spec.doc != "" {
 		withObjectOptsCode = append(withObjectOptsCode, Id("Description").Op(":").Lit(strings.TrimSpace(spec.doc)))
 	}
+	if spec.sourceMap != nil {
+		withObjectOptsCode = append(withObjectOptsCode, Id("SourceMap").Op(":").Add(spec.sourceMap.TypeDefCode()))
+	}
 	if len(withObjectOptsCode) > 0 {
-		withObjectArgsCode = append(withObjectArgsCode, Id("TypeDefWithObjectOpts").Values(withObjectOptsCode...))
+		withObjectArgsCode = append(withObjectArgsCode, Id("dagger").Dot("TypeDefWithObjectOpts").Values(withObjectOptsCode...))
 	}
 
 	typeDefCode := Qual("dag", "TypeDef").Call().Dot("WithObject").Call(withObjectArgsCode...)
@@ -195,11 +206,17 @@ func (spec *parsedObjectType) TypeDefCode() (*Statement, error) {
 			Lit(field.name),
 			fieldTypeDefCode,
 		}
+		var withFieldOpts []Code
 		if field.doc != "" {
+			withFieldOpts = append(withFieldOpts, Id("Description").Op(":").Lit(field.doc))
+		}
+		if field.sourceMap != nil {
+			withFieldOpts = append(withFieldOpts, Id("SourceMap").Op(":").Add(field.sourceMap.TypeDefCode()))
+		}
+		if len(withFieldOpts) > 0 {
 			withFieldArgsCode = append(withFieldArgsCode,
-				Id("TypeDefWithFieldOpts").Values(
-					Id("Description").Op(":").Lit(field.doc),
-				))
+				Id("dagger").Dot("TypeDefWithFieldOpts").Values(withFieldOpts...),
+			)
 		}
 		typeDefCode = dotLine(typeDefCode, "WithField").Call(withFieldArgsCode...)
 	}
@@ -240,13 +257,34 @@ func (spec *parsedObjectType) Name() string {
 	return spec.name
 }
 
-/*
-Extra generated code needed for the object implementation.
+func (spec *parsedObjectType) ModuleName() string {
+	return spec.moduleName
+}
 
-Right now, this is just an UnmarshalJSON method. This is needed because objects may have fields
-of an interface type, which the JSON unmarshaller can't handle on its own. Instead, this custom
-unmarshaller will unmarshal the JSON into a struct where all the fields are concrete types,
-including the underlying concrete struct implementation of any interface fields.
+// Extra generated code needed for the object implementation.
+func (spec *parsedObjectType) ImplementationCode() (*Statement, error) {
+	code := Empty()
+
+	method, err := spec.marshalJSONMethodCode()
+	if err != nil {
+		return nil, err
+	}
+	code.Add(method.Line().Line())
+
+	method, err = spec.unmarshalJSONMethodCode()
+	if err != nil {
+		return nil, err
+	}
+	code.Add(method.Line().Line())
+	return code, nil
+}
+
+/*
+UnmarshalJSON is needed because objects may have fields of an interface type,
+which the JSON unmarshaller can't handle on its own. Instead, this custom
+unmarshaller will unmarshal the JSON into a struct where all the fields are
+concrete types, including the underlying concrete struct implementation of any
+interface fields.
 
 After it unmarshals into that, it copies the fields to the real object fields, handling any
 special cases around interface conversions (e.g. converting a slice of structs to a slice of
@@ -270,7 +308,7 @@ e.g.:
 		return nil
 	}
 */
-func (spec *parsedObjectType) ImplementationCode() (*Statement, error) {
+func (spec *parsedObjectType) unmarshalJSONMethodCode() (*Statement, error) {
 	concreteFields := make([]Code, 0, len(spec.fields))
 	setFieldCodes := make([]*Statement, 0, len(spec.fields))
 	for _, field := range spec.fields {
@@ -284,7 +322,7 @@ func (spec *parsedObjectType) ImplementationCode() (*Statement, error) {
 		}
 		concreteFields = append(concreteFields, fieldCode)
 
-		setFieldCode, err := spec.setFieldsFromConcreteStructCode(field)
+		setFieldCode, err := spec.setFieldsFromUnmarshalStructCode(field)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate set field code: %w", err)
 		}
@@ -299,13 +337,86 @@ func (spec *parsedObjectType) ImplementationCode() (*Statement, error) {
 			g.Var().Id("concrete").Struct(concreteFields...)
 			g.Id("err").Op(":=").Id("json").Dot("Unmarshal").Call(Id("bs"), Op("&").Id("concrete"))
 			g.If(Id("err").Op("!=").Nil()).Block(Return(Id("err")))
-
 			for _, setFieldCode := range setFieldCodes {
 				g.Add(setFieldCode)
 			}
-
 			g.Return(Nil())
 		}), nil
+}
+
+/*
+MarshalJSON is needed because if using embedded fields, a struct will inherit
+the embedded MarshalJSON function (which could be an imported type, so would
+return an ID instead of a JSON serialization) - so we should always provide our
+own implementation.
+
+The custom marshaller transforms all the fields from the target into a concrete
+struct (exactly the same as in UnmarshalJSON), but taking interfaces and
+turning them into "any" types (since we don't know the underlying type, so we
+should defer to their serialization).
+
+e.g.:
+
+	func (r *Test) MarshalJSON() ([]byte, error) {
+		var concrete struct {
+			IfaceField          any
+			IfaceFieldNeverSet  any
+			IfacePrivateField   any
+			IfaceListField      any
+			OtherIfaceListField any
+		}
+		concrete.IfaceField = r.IfaceField
+		concrete.IfaceFieldNeverSet = r.IfaceFieldNeverSet
+		concrete.IfacePrivateField = r.IfacePrivateField
+		concrete.IfaceListField = r.IfaceListField
+		concrete.OtherIfaceListField = r.OtherIfaceListField
+		return json.Marshal(&concrete)
+	}
+*/
+func (spec *parsedObjectType) marshalJSONMethodCode() (*Statement, error) {
+	concreteFields := make([]Code, 0, len(spec.fields))
+	getFieldCodes := make([]*Statement, 0, len(spec.fields))
+	for _, field := range spec.fields {
+		fieldTypeCode, err := spec.marshalFieldTypeCode(field.typeSpec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate field type code: %w", err)
+		}
+		fieldCode := Id(field.goName).Add(fieldTypeCode)
+		if field.goName != field.name {
+			fieldCode.Tag(map[string]string{"json": field.name})
+		}
+		concreteFields = append(concreteFields, fieldCode)
+
+		getFieldCode := spec.setFieldsToMarshalStructCode(field)
+		getFieldCodes = append(getFieldCodes, getFieldCode)
+	}
+
+	return Func().Params(Id("r").Id(spec.name)).
+		Id("MarshalJSON").
+		Params().
+		Params(Id("[]byte"), Id("error")).
+		BlockFunc(func(g *Group) {
+			g.Var().Id("concrete").Struct(concreteFields...)
+			for _, getFieldCode := range getFieldCodes {
+				g.Add(getFieldCode)
+			}
+			g.Return(Id("json").Dot("Marshal").Call(Op("&").Id("concrete")))
+		}), nil
+}
+
+/*
+The code for the type of a field in the concrete struct we use for marshalling into.
+*/
+func (spec *parsedObjectType) marshalFieldTypeCode(typeSpec ParsedType) (*Statement, error) {
+	switch typeSpec := typeSpec.(type) {
+	case *parsedIfaceTypeReference:
+		return Id("any"), nil
+	case *parsedSliceType:
+		if _, ok := typeSpec.underlying.(*parsedIfaceTypeReference); ok {
+			return Id("any"), nil
+		}
+	}
+	return spec.concreteFieldTypeCode(typeSpec)
 }
 
 /*
@@ -320,8 +431,20 @@ func (spec *parsedObjectType) concreteFieldTypeCode(typeSpec ParsedType) (*State
 			s.Op("*")
 		}
 		if typeSpec.alias != "" {
-			s.Id(typeSpec.alias)
+			if typeSpec.moduleName == "" {
+				s.Id("dagger." + typeSpec.alias)
+			} else {
+				s.Id(typeSpec.alias)
+			}
 		} else {
+			tp := typeSpec.GoType()
+			if basic, ok := tp.(*types.Basic); ok {
+				if basic.Kind() == types.Invalid {
+					s.Id("any")
+					break
+				}
+			}
+
 			s.Id(typeSpec.GoType().String())
 		}
 
@@ -336,10 +459,10 @@ func (spec *parsedObjectType) concreteFieldTypeCode(typeSpec ParsedType) (*State
 		if typeSpec.isPtr {
 			s.Op("*")
 		}
-		s.Id(typeSpec.name)
+		s.Id(typeName(typeSpec))
 
 	case *parsedIfaceTypeReference:
-		s.Op("*").Id(formatIfaceImplName(typeSpec.name))
+		s.Op("*").Id(formatIfaceImplName(typeName(typeSpec)))
 
 	default:
 		return nil, fmt.Errorf("unsupported concrete field type %T", typeSpec)
@@ -354,7 +477,7 @@ The code for setting the fields of the real object from the concrete struct unma
 	r.Iface = concrete.Iface.toIface()
 	r.IfaceList = convertSlice(concrete.IfaceList, (*customIfaceImpl).toIface)
 */
-func (spec *parsedObjectType) setFieldsFromConcreteStructCode(field *fieldSpec) (*Statement, error) {
+func (spec *parsedObjectType) setFieldsFromUnmarshalStructCode(field *fieldSpec) (*Statement, error) {
 	s := Empty()
 	switch typeSpec := field.typeSpec.(type) {
 	case *parsedPrimitiveType, *parsedObjectTypeReference:
@@ -381,10 +504,15 @@ func (spec *parsedObjectType) setFieldsFromConcreteStructCode(field *fieldSpec) 
 	return s, nil
 }
 
+func (spec *parsedObjectType) setFieldsToMarshalStructCode(field *fieldSpec) *Statement {
+	return Empty().Id("concrete").Dot(field.goName).Op("=").Id("r").Dot(field.goName)
+}
+
 type fieldSpec struct {
-	name     string
-	doc      string
-	typeSpec ParsedType
+	name      string
+	doc       string
+	sourceMap *sourceMap
+	typeSpec  ParsedType
 
 	// isPrivate is true if the field is marked with the +private pragma
 	isPrivate bool

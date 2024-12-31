@@ -2,11 +2,17 @@ from typing import Annotated, Optional
 
 import pytest
 from beartype.door import TypeHint
-from typing_extensions import Doc
+from typing_extensions import Doc, Self
 
-from dagger import Arg, field
+from dagger import Name, field
 from dagger.mod import Module
-from dagger.mod._utils import get_arg_name, get_doc, is_optional, non_optional
+from dagger.mod._utils import (
+    get_alt_name,
+    get_doc,
+    is_nullable,
+    non_null,
+    normalize_name,
+)
 
 
 @pytest.mark.parametrize(
@@ -18,8 +24,8 @@ from dagger.mod._utils import get_arg_name, get_doc, is_optional, non_optional
         (Optional[str], True),
     ],
 )
-def test_is_optional(typ, expected):
-    assert is_optional(TypeHint(typ)) == expected
+def test_is_nullable(typ, expected):
+    assert is_nullable(TypeHint(typ)) == expected
 
 
 @pytest.mark.parametrize(
@@ -33,11 +39,16 @@ def test_is_optional(typ, expected):
     ],
 )
 def test_non_optional(typ, expected):
-    assert non_optional(TypeHint(typ)) == TypeHint(expected)
+    assert non_null(TypeHint(typ)) == TypeHint(expected)
 
 
 class ClassWithDocstring:
     """Foo."""
+
+    @classmethod
+    def create(cls) -> Self:
+        """Bar."""
+        return cls()
 
 
 def func_with_docstring():
@@ -64,16 +75,17 @@ def test_get_doc(annotation):
     assert get_doc(annotation) == "Foo."
 
 
-class ClassWithoutDocstring:
-    ...
+def test_get_factory_doc():
+    assert get_doc(ClassWithDocstring.create) == "Bar."
 
 
-def func_without_docstring():
-    ...
+class ClassWithoutDocstring: ...
 
 
-async def async_func_without_docstring():
-    ...
+def func_without_docstring(): ...
+
+
+async def async_func_without_docstring(): ...
 
 
 @pytest.mark.parametrize(
@@ -85,7 +97,7 @@ async def async_func_without_docstring():
         str,
         str | None,
         Annotated[str, "Not supported"],
-        Annotated[str, Arg("foo")],
+        Annotated[str, Name("foo")],
     ],
 )
 def test_no_annotated_doc(annotation):
@@ -102,12 +114,25 @@ def test_no_dataclass_default_doc():
     assert get_doc(Foo) is None
 
 
-def test_get_arg_name():
-    assert get_arg_name(Annotated[str, Arg("foo")]) == "foo"
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("with_", "with"),
+        ("__init__", "__init__"),
+        ("_private_", "_private_"),
+        ("mangled__", "mangled__"),
+    ],
+)
+def test_normalize_name(name: str, expected: str):
+    assert normalize_name(name) == expected
 
 
-def test_get_last_arg_name():
-    assert get_arg_name(Annotated[str, Arg("foo"), Arg("bar")]) == "bar"
+def test_get_alt_name():
+    assert get_alt_name(Annotated[str, Name("foo")]) == "foo"
+
+
+def test_get_last_alt_name():
+    assert get_alt_name(Annotated[str, Name("foo"), Name("bar")]) == "bar"
 
 
 @pytest.mark.parametrize(
@@ -117,5 +142,5 @@ def test_get_last_arg_name():
         Annotated[str, Doc("foo")],
     ],
 )
-def test_no_get_arg_name(annotation):
-    assert get_arg_name(annotation) is None
+def test_no_get_alt_name(annotation):
+    assert get_alt_name(annotation) is None

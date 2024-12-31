@@ -3,7 +3,7 @@ use convert_case::{Case, Casing};
 use dagger_sdk::core::introspection::{FullTypeFields, TypeRef};
 use genco::prelude::rust;
 use genco::quote;
-use genco::tokens::quoted;
+use genco::tokens::{quoted, static_literal};
 use itertools::Itertools;
 
 use crate::utility::OptionExt;
@@ -15,28 +15,32 @@ pub fn format_name(s: &str) -> String {
 }
 
 pub fn format_struct_name(s: &str) -> String {
-    s.to_case(Case::Snake)
+    let s = s.to_case(Case::Snake);
+    match s.as_ref() {
+        "ref" => "r#ref".to_string(),
+        "enum" => "r#enum".to_string(),
+        _ => s,
+    }
 }
 
 pub fn field_options_struct_name(field: &FullTypeFields) -> Option<String> {
     field
         .parent_type
         .as_ref()
-        .map(|p| p.name.as_ref().map(|n| format_name(n)))
-        .flatten()
+        .and_then(|p| p.name.as_ref().map(|n| format_name(n)))
         .zip(field.name.as_ref().map(|n| format_name(n)))
         .map(|(parent_name, field_name)| format!("{parent_name}{field_name}Opts"))
 }
 
 pub fn format_function(funcs: &CommonFunctions, field: &FullTypeFields) -> Option<rust::Tokens> {
     let is_async = field.type_.pipe(|t| &t.type_ref).pipe(|t| {
-        if type_ref_is_object(&t) || type_ref_is_list_of_objects(&t) {
-            return None;
+        if t.is_object() || t.is_list_of_objects() {
+            None
         } else {
-            return Some(quote! {
+            Some(quote! {
                 async
-            });
-        };
+            })
+        }
     });
 
     let signature = quote! {
@@ -111,17 +115,17 @@ pub fn format_function(funcs: &CommonFunctions, field: &FullTypeFields) -> Optio
 fn render_required_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Option<rust::Tokens> {
     if let Some(args) = field.args.as_ref() {
         let args = args
-            .into_iter()
-            .map(|a| {
+            .iter()
+            .filter_map(|a| {
                 a.as_ref().and_then(|s| {
-                    if type_ref_is_optional(&s.input_value.type_) {
+                    if s.input_value.type_.is_optional() {
                         return None;
                     }
 
                     let n = format_struct_name(&s.input_value.name);
                     let name = &s.input_value.name;
 
-                    if type_ref_is_scalar(&s.input_value.type_) {
+                    if s.input_value.type_.is_scalar() {
                         if let Scalar::String =
                             Scalar::from(&*s.input_value.type_.of_type.as_ref().unwrap().clone())
                         {
@@ -131,13 +135,8 @@ fn render_required_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
                         }
                     }
 
-                    if type_ref_is_enum(&s.input_value.type_) {
-                        return Some(quote! {
-                            query = query.arg_enum($(quoted(name)), $(n));
-                        })
-                    }
 
-                    if type_ref_is_list(&s.input_value.type_) {
+                    if s.input_value.type_.is_list() {
                         let inner = *s
                             .input_value
                             .type_
@@ -149,8 +148,8 @@ fn render_required_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
                             .as_ref()
                             .unwrap()
                             .clone();
-                        println!("type: {:?}", inner);
-                        if type_ref_is_scalar(&inner) {
+
+                        if inner.is_scalar() {
                             if let Scalar::String =
                                 Scalar::from(&*inner.of_type.as_ref().unwrap().clone())
                             {
@@ -161,13 +160,13 @@ fn render_required_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
                         }
                     }
 
-                    if type_ref_is_id(&s.input_value.type_) {
+                    if s.input_value.type_.is_id() {
                         return Some(quote!{
                             query = query.arg_lazy(
                                 $(quoted(name)),
                                 Box::new(move || {
                                     let $(&n) = $(&n).clone();
-                                    Box::pin(async move { $(&n).id().await.unwrap().quote() })
+                                    Box::pin(async move { $(&n).into_id().await.unwrap().quote() })
                                 }),
                             );
                         })
@@ -178,7 +177,6 @@ fn render_required_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
                     })
                 })
             })
-            .flatten()
             .collect::<Vec<_>>();
         let required_args = quote! {
             $(for arg in args join ($['\r']) => $arg)
@@ -193,23 +191,15 @@ fn render_required_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
 fn render_optional_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Option<rust::Tokens> {
     if let Some(args) = field.args.as_ref() {
         let args = args
-            .into_iter()
-            .map(|a| {
+            .iter()
+            .filter_map(|a| {
                 a.as_ref().and_then(|s| {
-                    if !type_ref_is_optional(&s.input_value.type_) {
+                    if !s.input_value.type_.is_optional() {
                         return None;
                     }
 
                     let n = format_struct_name(&s.input_value.name);
                     let name = &s.input_value.name;
-
-                    if type_ref_is_enum(&s.input_value.type_) {
-                        return Some(quote! {
-                            if let Some($(&n)) = opts.$(&n) {
-                                query = query.arg_enum($(quoted(name)), $(n));
-                            }
-                        });
-                    }
 
                     Some(quote! {
                         if let Some($(&n)) = opts.$(&n) {
@@ -218,10 +208,9 @@ fn render_optional_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
                     })
                 })
             })
-            .flatten()
             .collect::<Vec<_>>();
 
-        if args.len() == 0 {
+        if args.is_empty() {
             return None;
         }
 
@@ -238,7 +227,7 @@ fn render_optional_args(_funcs: &CommonFunctions, field: &FullTypeFields) -> Opt
 fn render_output_type(funcs: &CommonFunctions, type_ref: &TypeRef) -> rust::Tokens {
     let output_type = funcs.format_output_type(type_ref);
 
-    if type_ref_is_object(type_ref) || type_ref_is_list_of_objects(type_ref) {
+    if type_ref.is_object() || type_ref.is_list_of_objects() {
         return quote! {
             $(output_type)
         };
@@ -252,10 +241,10 @@ fn render_output_type(funcs: &CommonFunctions, type_ref: &TypeRef) -> rust::Toke
 }
 
 fn render_execution(funcs: &CommonFunctions, field: &FullTypeFields) -> rust::Tokens {
-    if let Some(true) = field.type_.pipe(|t| type_ref_is_object(&t.type_ref)) {
+    if let Some(true) = field.type_.pipe(|t| t.type_ref.is_object()) {
         let output_type = funcs.format_output_type(&field.type_.as_ref().unwrap().type_ref);
         return quote! {
-            return $(output_type) {
+            $(output_type) {
                 proc: self.proc.clone(),
                 selection: query,
                 graphql_client: self.graphql_client.clone(),
@@ -263,12 +252,9 @@ fn render_execution(funcs: &CommonFunctions, field: &FullTypeFields) -> rust::To
         };
     }
 
-    if let Some(true) = field
-        .type_
-        .pipe(|t| type_ref_is_list_of_objects(&t.type_ref))
-    {
+    if let Some(true) = field.type_.pipe(|t| t.type_ref.is_list_of_objects()) {
         let output_type = funcs.format_output_type(
-            &field
+            field
                 .type_
                 .as_ref()
                 .unwrap()
@@ -281,7 +267,7 @@ fn render_execution(funcs: &CommonFunctions, field: &FullTypeFields) -> rust::To
                 .unwrap(),
         );
         return quote! {
-            return vec![$(output_type) {
+            vec![$(output_type) {
                 proc: self.proc.clone(),
                 selection: query,
                 graphql_client: self.graphql_client.clone(),
@@ -302,20 +288,18 @@ fn format_function_args(
     let mut argument_description = Vec::new();
     if let Some(args) = field.args.as_ref() {
         let args = args
-            .into_iter()
-            .map(|a| {
+            .iter()
+            .filter_map(|a| {
                 a.as_ref().and_then(|s| {
-                    if type_ref_is_optional(&s.input_value.type_) {
+                    if s.input_value.type_.is_optional() {
                         return None;
                     }
 
                     let t = funcs.format_input_type(&s.input_value.type_);
 
-                    let t = t.trim_end_matches("Id");
                     let n = format_struct_name(&s.input_value.name);
-
                     if let Some(desc) = s.input_value.description.as_ref().and_then(|d| {
-                        if d != "" {
+                        if !d.is_empty() {
                             Some(write_comment_line(&format!("* `{n}` - {}", d)))
                         } else {
                             None
@@ -326,12 +310,18 @@ fn format_function_args(
                         });
                     }
 
-                    Some(quote! {
-                        $(n): $(t),
-                    })
+                    if t.ends_with("Id") {
+                        let into_id = rust::import("crate::id", "IntoID");
+                        Some(quote! {
+                            $(n): impl $(into_id)<$(t)>,
+                        })
+                    } else {
+                        Some(quote! {
+                            $(n): $(t),
+                        })
+                    }
                 })
             })
-            .flatten()
             .collect::<Vec<_>>();
         let required_args = quote! {
             &self,
@@ -341,14 +331,20 @@ fn format_function_args(
         if type_field_has_optional(field) {
             let field_name = field_options_struct_name(field);
             argument_description.push(quote! {
-                $(field_name.pipe(|_| write_comment_line(&format!("* `opt` - optional argument, see inner type for documentation, use <func>_opts to use"))))
+                $(field_name.pipe(|_| write_comment_line("* `opt` - optional argument, see inner type for documentation, use <func>_opts to use")))
             });
 
-            let description = quote! {
-                $(if argument_description.len() > 0 => $(format!("///\n")))
-                $(if argument_description.len() > 0 => $(format!("/// # Arguments\n")))
-                $(if argument_description.len() > 0 => $(format!("///\n")))
-                $(for arg_desc in argument_description join ($['\r']) => $arg_desc)
+            let description = if !argument_description.is_empty() {
+                Some(quote! {
+                    $(static_literal("///"))$['\r']
+                    $(static_literal("/// # Arguments"))$['\r']
+                    $(static_literal("///"))$['\r']
+                    $(for arg_desc in argument_description join ($['\r']) => $arg_desc)
+
+
+                })
+            } else {
+                None
             };
 
             Some((
@@ -356,17 +352,24 @@ fn format_function_args(
                     $(required_args)
                     opts: $(field_name)$(lifecycle)
                 },
-                description,
+                description.unwrap_or_default(),
                 true,
             ))
         } else {
-            let description = quote! {
-                $(if argument_description.len() > 0 => $(format!("///\n")))
-                $(if argument_description.len() > 0 => $(format!("/// # Arguments\n")))
-                $(if argument_description.len() > 0 => $(format!("///\n")))
-                $(for arg_desc in argument_description join ($['\r']) => $arg_desc)
+            let description = if !argument_description.is_empty() {
+                Some(quote! {
+                    $(static_literal("///"))$['\r']
+                    $(static_literal("/// # Arguments"))$['\r']
+                    $(static_literal("///"))$['\r']
+                    $(for arg_desc in argument_description join ($['\r']) => $arg_desc)
+
+
+                })
+            } else {
+                None
             };
-            Some((required_args, description, false))
+
+            Some((required_args, description.unwrap_or_default(), false))
         }
     } else {
         None
@@ -379,23 +382,28 @@ fn format_required_function_args(
 ) -> Option<rust::Tokens> {
     if let Some(args) = field.args.as_ref() {
         let args = args
-            .into_iter()
-            .map(|a| {
+            .iter()
+            .filter_map(|a| {
                 a.as_ref().and_then(|s| {
-                    if type_ref_is_optional(&s.input_value.type_) {
+                    if s.input_value.type_.is_optional() {
                         return None;
                     }
 
                     let t = funcs.format_input_type(&s.input_value.type_);
-                    let t = t.trim_end_matches("Id");
                     let n = format_struct_name(&s.input_value.name);
 
-                    Some(quote! {
-                        $(n): $(t),
-                    })
+                    if t.ends_with("Id") {
+                        let into_id = rust::import("crate::id", "IntoID");
+                        Some(quote! {
+                            $(n): impl $(into_id)<$(t)>,
+                        })
+                    } else {
+                        Some(quote! {
+                            $(n): $(t),
+                        })
+                    }
                 })
             })
-            .flatten()
             .collect::<Vec<_>>();
         let required_args = quote! {
             &self,
@@ -414,10 +422,10 @@ pub fn format_optional_args(
 ) -> Option<(rust::Tokens, bool)> {
     field
         .args
-        .pipe(|t| t.into_iter().flatten().collect::<Vec<_>>())
+        .pipe(|t| t.iter().flatten().collect::<Vec<_>>())
         .map(|t| {
             t.into_iter()
-                .filter(|t| type_ref_is_optional(&t.input_value.type_))
+                .filter(|t| t.input_value.type_.is_optional())
                 .sorted_by_key(|val| &val.input_value.name)
                 .collect::<Vec<_>>()
         })
@@ -427,7 +435,7 @@ pub fn format_optional_args(
 
 pub fn write_comment_line(content: &str) -> Option<rust::Tokens> {
     let cnt = content.trim();
-    if cnt == "" {
+    if cnt.is_empty() {
         return None;
     }
 
@@ -449,7 +457,7 @@ pub fn format_struct_comment(desc: &str) -> Option<rust::Tokens> {
         .map(write_comment_line)
         .collect::<Vec<_>>();
 
-    if formatted_lines.len() > 0 {
+    if !formatted_lines.is_empty() {
         Some(quote! {
             $(for line in formatted_lines join($['\r']) => $line)
         })

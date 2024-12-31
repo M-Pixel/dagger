@@ -1,12 +1,16 @@
 package main
 
-import "context"
+import (
+	"context"
+
+	"dagger/main/internal/dagger"
+)
 
 func New(
 	strs []string,
 	ints []int,
 	bools []bool,
-	dirs []*Directory,
+	dirs []*dagger.Directory,
 ) *Impl {
 
 	return &Impl{
@@ -34,8 +38,8 @@ type Impl struct {
 	Bool     bool
 	BoolList []bool
 
-	Obj     *Directory
-	ObjList []*Directory
+	Obj     *dagger.Directory
+	ObjList []*dagger.Directory
 
 	Others      []*OtherImpl
 	OtherIfaces []LocalOtherIface
@@ -47,13 +51,6 @@ func (m *Impl) Void() error {
 
 func (m Impl) WithStr(strArg string) *Impl {
 	m.Str = strArg
-	return &m
-}
-
-func (m Impl) WithOptionalTypeStr(strArg Optional[string]) *Impl {
-	if str, ok := strArg.Get(); ok {
-		m.Str = str
-	}
 	return &m
 }
 
@@ -92,20 +89,14 @@ func (m Impl) WithBoolList(boolListArg []bool) *Impl {
 	return &m
 }
 
-func (m Impl) WithObj(objArg *Directory) *Impl {
+func (m Impl) WithObj(objArg *dagger.Directory) *Impl {
 	m.Obj = objArg
 	return &m
 }
 
-func (m Impl) WithOptionalTypeObj(objArg Optional[*Directory]) *Impl {
-	if obj, ok := objArg.Get(); ok {
-		m.Obj = obj
-	}
-	return &m
-}
 func (m Impl) WithOptionalPragmaObj(
 	// +optional
-	objArg *Directory,
+	objArg *dagger.Directory,
 ) *Impl {
 	if objArg != nil {
 		m.Obj = objArg
@@ -113,7 +104,7 @@ func (m Impl) WithOptionalPragmaObj(
 	return &m
 }
 
-func (m Impl) WithObjList(objListArg []*Directory) *Impl {
+func (m Impl) WithObjList(objListArg []*dagger.Directory) *Impl {
 	m.ObjList = objListArg
 	return &m
 }

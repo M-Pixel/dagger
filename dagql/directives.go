@@ -1,8 +1,9 @@
 package dagql
 
 import (
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql/call"
 )
 
 type DirectiveSpec struct {
@@ -41,7 +42,7 @@ func (DirectiveLocation) Decoder() InputDecoder {
 	return DirectiveLocations
 }
 
-func (d DirectiveLocation) ToLiteral() *idproto.Literal {
+func (d DirectiveLocation) ToLiteral() call.Literal {
 	return DirectiveLocations.Literal(d)
 }
 

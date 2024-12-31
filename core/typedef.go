@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/iancoleman/strcase"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 )
 
 type Function struct {
@@ -20,6 +22,8 @@ type Function struct {
 	Description string         `field:"true" doc:"A doc string for the function, if any."`
 	Args        []*FunctionArg `field:"true" doc:"Arguments accepted by the function, if any."`
 	ReturnType  *TypeDef       `field:"true" doc:"The type returned by the function."`
+
+	SourceMap *SourceMap `field:"true" doc:"The location of this function declaration."`
 
 	// Below are not in public API
 
@@ -62,15 +66,26 @@ func (fn Function) Clone() *Function {
 	if fn.ReturnType != nil {
 		cp.ReturnType = fn.ReturnType.Clone()
 	}
+	if fn.SourceMap != nil {
+		cp.SourceMap = fn.SourceMap.Clone()
+	}
 	return &cp
 }
 
 func (fn *Function) FieldSpec() (dagql.FieldSpec, error) {
 	spec := dagql.FieldSpec{
-		Name:           fn.Name,
-		Description:    formatGqlDescription(fn.Description),
-		Type:           fn.ReturnType.ToTyped(),
-		ImpurityReason: "Module functions are currently always impure.", // TODO
+		Name:        fn.Name,
+		Description: formatGqlDescription(fn.Description),
+		Type:        fn.ReturnType.ToTyped(),
+
+		// NB: functions actually _are_ cached per-session, which matches the
+		// lifetime of the server, so we might as well consider them pure. That way
+		// there will be locking around concurrent calls, so the user won't see
+		// multiple in parallel.
+		//
+		// However, we can't *quite* mark them as pure, since Call has special
+		// logic for transferring secrets between cached calls.
+		ImpurityReason: "secrets still need transferring on cached calls",
 	}
 	for _, arg := range fn.Args {
 		input := arg.TypeDef.ToInput()
@@ -104,15 +119,24 @@ func (fn *Function) WithDescription(desc string) *Function {
 	return fn
 }
 
-func (fn *Function) WithArg(name string, typeDef *TypeDef, desc string, defaultValue JSON) *Function {
+func (fn *Function) WithArg(name string, typeDef *TypeDef, desc string, defaultValue JSON, defaultPath string, ignore []string, sourceMap *SourceMap) *Function {
 	fn = fn.Clone()
 	fn.Args = append(fn.Args, &FunctionArg{
 		Name:         strcase.ToLowerCamel(name),
 		Description:  desc,
+		SourceMap:    sourceMap,
 		TypeDef:      typeDef,
 		DefaultValue: defaultValue,
 		OriginalName: name,
+		DefaultPath:  defaultPath,
+		Ignore:       ignore,
 	})
+	return fn
+}
+
+func (fn *Function) WithSourceMap(sourceMap *SourceMap) *Function {
+	fn = fn.Clone()
+	fn.SourceMap = sourceMap
 	return fn
 }
 
@@ -171,10 +195,13 @@ func (fn *Function) LookupArg(name string) (*FunctionArg, bool) {
 
 type FunctionArg struct {
 	// Name is the standardized name of the argument (lowerCamelCase), as used for the resolver in the graphql schema
-	Name         string   `field:"true" doc:"The name of the argument in lowerCamelCase format."`
-	Description  string   `field:"true" doc:"A doc string for the argument, if any."`
-	TypeDef      *TypeDef `field:"true" doc:"The type of the argument."`
-	DefaultValue JSON     `field:"true" doc:"A default value to use for this argument when not explicitly set by the caller, if any."`
+	Name         string     `field:"true" doc:"The name of the argument in lowerCamelCase format."`
+	Description  string     `field:"true" doc:"A doc string for the argument, if any."`
+	SourceMap    *SourceMap `field:"true" doc:"The location of this arg declaration."`
+	TypeDef      *TypeDef   `field:"true" doc:"The type of the argument."`
+	DefaultValue JSON       `field:"true" doc:"A default value to use for this argument when not explicitly set by the caller, if any."`
+	DefaultPath  string     `field:"true" doc:"Only applies to arguments of type File or Directory. If the argument is not set, load it from the given path in the context directory"`
+	Ignore       []string   `field:"true" doc:"Only applies to arguments of type Directory. The ignore patterns are applied to the input directory, and matching entries are filtered out, in a cache-efficient manner."`
 
 	// Below are not in public API
 
@@ -184,7 +211,12 @@ type FunctionArg struct {
 
 func (arg FunctionArg) Clone() *FunctionArg {
 	cp := arg
-	cp.TypeDef = arg.TypeDef.Clone()
+	if arg.TypeDef != nil {
+		cp.TypeDef = arg.TypeDef.Clone()
+	}
+	if arg.SourceMap != nil {
+		cp.SourceMap = arg.SourceMap.Clone()
+	}
 	// NB(vito): don't bother copying DefaultValue, it's already 'any' so it's
 	// hard to imagine anything actually mutating it at runtime vs. replacing it
 	// wholesale.
@@ -208,13 +240,13 @@ func (*FunctionArg) TypeDescription() string {
 
 type DynamicID struct {
 	typeName string
-	id       *idproto.ID
+	id       *call.ID
 }
 
 var _ dagql.IDable = DynamicID{}
 
 // ID returns the ID of the value.
-func (d DynamicID) ID() *idproto.ID {
+func (d DynamicID) ID() *call.ID {
 	return d.id
 }
 
@@ -229,13 +261,13 @@ var _ dagql.InputDecoder = DynamicID{}
 func (d DynamicID) DecodeInput(val any) (dagql.Input, error) {
 	switch x := val.(type) {
 	case string:
-		var idp idproto.ID
+		var idp call.ID
 		if err := idp.Decode(x); err != nil {
 			return nil, fmt.Errorf("decode %q ID: %w", d.typeName, err)
 		}
 		d.id = &idp
 		return d, nil
-	case *idproto.ID:
+	case *call.ID:
 		d.id = x
 		return d, nil
 	default:
@@ -245,12 +277,8 @@ func (d DynamicID) DecodeInput(val any) (dagql.Input, error) {
 
 var _ dagql.Input = DynamicID{}
 
-func (d DynamicID) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Id{
-			Id: d.id,
-		},
-	}
+func (d DynamicID) ToLiteral() call.Literal {
+	return call.NewLiteralID(d.id)
 }
 
 func (d DynamicID) Type() *ast.Type {
@@ -281,6 +309,8 @@ type TypeDef struct {
 	AsObject    dagql.Nullable[*ObjectTypeDef]    `field:"true" doc:"If kind is OBJECT, the object-specific type definition. If kind is not OBJECT, this will be null."`
 	AsInterface dagql.Nullable[*InterfaceTypeDef] `field:"true" doc:"If kind is INTERFACE, the interface-specific type definition. If kind is not INTERFACE, this will be null."`
 	AsInput     dagql.Nullable[*InputTypeDef]     `field:"true" doc:"If kind is INPUT, the input-specific type definition. If kind is not INPUT, this will be null."`
+	AsScalar    dagql.Nullable[*ScalarTypeDef]    `field:"true" doc:"If kind is SCALAR, the scalar-specific type definition. If kind is not SCALAR, this will be null."`
+	AsEnum      dagql.Nullable[*EnumTypeDef]      `field:"true" doc:"If kind is ENUM, the enum-specific type definition. If kind is not ENUM, this will be null."`
 }
 
 func (typeDef TypeDef) Clone() *TypeDef {
@@ -296,6 +326,12 @@ func (typeDef TypeDef) Clone() *TypeDef {
 	}
 	if typeDef.AsInput.Valid {
 		cp.AsInput.Value = typeDef.AsInput.Value.Clone()
+	}
+	if typeDef.AsScalar.Valid {
+		cp.AsScalar.Value = typeDef.AsScalar.Value.Clone()
+	}
+	if typeDef.AsEnum.Valid {
+		cp.AsEnum.Value = typeDef.AsEnum.Value.Clone()
 	}
 	return &cp
 }
@@ -320,6 +356,10 @@ func (typeDef *TypeDef) ToTyped() dagql.Typed {
 		typed = dagql.Int(0)
 	case TypeDefKindBoolean:
 		typed = dagql.Boolean(false)
+	case TypeDefKindScalar:
+		typed = dagql.NewScalar[dagql.String](typeDef.AsScalar.Value.Name, dagql.String(""))
+	case TypeDefKindEnum:
+		typed = &ModuleEnum{TypeDef: typeDef.AsEnum.Value}
 	case TypeDefKindList:
 		typed = dagql.DynamicArrayOutput{Elem: typeDef.AsList.Value.ElementTypeDef.ToTyped()}
 	case TypeDefKindObject:
@@ -348,6 +388,10 @@ func (typeDef *TypeDef) ToInput() dagql.Input {
 		typed = dagql.Int(0)
 	case TypeDefKindBoolean:
 		typed = dagql.Boolean(false)
+	case TypeDefKindScalar:
+		typed = dagql.NewScalar[dagql.String](typeDef.AsScalar.Value.Name, dagql.String(""))
+	case TypeDefKindEnum:
+		typed = &dagql.EnumValueName{Enum: typeDef.AsEnum.Value.Name}
 	case TypeDefKindList:
 		typed = dagql.DynamicArrayInput{
 			Elem: typeDef.AsList.Value.ElementTypeDef.ToInput(),
@@ -386,6 +430,12 @@ func (typeDef *TypeDef) WithKind(kind TypeDefKind) *TypeDef {
 	return typeDef
 }
 
+func (typeDef *TypeDef) WithScalar(name string, desc string) *TypeDef {
+	typeDef = typeDef.WithKind(TypeDefKindScalar)
+	typeDef.AsScalar = dagql.NonNull(NewScalarTypeDef(name, desc))
+	return typeDef
+}
+
 func (typeDef *TypeDef) WithListOf(elem *TypeDef) *TypeDef {
 	typeDef = typeDef.WithKind(TypeDefKindList)
 	typeDef.AsList = dagql.NonNull(&ListTypeDef{
@@ -394,15 +444,15 @@ func (typeDef *TypeDef) WithListOf(elem *TypeDef) *TypeDef {
 	return typeDef
 }
 
-func (typeDef *TypeDef) WithObject(name, desc string) *TypeDef {
+func (typeDef *TypeDef) WithObject(name, desc string, sourceMap *SourceMap) *TypeDef {
 	typeDef = typeDef.WithKind(TypeDefKindObject)
-	typeDef.AsObject = dagql.NonNull(NewObjectTypeDef(name, desc))
+	typeDef.AsObject = dagql.NonNull(NewObjectTypeDef(name, desc).WithSourceMap(sourceMap))
 	return typeDef
 }
 
-func (typeDef *TypeDef) WithInterface(name, desc string) *TypeDef {
+func (typeDef *TypeDef) WithInterface(name, desc string, sourceMap *SourceMap) *TypeDef {
 	typeDef = typeDef.WithKind(TypeDefKindInterface)
-	typeDef.AsInterface = dagql.NonNull(NewInterfaceTypeDef(name, desc))
+	typeDef.AsInterface = dagql.NonNull(NewInterfaceTypeDef(name, desc).WithSourceMap(sourceMap))
 	return typeDef
 }
 
@@ -412,7 +462,7 @@ func (typeDef *TypeDef) WithOptional(optional bool) *TypeDef {
 	return typeDef
 }
 
-func (typeDef *TypeDef) WithObjectField(name string, fieldType *TypeDef, desc string) (*TypeDef, error) {
+func (typeDef *TypeDef) WithObjectField(name string, fieldType *TypeDef, desc string, sourceMap *SourceMap) (*TypeDef, error) {
 	if !typeDef.AsObject.Valid {
 		return nil, fmt.Errorf("cannot add function to non-object type: %s", typeDef.Kind)
 	}
@@ -421,6 +471,7 @@ func (typeDef *TypeDef) WithObjectField(name string, fieldType *TypeDef, desc st
 		Name:         strcase.ToLowerCamel(name),
 		OriginalName: name,
 		Description:  desc,
+		SourceMap:    sourceMap,
 		TypeDef:      fieldType,
 	})
 	return typeDef, nil
@@ -455,6 +506,43 @@ func (typeDef *TypeDef) WithObjectConstructor(fn *Function) (*TypeDef, error) {
 	return typeDef, nil
 }
 
+func (typeDef *TypeDef) WithEnum(name, desc string, sourceMap *SourceMap) *TypeDef {
+	typeDef = typeDef.WithKind(TypeDefKindEnum)
+	typeDef.AsEnum = dagql.NonNull(NewEnumTypeDef(name, desc, sourceMap))
+	return typeDef
+}
+
+func (typeDef *TypeDef) WithEnumValue(name, desc string, sourceMap *SourceMap) (*TypeDef, error) {
+	if !typeDef.AsEnum.Valid {
+		return nil, fmt.Errorf("cannot add value to non-enum type: %s", typeDef.Kind)
+	}
+
+	// Validate if the enum follows GraphQL spec.
+	// A GraphQL enum should be: only letters, digits and underscores, and has to start with a letter or a single underscore.
+	// To do so, we can use a regular expression.
+	// ^            : Start of the string
+	// [a-zA-Z_]    : First character must be a letter or underscore
+	// [a-zA-Z0-9_]*: Following characters can be letters, digits, or underscores (zero or more times)
+	// $            : End of the string
+	pattern := `^[a-zA-Z_][a-zA-Z0-9_]*$`
+
+	if !regexp.MustCompile(pattern).MatchString(name) {
+		return nil, fmt.Errorf("enum value %q is not valid (only letters, digits and underscores are allowed)", name)
+	}
+
+	// Verify if the enum value is duplicated.
+	for _, v := range typeDef.AsEnum.Value.Values {
+		if v.Name == name {
+			return nil, fmt.Errorf("enum value %q is already defined", name)
+		}
+	}
+
+	typeDef = typeDef.Clone()
+	typeDef.AsEnum.Value.Values = append(typeDef.AsEnum.Value.Values, NewEnumValueTypeDef(name, desc, sourceMap))
+
+	return typeDef, nil
+}
+
 func (typeDef *TypeDef) IsSubtypeOf(otherDef *TypeDef) bool {
 	if typeDef == nil || otherDef == nil {
 		return false
@@ -467,6 +555,10 @@ func (typeDef *TypeDef) IsSubtypeOf(otherDef *TypeDef) bool {
 	switch typeDef.Kind {
 	case TypeDefKindString, TypeDefKindInteger, TypeDefKindBoolean, TypeDefKindVoid:
 		return typeDef.Kind == otherDef.Kind
+	case TypeDefKindScalar:
+		return typeDef.AsScalar.Value.Name == otherDef.AsScalar.Value.Name
+	case TypeDefKindEnum:
+		return typeDef.AsEnum.Value.Name == otherDef.AsEnum.Value.Name
 	case TypeDefKindList:
 		if otherDef.Kind != TypeDefKindList {
 			return false
@@ -497,6 +589,7 @@ type ObjectTypeDef struct {
 	// Name is the standardized name of the object (CamelCase), as used for the object in the graphql schema
 	Name        string                    `field:"true" doc:"The name of the object."`
 	Description string                    `field:"true" doc:"The doc string for the object, if any."`
+	SourceMap   *SourceMap                `field:"true" doc:"The location of this object declaration."`
 	Fields      []*FieldTypeDef           `field:"true" doc:"Static fields defined on this object, if any."`
 	Functions   []*Function               `field:"true" doc:"Functions defined on this object, if any."`
 	Constructor dagql.Nullable[*Function] `field:"true" doc:"The function used to construct new instances of this object, if any"`
@@ -547,7 +640,17 @@ func (obj ObjectTypeDef) Clone() *ObjectTypeDef {
 		cp.Constructor.Value = obj.Constructor.Value.Clone()
 	}
 
+	if cp.SourceMap != nil {
+		cp.SourceMap = cp.SourceMap.Clone()
+	}
+
 	return &cp
+}
+
+func (obj *ObjectTypeDef) WithSourceMap(sourceMap *SourceMap) *ObjectTypeDef {
+	obj = obj.Clone()
+	obj.SourceMap = sourceMap
+	return obj
 }
 
 func (obj *ObjectTypeDef) FieldByName(name string) (*FieldTypeDef, bool) {
@@ -618,6 +721,8 @@ type FieldTypeDef struct {
 	Description string   `field:"true" doc:"A doc string for the field, if any."`
 	TypeDef     *TypeDef `field:"true" doc:"The type of the field."`
 
+	SourceMap *SourceMap `field:"true" doc:"The location of this field declaration."`
+
 	// Below are not in public API
 
 	// The original name of the object as provided by the SDK that defined it, used
@@ -645,6 +750,9 @@ func (typeDef FieldTypeDef) Clone() *FieldTypeDef {
 	if typeDef.TypeDef != nil {
 		cp.TypeDef = typeDef.TypeDef.Clone()
 	}
+	if typeDef.SourceMap != nil {
+		cp.SourceMap = typeDef.SourceMap.Clone()
+	}
 	return &cp
 }
 
@@ -652,6 +760,7 @@ type InterfaceTypeDef struct {
 	// Name is the standardized name of the interface (CamelCase), as used for the interface in the graphql schema
 	Name        string      `field:"true" doc:"The name of the interface."`
 	Description string      `field:"true" doc:"The doc string for the interface, if any."`
+	SourceMap   *SourceMap  `field:"true" doc:"The location of this interface declaration."`
 	Functions   []*Function `field:"true" doc:"Functions defined on this interface, if any."`
 	// SourceModuleName is currently only set when returning the TypeDef from the Objects field on Module
 	SourceModuleName string `field:"true" doc:"If this InterfaceTypeDef is associated with a Module, the name of the module. Unset otherwise."`
@@ -689,8 +798,17 @@ func (iface InterfaceTypeDef) Clone() *InterfaceTypeDef {
 	for i, fn := range iface.Functions {
 		cp.Functions[i] = fn.Clone()
 	}
+	if cp.SourceMap != nil {
+		cp.SourceMap = cp.SourceMap.Clone()
+	}
 
 	return &cp
+}
+
+func (iface *InterfaceTypeDef) WithSourceMap(sourceMap *SourceMap) *InterfaceTypeDef {
+	iface = iface.Clone()
+	iface.SourceMap = sourceMap
+	return iface
 }
 
 func (iface *InterfaceTypeDef) IsSubtypeOf(otherIface *InterfaceTypeDef) bool {
@@ -715,6 +833,39 @@ func (iface *InterfaceTypeDef) IsSubtypeOf(otherIface *InterfaceTypeDef) bool {
 	}
 
 	return true
+}
+
+type ScalarTypeDef struct {
+	Name        string `field:"true" doc:"The name of the scalar."`
+	Description string `field:"true" doc:"A doc string for the scalar, if any."`
+
+	OriginalName string
+
+	// SourceModuleName is currently only set when returning the TypeDef from the Scalars field on Module
+	SourceModuleName string `field:"true" doc:"If this ScalarTypeDef is associated with a Module, the name of the module. Unset otherwise."`
+}
+
+func NewScalarTypeDef(name, description string) *ScalarTypeDef {
+	return &ScalarTypeDef{
+		Name:         strcase.ToCamel(name),
+		OriginalName: name,
+		Description:  description,
+	}
+}
+
+func (*ScalarTypeDef) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "ScalarTypeDef",
+		NonNull:   true,
+	}
+}
+
+func (typeDef *ScalarTypeDef) TypeDescription() string {
+	return "A definition of a custom scalar defined in a Module."
+}
+
+func (typeDef ScalarTypeDef) Clone() *ScalarTypeDef {
+	return &typeDef
 }
 
 type ListTypeDef struct {
@@ -784,6 +935,106 @@ func (typeDef *InputTypeDef) ToInputObjectSpec() dagql.InputObjectSpec {
 	return spec
 }
 
+type EnumTypeDef struct {
+	// Name is the standardized name of the enum (CamelCase), as used for the enum in the graphql schema
+	Name        string              `field:"true" doc:"The name of the enum."`
+	Description string              `field:"true" doc:"A doc string for the enum, if any."`
+	Values      []*EnumValueTypeDef `field:"true" doc:"The values of the enum."`
+	SourceMap   *SourceMap          `field:"true" doc:"The location of this enum declaration."`
+
+	// SourceModuleName is currently only set when returning the TypeDef from the Enum field on Module
+	SourceModuleName string `field:"true" doc:"If this EnumTypeDef is associated with a Module, the name of the module. Unset otherwise."`
+
+	// Below are not in public API
+
+	// The original name of the enum as provided by the SDK that defined it, used
+	// when invoking the SDK so it doesn't need to think as hard about case conversions
+	OriginalName string
+}
+
+func (*EnumTypeDef) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "EnumTypeDef",
+		NonNull:   true,
+	}
+}
+
+func (*EnumTypeDef) TypeDescription() string {
+	return "A definition of a custom enum defined in a Module."
+}
+
+// Implements dagql.Enum interface
+func (enum *EnumTypeDef) ListValues() ast.EnumValueList {
+	var values ast.EnumValueList
+
+	for _, val := range enum.Values {
+		values = append(values, &ast.EnumValueDefinition{
+			Name:        val.Name,
+			Description: val.Description,
+		})
+	}
+
+	return values
+}
+
+func NewEnumTypeDef(name, description string, sourceMap *SourceMap) *EnumTypeDef {
+	return &EnumTypeDef{
+		Name:         strcase.ToCamel(name),
+		OriginalName: name,
+		Description:  description,
+		SourceMap:    sourceMap,
+	}
+}
+
+func (enum EnumTypeDef) Clone() *EnumTypeDef {
+	cp := enum
+
+	cp.Values = make([]*EnumValueTypeDef, len(enum.Values))
+	for i, value := range enum.Values {
+		cp.Values[i] = value.Clone()
+	}
+	if enum.SourceMap != nil {
+		cp.SourceMap = enum.SourceMap.Clone()
+	}
+
+	return &cp
+}
+
+type EnumValueTypeDef struct {
+	Name        string     `field:"true" doc:"The name of the enum value."`
+	Description string     `field:"true" doc:"A doc string for the enum value, if any."`
+	SourceMap   *SourceMap `field:"true" doc:"The location of this enum value declaration."`
+}
+
+func (*EnumValueTypeDef) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "EnumValueTypeDef",
+		NonNull:   true,
+	}
+}
+
+func (*EnumValueTypeDef) TypeDescription() string {
+	return "A definition of a value in a custom enum defined in a Module."
+}
+
+func NewEnumValueTypeDef(name, description string, sourceMap *SourceMap) *EnumValueTypeDef {
+	return &EnumValueTypeDef{
+		Name:        name,
+		Description: description,
+		SourceMap:   sourceMap,
+	}
+}
+
+func (enumValue EnumValueTypeDef) Clone() *EnumValueTypeDef {
+	cp := enumValue
+
+	if enumValue.SourceMap != nil {
+		cp.SourceMap = enumValue.SourceMap.Clone()
+	}
+
+	return &cp
+}
+
 type TypeDefKind string
 
 func (k TypeDefKind) String() string {
@@ -799,6 +1050,8 @@ var (
 		"An integer value.")
 	TypeDefKindBoolean = TypeDefKinds.Register("BOOLEAN_KIND",
 		"A boolean value.")
+	TypeDefKindScalar = TypeDefKinds.Register("SCALAR_KIND",
+		"A scalar value of any basic kind.")
 	TypeDefKindList = TypeDefKinds.Register("LIST_KIND",
 		"A list of values all having the same type.",
 		"Always paired with a ListTypeDef.")
@@ -818,6 +1071,10 @@ var (
 		specifying this Kind is always Optional, as the Void is never actually
 		represented.`,
 	)
+	TypeDefKindEnum = TypeDefKinds.Register("ENUM_KIND",
+		"A GraphQL enum type and its values",
+		"Always paired with an EnumTypeDef.",
+	)
 )
 
 func (k TypeDefKind) Type() *ast.Type {
@@ -835,12 +1092,12 @@ func (k TypeDefKind) Decoder() dagql.InputDecoder {
 	return TypeDefKinds
 }
 
-func (k TypeDefKind) ToLiteral() *idproto.Literal {
+func (k TypeDefKind) ToLiteral() call.Literal {
 	return TypeDefKinds.Literal(k)
 }
 
 type FunctionCall struct {
-	Query *Query
+	Query *Query `json:"-"`
 
 	Name       string                  `field:"true" doc:"The name of the function being called."`
 	ParentName string                  `field:"true" doc:"The name of the parent object of the function being called. If the function is top-level to the module, this is the name of the module."`
@@ -864,11 +1121,36 @@ func (fnCall *FunctionCall) ReturnValue(ctx context.Context, val JSON) error {
 	// filesystem. This ensures that the result is cached as part of the module
 	// function's Exec while also keeping SDKs as agnostic as possible to the
 	// format + location of that result.
-	return fnCall.Query.Buildkit.IOReaderExport(
+	bk, err := fnCall.Query.Buildkit(ctx)
+	if err != nil {
+		return fmt.Errorf("get buildkit client: %w", err)
+	}
+	return bk.IOReaderExport(
 		ctx,
 		bytes.NewReader(val),
 		filepath.Join(modMetaDirPath, modMetaOutputPath),
-		0600,
+		0o600,
+	)
+}
+
+func (fnCall *FunctionCall) ReturnError(ctx context.Context, errID dagql.ID[*Error]) error {
+	// The return is implemented by exporting the result back to the caller's
+	// filesystem. This ensures that the result is cached as part of the module
+	// function's Exec while also keeping SDKs as agnostic as possible to the
+	// format + location of that result.
+	bk, err := fnCall.Query.Buildkit(ctx)
+	if err != nil {
+		return fmt.Errorf("get buildkit client: %w", err)
+	}
+	enc, err := errID.Encode()
+	if err != nil {
+		return fmt.Errorf("encode error ID: %w", err)
+	}
+	return bk.IOReaderExport(
+		ctx,
+		strings.NewReader(enc),
+		filepath.Join(modMetaDirPath, modMetaErrorPath),
+		0o600,
 	)
 }
 
@@ -886,4 +1168,63 @@ func (*FunctionCallArgValue) Type() *ast.Type {
 
 func (*FunctionCallArgValue) TypeDescription() string {
 	return "A value passed as a named argument to a function call."
+}
+
+type SourceMap struct {
+	Module   string `field:"true" doc:"The module dependency this was declared in."`
+	Filename string `field:"true" doc:"The filename from the module source."`
+	Line     int    `field:"true" doc:"The line number within the filename."`
+	Column   int    `field:"true" doc:"The column number within the line."`
+}
+
+func (*SourceMap) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "SourceMap",
+		NonNull:   true,
+	}
+}
+
+func (*SourceMap) TypeDescription() string {
+	return "Source location information."
+}
+
+func (sourceMap SourceMap) Clone() *SourceMap {
+	cp := sourceMap
+	return &cp
+}
+
+func (sourceMap *SourceMap) TypeDirective() *ast.Directive {
+	return &ast.Directive{
+		Name: "sourceMap",
+		Arguments: ast.ArgumentList{
+			{
+				Name: "module",
+				Value: &ast.Value{
+					Kind: ast.StringValue,
+					Raw:  sourceMap.Module,
+				},
+			},
+			{
+				Name: "filename",
+				Value: &ast.Value{
+					Kind: ast.StringValue,
+					Raw:  sourceMap.Filename,
+				},
+			},
+			{
+				Name: "line",
+				Value: &ast.Value{
+					Kind: ast.IntValue,
+					Raw:  fmt.Sprint(sourceMap.Line),
+				},
+			},
+			{
+				Name: "column",
+				Value: &ast.Value{
+					Kind: ast.IntValue,
+					Raw:  fmt.Sprint(sourceMap.Column),
+				},
+			},
+		},
+	}
 }

@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"reflect"
 
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql/call"
 )
 
 // Derefable is a type that wraps another type.
@@ -70,13 +71,9 @@ func (o Optional[I]) Decoder() InputDecoder {
 	return o
 }
 
-func (o Optional[I]) ToLiteral() *idproto.Literal {
+func (o Optional[I]) ToLiteral() call.Literal {
 	if !o.Valid {
-		return &idproto.Literal{
-			Value: &idproto.Literal_Null{
-				Null: true,
-			},
-		}
+		return call.NewLiteralNull()
 	}
 	return o.Value.ToLiteral()
 }
@@ -142,13 +139,9 @@ func (o DynamicOptional) Decoder() InputDecoder {
 	return o
 }
 
-func (o DynamicOptional) ToLiteral() *idproto.Literal {
+func (o DynamicOptional) ToLiteral() call.Literal {
 	if !o.Valid {
-		return &idproto.Literal{
-			Value: &idproto.Literal_Null{
-				Null: true,
-			},
-		}
+		return call.NewLiteralNull()
 	}
 	return o.Value.ToLiteral()
 }

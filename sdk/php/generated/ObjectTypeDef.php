@@ -13,24 +13,36 @@ namespace Dagger;
  */
 class ObjectTypeDef extends Client\AbstractObject implements Client\IdAble
 {
+    /**
+     * The function used to construct new instances of this object, if any
+     */
     public function constructor(): Function_
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('constructor');
         return new \Dagger\Function_($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
+    /**
+     * The doc string for the object, if any.
+     */
     public function description(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('description');
         return (string)$this->queryLeaf($leafQueryBuilder, 'description');
     }
 
+    /**
+     * Static fields defined on this object, if any.
+     */
     public function fields(): array
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('fields');
         return (array)$this->queryLeaf($leafQueryBuilder, 'fields');
     }
 
+    /**
+     * Functions defined on this object, if any.
+     */
     public function functions(): array
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('functions');
@@ -46,12 +58,27 @@ class ObjectTypeDef extends Client\AbstractObject implements Client\IdAble
         return new \Dagger\ObjectTypeDefId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
+    /**
+     * The name of the object.
+     */
     public function name(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('name');
         return (string)$this->queryLeaf($leafQueryBuilder, 'name');
     }
 
+    /**
+     * The location of this object declaration.
+     */
+    public function sourceMap(): SourceMap
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('sourceMap');
+        return new \Dagger\SourceMap($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * If this ObjectTypeDef is associated with a Module, the name of the module. Unset otherwise.
+     */
     public function sourceModuleName(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('sourceModuleName');

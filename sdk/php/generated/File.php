@@ -23,16 +23,28 @@ class File extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * Return the file's digest. The format of the digest is not guaranteed to be stable between releases of Dagger. It is guaranteed to be stable between invocations of the same Dagger engine.
+     */
+    public function digest(?bool $excludeMetadata = false): string
+    {
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('digest');
+        if (null !== $excludeMetadata) {
+        $leafQueryBuilder->setArgument('excludeMetadata', $excludeMetadata);
+        }
+        return (string)$this->queryLeaf($leafQueryBuilder, 'digest');
+    }
+
+    /**
      * Writes the file to a file path on the host.
      */
-    public function export(string $path, ?bool $allowParentDirPath = false): bool
+    public function export(string $path, ?bool $allowParentDirPath = false): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('export');
         $leafQueryBuilder->setArgument('path', $path);
         if (null !== $allowParentDirPath) {
         $leafQueryBuilder->setArgument('allowParentDirPath', $allowParentDirPath);
         }
-        return (bool)$this->queryLeaf($leafQueryBuilder, 'export');
+        return (string)$this->queryLeaf($leafQueryBuilder, 'export');
     }
 
     /**
@@ -69,6 +81,16 @@ class File extends Client\AbstractObject implements Client\IdAble
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('sync');
         return new \Dagger\FileId((string)$this->queryLeaf($leafQueryBuilder, 'sync'));
+    }
+
+    /**
+     * Retrieves this file with its name set to the given name.
+     */
+    public function withName(string $name): File
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withName');
+        $innerQueryBuilder->setArgument('name', $name);
+        return new \Dagger\File($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**

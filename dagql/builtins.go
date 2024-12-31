@@ -6,8 +6,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql/call"
 )
 
 func builtinOrTyped(val any) (Typed, error) {
@@ -43,7 +44,7 @@ func builtinOrTyped(val any) (Typed, error) {
 			arr := DynamicArrayOutput{
 				Elem: elem,
 			}
-			for i := 0; i < valV.Len(); i++ {
+			for i := range valV.Len() {
 				elem, err := builtinOrTyped(valV.Index(i).Interface())
 				if err != nil {
 					return nil, fmt.Errorf("slice elem %d: %w", i, err)
@@ -103,6 +104,19 @@ func (d DynamicArrayOutput) Nth(i int) (Typed, error) {
 
 func (d DynamicArrayOutput) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.Values)
+}
+
+func (d DynamicArrayOutput) SetField(val reflect.Value) error {
+	if val.Kind() != reflect.Slice {
+		return fmt.Errorf("expected slice, got %v", val.Kind())
+	}
+	val.Set(reflect.MakeSlice(val.Type(), len(d.Values), len(d.Values)))
+	for i, elem := range d.Values {
+		if err := assign(val.Index(i), elem); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func builtinOrInput(val any) (Input, error) {
@@ -188,16 +202,12 @@ func (d DynamicArrayInput) DecodeInput(val any) (Input, error) {
 
 var _ Input = DynamicArrayInput{}
 
-func (d DynamicArrayInput) ToLiteral() *idproto.Literal {
-	list := &idproto.List{}
+func (d DynamicArrayInput) ToLiteral() call.Literal {
+	literals := make([]call.Literal, 0, len(d.Values))
 	for _, elem := range d.Values {
-		list.Values = append(list.Values, elem.ToLiteral())
+		literals = append(literals, elem.ToLiteral())
 	}
-	return &idproto.Literal{
-		Value: &idproto.Literal_List{
-			List: list,
-		},
-	}
+	return call.NewLiteralList(literals...)
 }
 
 func (d DynamicArrayInput) Type() *ast.Type {

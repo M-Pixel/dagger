@@ -22,6 +22,9 @@ enum TypeDefKind: string
     /** A boolean value. */
     case BOOLEAN_KIND = 'BOOLEAN_KIND';
 
+    /** A scalar value of any basic kind. */
+    case SCALAR_KIND = 'SCALAR_KIND';
+
     /**
      * A list of values all having the same type.
      *
@@ -52,4 +55,11 @@ enum TypeDefKind: string
      * This is used for functions that have no return value. The outer TypeDef specifying this Kind is always Optional, as the Void is never actually represented.
      */
     case VOID_KIND = 'VOID_KIND';
+
+    /**
+     * A GraphQL enum type and its values
+     *
+     * Always paired with an EnumTypeDef.
+     */
+    case ENUM_KIND = 'ENUM_KIND';
 }

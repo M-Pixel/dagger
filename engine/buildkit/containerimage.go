@@ -3,21 +3,23 @@ package buildkit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
 	"strings"
 
-	"github.com/containerd/containerd/platforms"
-	"github.com/dagger/dagger/engine"
+	"github.com/containerd/platforms"
 	bkcache "github.com/moby/buildkit/cache"
 	bkclient "github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	bkgw "github.com/moby/buildkit/frontend/gateway/client"
 	bksolverpb "github.com/moby/buildkit/solver/pb"
 	solverresult "github.com/moby/buildkit/solver/result"
+	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/vito/progrock"
+
+	"github.com/dagger/dagger/engine"
 )
 
 type ContainerExport struct {
@@ -30,11 +32,12 @@ func (c *Client) PublishContainerImage(
 	inputByPlatform map[string]ContainerExport,
 	opts map[string]string, // TODO: make this an actual type, this leaks too much untyped buildkit api
 ) (map[string]string, error) {
+	ctx = buildkitTelemetryProvider(c, ctx)
 	ctx, cancel, err := c.withClientCloseCancel(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer cancel()
+	defer cancel(errors.New("publish container image done"))
 
 	combinedResult, err := c.getContainerResult(ctx, inputByPlatform)
 	if err != nil {
@@ -48,12 +51,12 @@ func (c *Client) PublishContainerImage(
 
 	expInstance, err := exporter.Resolve(ctx, 0, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve exporter: %s", err)
+		return nil, fmt.Errorf("failed to resolve exporter: %w", err)
 	}
 
 	resp, descRef, err := expInstance.Export(ctx, combinedResult, nil, c.ID())
 	if err != nil {
-		return nil, fmt.Errorf("failed to export: %s", err)
+		return nil, fmt.Errorf("failed to export: %w", err)
 	}
 	if descRef != nil {
 		descRef.Release()
@@ -67,11 +70,12 @@ func (c *Client) ExportContainerImage(
 	destPath string,
 	opts map[string]string, // TODO: make this an actual type, this leaks too much untyped buildkit api
 ) (map[string]string, error) {
+	ctx = buildkitTelemetryProvider(c, ctx)
 	ctx, cancel, err := c.withClientCloseCancel(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer cancel()
+	defer cancel(errors.New("export container image done"))
 
 	destPath = path.Clean(destPath)
 	if destPath == ".." || strings.HasPrefix(destPath, "../") {
@@ -95,23 +99,22 @@ func (c *Client) ExportContainerImage(
 
 	expInstance, err := exporter.Resolve(ctx, 0, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve exporter: %s", err)
+		return nil, fmt.Errorf("failed to resolve exporter: %w", err)
 	}
 
 	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get requester session ID from client metadata: %s", err)
+		return nil, fmt.Errorf("failed to get requester session ID from client metadata: %w", err)
 	}
 
 	ctx = engine.LocalExportOpts{
-		DestClientID: clientMetadata.ClientID,
 		Path:         destPath,
 		IsFileStream: true,
 	}.AppendToOutgoingContext(ctx)
 
 	resp, descRef, err := expInstance.Export(ctx, combinedResult, nil, clientMetadata.ClientID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to export: %s", err)
+		return nil, fmt.Errorf("failed to export: %w", err)
 	}
 	if descRef != nil {
 		descRef.Release()
@@ -125,16 +128,17 @@ func (c *Client) ContainerImageToTarball(
 	fileName string,
 	inputByPlatform map[string]ContainerExport,
 	opts map[string]string,
-) (*bksolverpb.Definition, error) {
+) (digest.Digest, error) {
+	ctx = buildkitTelemetryProvider(c, ctx)
 	ctx, cancel, err := c.withClientCloseCancel(ctx)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	defer cancel()
+	defer cancel(errors.New("container image to tarball done"))
 
 	combinedResult, err := c.getContainerResult(ctx, inputByPlatform)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	exporterName := bkclient.ExporterDocker
@@ -144,41 +148,39 @@ func (c *Client) ContainerImageToTarball(
 
 	exporter, err := c.Worker.Exporter(exporterName, c.SessionManager)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	expInstance, err := exporter.Resolve(ctx, 0, opts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve exporter: %s", err)
+		return "", fmt.Errorf("failed to resolve exporter: %w", err)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "dagger-tarball")
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temp dir for tarball export: %s", err)
+		return "", fmt.Errorf("failed to create temp dir for tarball export: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 	destPath := path.Join(tmpDir, fileName)
 
 	ctx = engine.LocalExportOpts{
-		DestClientID: c.ID(),
 		Path:         destPath,
 		IsFileStream: true,
 	}.AppendToOutgoingContext(ctx)
 
 	_, descRef, err := expInstance.Export(ctx, combinedResult, nil, c.ID())
 	if err != nil {
-		return nil, fmt.Errorf("failed to export: %s", err)
+		return "", fmt.Errorf("failed to export: %w", err)
 	}
 	if descRef != nil {
 		defer descRef.Release()
 	}
 
-	ctx, recorder := progrock.WithGroup(ctx, "container image to tarball")
-	pbDef, _, err := c.EngineContainerLocalImport(ctx, recorder, engineHostPlatform, tmpDir, nil, []string{fileName})
+	dgst, err := c.EngineContainerLocalImport(ctx, engineHostPlatform, tmpDir, nil, []string{fileName})
 	if err != nil {
-		return nil, fmt.Errorf("failed to import container tarball from engine container filesystem: %s", err)
+		return "", fmt.Errorf("failed to import container tarball from engine container filesystem: %w", err)
 	}
-	return pbDef, nil
+	return dgst, nil
 }
 
 func (c *Client) getContainerResult(
@@ -196,11 +198,11 @@ func (c *Client) getContainerResult(
 			Evaluate:   true,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to solve for container publish: %s", err)
+			return nil, fmt.Errorf("failed to solve for container publish: %w", err)
 		}
 		cacheRes, err := ConvertToWorkerCacheResult(ctx, res)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert result: %s", err)
+			return nil, fmt.Errorf("failed to convert result: %w", err)
 		}
 		ref, err := cacheRes.SingleRef()
 		if err != nil {

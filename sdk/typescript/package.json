@@ -9,48 +9,61 @@
     "dist/"
   ],
   "exports": {
-    ".": "./dist/index.js"
+    ".": "./dist/src/index.js",
+    "./telemetry": "./dist/src/telemetry/index.js"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=18"
   },
-  "main": "dist/index.js",
+  "main": "dist/src/index.js",
   "dependencies": {
-    "@lifeomic/axios-fetch": "^3.0.1",
-    "adm-zip": "^0.5.10",
+    "@grpc/grpc-js": "^1.11.1",
+    "@lifeomic/axios-fetch": "^3.1.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.53.0",
+    "@opentelemetry/sdk-metrics": "^1.25.1",
+    "@opentelemetry/sdk-node": "^0.52.1",
+    "@opentelemetry/semantic-conventions": "^1.25.1",
+    "adm-zip": "^0.5.15",
     "env-paths": "^3.0.0",
-    "execa": "^8.0.1",
-    "graphql": "^16.8.0",
-    "graphql-request": "^6.1.0",
+    "execa": "^9.3.1",
+    "graphql": "^16.9.0",
+    "graphql-request": "^7.1.0",
     "graphql-tag": "^2.12.6",
-    "node-color-log": "^11.0.0",
-    "node-fetch": "^3.3.1",
-    "reflect-metadata": "^0.2.1",
-    "tar": "^6.1.13",
-    "typescript": "^5.3.3"
+    "node-color-log": "^12.0.1",
+    "node-fetch": "^3.3.2",
+    "reflect-metadata": "^0.2.2",
+    "tar": "^7.4.2",
+    "typescript": "^5.5.4"
   },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "test": "mocha",
+    "test": "yarn run test:node",
+    "test:bun": "bun run --bun mocha",
+    "test:node": "mocha",
+    "test:generate-scan": "tsx ./introspector/test/testdata/generate_expected_scan.ts",
     "lint": "yarn eslint --max-warnings=0 .",
-    "fmt": "yarn eslint --fix .",
-    "docs:lint": "yarn eslint --max-warnings=0 --resolve-plugins-relative-to=./ --ext=.js,.ts,.mjs,.mts ../../docs/current_docs",
-    "docs:fmt": "yarn eslint --fix --resolve-plugins-relative-to=./ --ext=.js,.ts,.mjs,.mts ../../docs/current_docs ."
+    "fmt": "yarn eslint --max-warnings=0 --fix .",
+    "docs:lint": "cd ../../docs/current_docs && eslint -c ../../sdk/typescript/eslint-docs.config.js --max-warnings=0 ./**/*.ts",
+    "docs:fmt": "cd ../../docs/current_docs && eslint --fix -c ../../sdk/typescript/eslint-docs.config.js --max-warnings=0 ./**/*.ts"
   },
   "devDependencies": {
-    "@trivago/prettier-plugin-sort-imports": "^4.2.0",
-    "@types/adm-zip": "^0.5.0",
-    "@types/mocha": "latest",
-    "@types/node": "~20",
-    "@types/tar": "^6.1.4",
-    "@typescript-eslint/eslint-plugin": "^5.62.0",
-    "@typescript-eslint/parser": "^5.62.0",
-    "eslint": "^8.56.0",
+    "@eslint/js": "^10.0.0",
+    "@trivago/prettier-plugin-sort-imports": "^4.3.0",
+    "@types/adm-zip": "^0.5.5",
+    "@types/mocha": "^10.0.7",
+    "@types/node": "~22.1.0",
+    "@types/tar": "^6.1.13",
+    "@typescript-eslint/eslint-plugin": "^8.0.1",
+    "@typescript-eslint/parser": "^8.0.1",
+    "eslint": "^9.8.0",
     "eslint-config-prettier": "^9.1.0",
-    "eslint-plugin-prettier": "^4.2.1",
-    "mocha": "^10.2.0",
-    "prettier": "^2.8.7",
-    "ts-node": "^10.9.1"
+    "eslint-plugin-prettier": "^5.2.1",
+    "mocha": "^10.7.0",
+    "prettier": "^3.3.3",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.2",
+    "typescript-eslint": "^8.0.1"
   }
 }

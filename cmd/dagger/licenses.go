@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/mitchellh/go-spdx"
-	"github.com/vito/progrock"
+
+	"github.com/dagger/dagger/engine/slog"
 )
 
 const (
@@ -59,25 +60,27 @@ var licenseFiles = []string{
 	"UNLICENCE",
 }
 
-func findOrCreateLicense(ctx context.Context, dir string) error {
-	rec := progrock.FromContext(ctx)
-
-	id := licenseID
-	if id == "" {
-		if foundLicense, err := searchForLicense(dir); err == nil {
-			rec.Debug("found existing LICENSE file", progrock.Labelf("path", foundLicense))
-			return nil
-		}
-
-		id = defaultLicense
+func findOrCreateLicense(ctx context.Context, dir string, searchExisting bool) error {
+	// Empty license means no license
+	if licenseID == "" {
+		return nil
 	}
 
-	rec.Warn("no LICENSE file found; generating one for you, feel free to change or remove",
-		progrock.Labelf("license", id))
+	slog := slog.SpanLogger(ctx, InstrumentationLibrary)
 
-	license, err := spdx.License(id)
+	if searchExisting {
+		if foundLicense, err := searchForLicense(dir); err == nil {
+			slog.Debug("found existing LICENSE file", "path", foundLicense)
+			return nil
+		}
+	}
+
+	slog.Warn("no LICENSE file found; generating one for you, feel free to change or remove",
+		"license", licenseID)
+
+	license, err := spdx.License(licenseID)
 	if err != nil {
-		return fmt.Errorf("failed to get license: %w", err)
+		return fmt.Errorf("failed to get license %q: %w", licenseID, err)
 	}
 
 	newLicense := filepath.Join(dir, "LICENSE")
@@ -98,29 +101,46 @@ func searchForLicense(dir string) (string, error) {
 		dir = "."
 	}
 
-	for _, fileName := range licenseFiles {
-		licensePath := filepath.Join(dir, fileName)
-		if _, err := os.Stat(licensePath); err == nil {
-			return licensePath, nil
-		}
-	}
-
-	var atRoot bool
-	if dir == "/" {
-		atRoot = true
-	} else if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-		atRoot = true
-	}
-
-	if atRoot {
-		// we reached the module root; time to give up
-		return "", errors.New("not found")
-	}
-
-	abs, err := filepath.Abs(dir)
+	dirs, err := pathsToContext(dir)
 	if err != nil {
 		return "", err
 	}
 
-	return searchForLicense(filepath.Dir(abs))
+	for _, dir := range dirs {
+		for _, fileName := range licenseFiles {
+			licensePath := filepath.Join(dir, fileName)
+			if _, err := os.Stat(licensePath); err == nil {
+				return licensePath, nil
+			}
+		}
+	}
+
+	return "", errors.New("not found")
+}
+
+func pathsToContext(path string) ([]string, error) {
+	curPath := path
+
+	var paths []string
+	for {
+		paths = append(paths, curPath)
+
+		_, err := os.Stat(filepath.Join(curPath, ".git"))
+		if err == nil {
+			// at the module root; time to return
+			return paths, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+
+		if absPath, err := filepath.Abs(curPath); err != nil {
+			return nil, err
+		} else if absPath[len(absPath)-1] == os.PathSeparator {
+			// at the filesystem root; time to give up
+			return []string{path}, nil
+		}
+
+		curPath = filepath.Clean(filepath.Join(curPath, ".."))
+	}
 }

@@ -41,21 +41,21 @@ func Close() error {
 }
 
 // Retrieves a content-addressed blob.
-func Blob(digest string, size int, mediaType string, uncompressed string) *dagger.Directory {
+func Blob(digest string) *dagger.Directory {
 	client := initClient()
-	return client.Blob(digest, size, mediaType, uncompressed)
+	return client.Blob(digest)
+}
+
+// Retrieves a container builtin to the engine.
+func BuiltinContainer(digest string) *dagger.Container {
+	client := initClient()
+	return client.BuiltinContainer(digest)
 }
 
 // Constructs a cache volume for a given cache key.
 func CacheVolume(key string) *dagger.CacheVolume {
 	client := initClient()
 	return client.CacheVolume(key)
-}
-
-// Checks if the current Dagger Engine is compatible with an SDK's required version.
-func CheckVersionCompatibility(ctx context.Context, version string) (bool, error) {
-	client := initClient()
-	return client.CheckVersionCompatibility(ctx, version)
 }
 
 // Creates a scratch container.
@@ -93,15 +93,21 @@ func DefaultPlatform(ctx context.Context) (dagger.Platform, error) {
 }
 
 // Creates an empty directory.
-func Directory(opts ...dagger.DirectoryOpts) *dagger.Directory {
+func Directory() *dagger.Directory {
 	client := initClient()
-	return client.Directory(opts...)
+	return client.Directory()
 }
 
-// Deprecated: Use LoadFileFromID instead.
-func File(id dagger.FileID) *dagger.File {
+// The Dagger engine container configuration and state
+func Engine() *dagger.Engine {
 	client := initClient()
-	return client.File(id)
+	return client.Engine()
+}
+
+// Create a new error.
+func Error(message string) *dagger.Error {
+	client := initClient()
+	return client.Error(message)
 }
 
 // Creates a function.
@@ -158,10 +164,52 @@ func LoadDirectoryFromID(id dagger.DirectoryID) *dagger.Directory {
 	return client.LoadDirectoryFromID(id)
 }
 
+// Load a EngineCacheEntry from its ID.
+func LoadEngineCacheEntryFromID(id dagger.EngineCacheEntryID) *dagger.EngineCacheEntry {
+	client := initClient()
+	return client.LoadEngineCacheEntryFromID(id)
+}
+
+// Load a EngineCacheEntrySet from its ID.
+func LoadEngineCacheEntrySetFromID(id dagger.EngineCacheEntrySetID) *dagger.EngineCacheEntrySet {
+	client := initClient()
+	return client.LoadEngineCacheEntrySetFromID(id)
+}
+
+// Load a EngineCache from its ID.
+func LoadEngineCacheFromID(id dagger.EngineCacheID) *dagger.EngineCache {
+	client := initClient()
+	return client.LoadEngineCacheFromID(id)
+}
+
+// Load a Engine from its ID.
+func LoadEngineFromID(id dagger.EngineID) *dagger.Engine {
+	client := initClient()
+	return client.LoadEngineFromID(id)
+}
+
+// Load a EnumTypeDef from its ID.
+func LoadEnumTypeDefFromID(id dagger.EnumTypeDefID) *dagger.EnumTypeDef {
+	client := initClient()
+	return client.LoadEnumTypeDefFromID(id)
+}
+
+// Load a EnumValueTypeDef from its ID.
+func LoadEnumValueTypeDefFromID(id dagger.EnumValueTypeDefID) *dagger.EnumValueTypeDef {
+	client := initClient()
+	return client.LoadEnumValueTypeDefFromID(id)
+}
+
 // Load a EnvVariable from its ID.
 func LoadEnvVariableFromID(id dagger.EnvVariableID) *dagger.EnvVariable {
 	client := initClient()
 	return client.LoadEnvVariableFromID(id)
+}
+
+// Load a Error from its ID.
+func LoadErrorFromID(id dagger.ErrorID) *dagger.Error {
+	client := initClient()
+	return client.LoadErrorFromID(id)
 }
 
 // Load a FieldTypeDef from its ID.
@@ -278,6 +326,12 @@ func LoadModuleSourceFromID(id dagger.ModuleSourceID) *dagger.ModuleSource {
 	return client.LoadModuleSourceFromID(id)
 }
 
+// Load a ModuleSourceView from its ID.
+func LoadModuleSourceViewFromID(id dagger.ModuleSourceViewID) *dagger.ModuleSourceView {
+	client := initClient()
+	return client.LoadModuleSourceViewFromID(id)
+}
+
 // Load a ObjectTypeDef from its ID.
 func LoadObjectTypeDefFromID(id dagger.ObjectTypeDefID) *dagger.ObjectTypeDef {
 	client := initClient()
@@ -288,6 +342,12 @@ func LoadObjectTypeDefFromID(id dagger.ObjectTypeDefID) *dagger.ObjectTypeDef {
 func LoadPortFromID(id dagger.PortID) *dagger.Port {
 	client := initClient()
 	return client.LoadPortFromID(id)
+}
+
+// Load a ScalarTypeDef from its ID.
+func LoadScalarTypeDefFromID(id dagger.ScalarTypeDefID) *dagger.ScalarTypeDef {
+	client := initClient()
+	return client.LoadScalarTypeDefFromID(id)
 }
 
 // Load a Secret from its ID.
@@ -306,6 +366,12 @@ func LoadServiceFromID(id dagger.ServiceID) *dagger.Service {
 func LoadSocketFromID(id dagger.SocketID) *dagger.Socket {
 	client := initClient()
 	return client.LoadSocketFromID(id)
+}
+
+// Load a SourceMap from its ID.
+func LoadSourceMapFromID(id dagger.SourceMapID) *dagger.SourceMap {
+	client := initClient()
+	return client.LoadSourceMapFromID(id)
 }
 
 // Load a Terminal from its ID.
@@ -338,16 +404,10 @@ func ModuleSource(refString string, opts ...dagger.ModuleSourceOpts) *dagger.Mod
 	return client.ModuleSource(refString, opts...)
 }
 
-// Creates a named sub-pipeline.
-func Pipeline(name string, opts ...dagger.PipelineOpts) *dagger.Client {
-	client := initClient()
-	return client.Pipeline(name, opts...)
-}
-
 // Reference a secret by name.
-func Secret(name string) *dagger.Secret {
+func Secret(name string, opts ...dagger.SecretOpts) *dagger.Secret {
 	client := initClient()
-	return client.Secret(name)
+	return client.Secret(name, opts...)
 }
 
 // Sets a secret given a user defined name to its plaintext and returns the secret.
@@ -358,16 +418,20 @@ func SetSecret(name string, plaintext string) *dagger.Secret {
 	return client.SetSecret(name, plaintext)
 }
 
-// Loads a socket by its ID.
-//
-// Deprecated: Use LoadSocketFromID instead.
-func Socket(id dagger.SocketID) *dagger.Socket {
+// Creates source map metadata.
+func SourceMap(filename string, line int, column int) *dagger.SourceMap {
 	client := initClient()
-	return client.Socket(id)
+	return client.SourceMap(filename, line, column)
 }
 
 // Create a new TypeDef.
 func TypeDef() *dagger.TypeDef {
 	client := initClient()
 	return client.TypeDef()
+}
+
+// Get the current Dagger Engine version.
+func Version(ctx context.Context) (string, error) {
+	client := initClient()
+	return client.Version(ctx)
 }

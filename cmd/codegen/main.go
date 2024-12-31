@@ -1,25 +1,30 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/vito/progrock"
-	"github.com/vito/progrock/console"
 
 	"dagger.io/dagger"
+	"dagger.io/dagger/telemetry"
 	"github.com/dagger/dagger/cmd/codegen/generator"
+	"github.com/dagger/dagger/cmd/codegen/introspection"
 )
 
 var (
 	outputDir             string
 	lang                  string
-	propagateLogs         bool
 	introspectionJSONPath string
 
-	moduleSourceRootPath string
-	moduleName           string
+	modulePath string
+	moduleName string
+
+	outputSchema string
+	merge        bool
 )
 
 var rootCmd = &cobra.Command{
@@ -32,60 +37,62 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+var introspectCmd = &cobra.Command{
+	Use:  "introspect",
+	RunE: Introspect,
+}
+
 func init() {
 	rootCmd.Flags().StringVar(&lang, "lang", "go", "language to generate")
 	rootCmd.Flags().StringVarP(&outputDir, "output", "o", ".", "output directory")
-	rootCmd.Flags().BoolVar(&propagateLogs, "propagate-logs", false, "propagate logs directly to progrock.sock")
 	rootCmd.Flags().StringVar(&introspectionJSONPath, "introspection-json-path", "", "optional path to file containing pre-computed graphql introspection JSON")
 
-	rootCmd.Flags().StringVar(&moduleSourceRootPath, "module-source-root", "", "path to root directory of module source (i.e. where its dagger.json is located)")
+	rootCmd.Flags().StringVar(&modulePath, "module-context-path", "", "path to context directory of the module")
 	rootCmd.Flags().StringVar(&moduleName, "module-name", "", "name of module to generate code for")
-}
+	rootCmd.Flags().BoolVar(&merge, "merge", false, "merge module deps with project's")
 
-const nestedSock = "/.progrock.sock"
+	introspectCmd.Flags().StringVarP(&outputSchema, "output", "o", "", "save introspection result to file")
+	rootCmd.AddCommand(introspectCmd)
+}
 
 func ClientGen(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
-	dag, err := dagger.Connect(ctx, dagger.WithSkipCompatibilityCheck())
-	if err != nil {
-		return err
-	}
+	ctx = telemetry.InitEmbedded(ctx, nil)
 
-	var progW progrock.Writer
-	var dialErr error
-	if propagateLogs {
-		progW, dialErr = progrock.DialRPC(ctx, "unix://"+nestedSock)
-		if dialErr != nil {
-			return fmt.Errorf("error connecting to progrock: %w; falling back to console output", dialErr)
-		}
-	} else {
-		progW = console.NewWriter(os.Stderr, console.WithMessageLevel(progrock.MessageLevel_DEBUG))
+	// we're checking for the flag existence here as not setting the flag and
+	// setting it to false doesn't produce the same behavior.
+	var mergePtr *bool
+	if cmd.Flags().Changed("merge") {
+		mergePtr = &merge
 	}
-
-	var rec *progrock.Recorder
-	if parent := os.Getenv("_DAGGER_PROGROCK_PARENT"); parent != "" {
-		rec = progrock.NewSubRecorder(progW, parent)
-	} else {
-		rec = progrock.NewRecorder(progW)
-	}
-	defer rec.Complete()
-	defer rec.Close()
-
-	ctx = progrock.ToContext(ctx, rec)
 
 	cfg := generator.Config{
 		Lang: generator.SDKLang(lang),
 
 		OutputDir: outputDir,
+
+		Merge: mergePtr,
 	}
 
 	if moduleName != "" {
 		cfg.ModuleName = moduleName
 
-		if moduleSourceRootPath == "" {
-			return fmt.Errorf("--module-name requires --module-source-root")
+		if modulePath == "" {
+			return fmt.Errorf("--module-name requires --module-context-path")
 		}
-		cfg.ModuleSourceRootPath = moduleSourceRootPath
+		modPath, err := relativeTo(outputDir, modulePath)
+		if err != nil {
+			return err
+		}
+		if part, _, _ := strings.Cut(modPath, string(filepath.Separator)); part == ".." {
+			return fmt.Errorf("module path must be child of output directory")
+		}
+		cfg.ModuleContextPath = modPath
+		moduleParentPath, err := relativeTo(modulePath, outputDir)
+		if err != nil {
+			return err
+		}
+		cfg.ModuleParentPath = moduleParentPath
 	}
 
 	if introspectionJSONPath != "" {
@@ -96,11 +103,52 @@ func ClientGen(cmd *cobra.Command, args []string) error {
 		cfg.IntrospectionJSON = string(introspectionJSON)
 	}
 
-	return Generate(ctx, cfg, dag)
+	return Generate(ctx, cfg)
+}
+
+func Introspect(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+	dag, err := dagger.Connect(ctx)
+	if err != nil {
+		return err
+	}
+
+	var data any
+	err = dag.Do(ctx, &dagger.Request{
+		Query: introspection.Query,
+	}, &dagger.Response{
+		Data: &data,
+	})
+	if err != nil {
+		return fmt.Errorf("introspection query: %w", err)
+	}
+	if data != nil {
+		jsonData, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal introspection json: %w", err)
+		}
+		if outputSchema != "" {
+			return os.WriteFile(outputSchema, jsonData, 0o644) //nolint: gosec
+		}
+		cmd.Println(string(jsonData))
+	}
+	return nil
 }
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func relativeTo(basepath string, tarpath string) (string, error) {
+	basepath, err := filepath.Abs(basepath)
+	if err != nil {
+		return "", err
+	}
+	tarpath, err = filepath.Abs(tarpath)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Rel(basepath, tarpath)
 }

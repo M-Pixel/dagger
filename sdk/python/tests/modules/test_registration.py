@@ -1,15 +1,10 @@
-import pytest
+import itertools
+from typing import Annotated
 
+from typing_extensions import Doc
+
+import dagger
 from dagger.mod import Module
-from dagger.mod._exceptions import NameConflictError, UserError
-
-
-def get_resolver(mod: Module, parent_name: str, resolver_name: str):
-    return mod.get_resolver(
-        mod.get_resolvers("foo"),
-        parent_name,
-        resolver_name,
-    )
 
 
 def test_object_type_resolvers():
@@ -20,105 +15,92 @@ def test_object_type_resolvers():
         private_field: str
         exposed_field: str = mod.field()
 
-        def private_method(self) -> str:
-            ...
+        def private_method(self) -> str: ...
 
         @mod.function
-        def exposed_method(self) -> str:
-            ...
+        def exposed_method(self) -> str: ...
 
-    def private_function() -> str:
-        ...
+    def private_function() -> str: ...
 
     @mod.function
-    def exposed_function() -> str:
-        ...
+    def unsupported_top_level() -> str: ...
 
-    resolvers = [
-        (r.name, r.origin.__name__ if r.origin else None) for r in mod._resolvers
+    fields = list(
+        itertools.chain.from_iterable(
+            (f.original_name for f in o.fields.values()) for o in mod._objects.values()
+        )
+    )
+
+    functions = list(
+        itertools.chain.from_iterable(
+            (f.original_name for f in o.functions.values())
+            for o in mod._objects.values()
+        )
+    )
+
+    assert fields + functions == [
+        "exposed_field",
+        "exposed_method",
     ]
-
-    assert resolvers == [
-        ("exposed_method", "ExposedClass"),
-        ("exposed_field", "ExposedClass"),
-        ("", "ExposedClass"),
-        ("exposed_function", None),
-    ]
-
-
-def test_no_main_object():
-    mod = Module()
-
-    @mod.object_type
-    class Bar:
-        @mod.function
-        def method(self):
-            ...
-
-    with pytest.raises(UserError, match="doesn't define"):
-        mod.get_resolvers("foo")
-
-
-def test_toplevel_and_class_conflict():
-    mod = Module()
-
-    @mod.object_type
-    class Foo:
-        @mod.function
-        def method(self):
-            ...
-
-    @mod.function
-    def func():
-        ...
-
-    with pytest.raises(NameConflictError, match="not both"):
-        mod.get_resolvers("foo")
-
-
-def test_resolver_name_conflict():
-    mod = Module()
-
-    @mod.function
-    def foo():
-        ...
-
-    @mod.function(name="foo")
-    def foo_():
-        ...
-
-    with pytest.raises(NameConflictError, match="“Foo.foo” is defined 2 times"):
-        mod.get_resolvers("foo")
-
-
-@pytest.mark.parametrize(
-    ("mod_name", "class_name"),
-    [
-        ("foo", "Foo"),
-        ("foo-bar", "FooBar"),
-        ("foo_bar", "FooBar"),
-        ("fooBar", "FooBar"),
-        ("FooBar", "FooBar"),
-    ],
-)
-def test_main_object_name(mod_name, class_name):
-    mod = Module()
-
-    @mod.function
-    def func():
-        ...
-
-    resolvers = mod.get_resolvers(mod_name)
-    assert next(iter(resolvers.keys())).name == class_name
 
 
 def test_func_doc():
     mod = Module()
 
-    @mod.function
-    def fn_with_doc():
-        """Foo."""
+    @mod.object_type
+    class Foo:
+        @mod.function
+        def fn_with_doc(self):
+            """Foo."""
 
-    r = get_resolver(mod, "Foo", "fn_with_doc")
+    assert mod.get_object("Foo").functions["fn_with_doc"].doc == "Foo."
 
-    assert r.doc == "Foo."
+
+def test_external_constructor_doc():
+    mod = Module()
+
+    @mod.object_type
+    class External:
+        """external docstring"""
+
+        foo: Annotated[str, Doc("a foo walks into a bar")] = "bar"
+
+        @mod.function
+        def bar(self) -> str:
+            return self.foo
+
+    @mod.object_type
+    class Test:
+        external = mod.function()(External)
+        alternative = mod.function(doc="still external")(External)
+
+    obj = mod.get_object("Test")
+
+    assert obj.functions["external"].doc == "external docstring"
+    assert obj.functions["alternative"].doc == "still external"
+
+    # all functions point to the same constructor, with the same arguments
+    for fn in obj.functions.values():
+        for param in fn.parameters.values():
+            assert param.name == "foo"
+            assert param.doc == "a foo walks into a bar"
+            assert param.default_value == dagger.JSON('"bar"')
+
+
+def test_external_alt_constructor_doc():
+    mod = Module()
+
+    @mod.object_type
+    class External:
+        """An object"""
+
+        @classmethod
+        def create(cls) -> "External":
+            """Factory constructor."""
+            return cls()
+
+    @mod.object_type
+    class Test:
+        external = mod.function()(External)
+
+    assert mod.get_object("Test").functions["external"].doc == "Factory constructor."

@@ -1,13 +1,13 @@
 import { object, func } from "@dagger.io/dagger"
 
-@object
-class Syntax {
-	@func
+@object()
+export class Syntax {
+	@func()
 	singleQuoteDefaultArgHello(msg: string = 'world'): string {
 		return `hello ${msg}`
 	}
 
-	@func
+	@func()
 	doubleQuotesDefaultArgHello(msg: string = "world"): string {
 		return `hello ${msg}`
 	}

@@ -14,9 +14,10 @@ from gql.transport.exceptions import (
     TransportServerError,
 )
 from gql.transport.httpx import HTTPXAsyncTransport
+from opentelemetry import propagate
 from typing_extensions import Self
 
-from dagger import ClientConnectionError
+from dagger import ClientConnectionError, telemetry
 from dagger._config import ConnectConfig, Retry
 from dagger._managers import ResourceManager
 
@@ -53,6 +54,13 @@ class ConnectParams:
             raise ClientConnectionError(msg) from e
 
 
+class TelemetryTransport(httpx.AsyncHTTPTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        # Get traceparent into request headers if present.
+        propagate.inject(request.headers)
+        return await super().handle_async_request(request)
+
+
 class ClientSession(ResourceManager):
     """Establish a GraphQL client connection to the engine."""
 
@@ -64,6 +72,7 @@ class ClientSession(ResourceManager):
 
         transport = HTTPXAsyncTransport(
             conn.url,
+            transport=TelemetryTransport(),
             timeout=cfg.timeout,
             auth=(conn.session_token, ""),
         )
@@ -78,12 +87,17 @@ class ClientSession(ResourceManager):
         self.client = retrying_client(client, cfg.retry) if cfg.retry else client
         self._session: AsyncClientSession | None = None
 
+    async def __aenter__(self) -> Self:
+        await self.start()
+        return self
+
     async def start(self) -> AsyncClientSession:
         if self._session:
             return self._session
 
         async with self.get_stack() as stack:
             logger.debug("Establishing client session to GraphQL server")
+
             try:
                 session = await stack.enter_async_context(self.client)
             except TimeoutError as e:
@@ -158,6 +172,7 @@ class BaseConnection:
         return self.connect().__await__()
 
     async def __aenter__(self) -> Self:
+        telemetry.initialize()
         return await self.connect()
 
     async def __aexit__(self, *_) -> None:

@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/containerd/containerd/labels"
-	"github.com/dagger/dagger/dagql"
-	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/opencontainers/go-digest"
 	"github.com/vektah/gqlparser/v2/ast"
-	"github.com/vito/progrock"
+
+	"github.com/dagger/dagger/dagql"
 )
 
 type Host struct {
@@ -32,7 +31,7 @@ type CopyFilter struct {
 	Include []string `default:"[]"`
 }
 
-func LoadBlob(ctx context.Context, srv *dagql.Server, desc specs.Descriptor) (i dagql.Instance[*Directory], err error) {
+func LoadBlob(ctx context.Context, srv *dagql.Server, dgst digest.Digest) (i dagql.Instance[*Directory], err error) {
 	// Instead of directly returning a Directory, which would get "stamped" with
 	// an impure ID that cannot be passed between modules, we fetch the Directory
 	// we just uploaded by its blob, which yields a pure ID.
@@ -41,19 +40,7 @@ func LoadBlob(ctx context.Context, srv *dagql.Server, desc specs.Descriptor) (i 
 		Args: []dagql.NamedInput{
 			{
 				Name:  "digest",
-				Value: dagql.NewString(desc.Digest.String()),
-			},
-			{
-				Name:  "size",
-				Value: dagql.NewInt(desc.Size),
-			},
-			{
-				Name:  "mediaType",
-				Value: dagql.NewString(desc.MediaType),
-			},
-			{
-				Name:  "uncompressed",
-				Value: dagql.NewString(desc.Annotations[labels.LabelUncompressed]),
+				Value: dagql.NewString(dgst.String()),
 			},
 		},
 	})
@@ -70,14 +57,15 @@ func (host *Host) Directory(
 	var i dagql.Instance[*Directory]
 	// TODO: enforcement that requester session is granted access to source session at this path
 
-	// Create a sub-pipeline to group llb.Local instructions
-	pipelineName := fmt.Sprintf("%s %s", pipelineNamePrefix, dirPath)
-	ctx, subRecorder := progrock.WithGroup(ctx, pipelineName, progrock.Weak())
+	bk, err := host.Query.Buildkit(ctx)
+	if err != nil {
+		return i, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
-	_, desc, err := host.Query.Buildkit.LocalImport(
+	// Create a sub-pipeline to group llb.Local instructions
+	dgst, err := bk.LocalImport(
 		ctx,
-		subRecorder,
-		host.Query.Platform.Spec(),
+		host.Query.Platform().Spec(),
 		dirPath,
 		filter.Exclude,
 		filter.Include,
@@ -85,7 +73,7 @@ func (host *Host) Directory(
 	if err != nil {
 		return i, fmt.Errorf("host directory %s: %w", dirPath, err)
 	}
-	return LoadBlob(ctx, srv, desc)
+	return LoadBlob(ctx, srv, dgst)
 }
 
 func (host *Host) File(ctx context.Context, srv *dagql.Server, filePath string) (dagql.Instance[*File], error) {
@@ -120,13 +108,26 @@ func (host *Host) File(ctx context.Context, srv *dagql.Server, filePath string) 
 }
 
 func (host *Host) SetSecretFile(ctx context.Context, srv *dagql.Server, secretName string, path string) (i dagql.Instance[*Secret], err error) {
-	secretFileContent, err := host.Query.Buildkit.ReadCallerHostFile(ctx, path)
+	secretStore, err := host.Query.Secrets(ctx)
+	if err != nil {
+		return i, fmt.Errorf("failed to get secrets: %w", err)
+	}
+
+	accessor, err := GetClientResourceAccessor(ctx, host.Query, secretName)
+	if err != nil {
+		return i, err
+	}
+
+	bk, err := host.Query.Buildkit(ctx)
+	if err != nil {
+		return i, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+
+	secretFileContent, err := bk.ReadCallerHostFile(ctx, path)
 	if err != nil {
 		return i, fmt.Errorf("read secret file: %w", err)
 	}
-	if err := host.Query.Secrets.AddSecret(ctx, secretName, secretFileContent); err != nil {
-		return i, err
-	}
+
 	err = srv.Select(ctx, srv.Root(), &i, dagql.Selector{
 		Field: "secret",
 		Args: []dagql.NamedInput{
@@ -134,11 +135,19 @@ func (host *Host) SetSecretFile(ctx context.Context, srv *dagql.Server, secretNa
 				Name:  "name",
 				Value: dagql.NewString(secretName),
 			},
+			{
+				Name:  "accessor",
+				Value: dagql.Opt(dagql.NewString(accessor)),
+			},
 		},
 	})
-	return
-}
+	if err != nil {
+		return i, fmt.Errorf("failed to select secret: %w", err)
+	}
 
-func (host *Host) Socket(sockPath string) *Socket {
-	return NewHostUnixSocket(sockPath)
+	if err := secretStore.AddSecret(i.Self, secretName, secretFileContent); err != nil {
+		return i, fmt.Errorf("failed to add secret: %w", err)
+	}
+
+	return i, nil
 }

@@ -1,11 +1,15 @@
 import contextlib
 import logging
+from typing import TYPE_CHECKING
 
-from dagger import Config
+from dagger import Config, telemetry
 
 from ._engine.conn import Engine, provision_engine
 from ._managers import ResourceManager
 from .client._session import SharedConnection
+
+if TYPE_CHECKING:
+    from dagger import Client
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,7 @@ class Connection(ResourceManager):
 
         import dagger
 
+
         async def main():
             async with dagger.Connection() as client:
                 ctr = client.container().from_("alpine")
@@ -32,6 +37,7 @@ class Connection(ResourceManager):
         import anyio
         import dagger
 
+
         async def main():
             cfg = dagger.Config(log_output=sys.stderr)
 
@@ -42,6 +48,7 @@ class Connection(ResourceManager):
             print(version)
             # Output: Python 3.11.1
 
+
         anyio.run(main)
     """
 
@@ -49,7 +56,8 @@ class Connection(ResourceManager):
         super().__init__()
         self.cfg = config or Config()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Client":
+        telemetry.initialize()
         logger.debug("Establishing connection with isolated client")
         async with self.get_stack() as stack:
             engine = await Engine(self.cfg, stack).provision()
@@ -74,6 +82,7 @@ async def connection(config: Config | None = None):
         import dagger
         from dagger import dag
 
+
         async def main():
             async with dagger.connection():
                 ctr = dag.container().from_("alpine")
@@ -88,6 +97,7 @@ async def connection(config: Config | None = None):
         import dagger
         from dagger import dag
 
+
         async def main():
             cfg = dagger.Config(log_output=sys.stderr)
 
@@ -98,8 +108,10 @@ async def connection(config: Config | None = None):
             print(version)
             # Output: Python 3.11.1
 
+
         anyio.run(main)
     """
+    telemetry.initialize()
     logger.debug("Establishing connection with shared client")
     async with provision_engine(config or Config()) as engine:
         conn = engine.get_shared_client_connection()

@@ -17,7 +17,10 @@ abstract class Connection
         $connection = static::newEnvSession();
 
         if (!empty($workingDir)) {
-            throw new InvalidArgumentException('cannot configure workdir for existing session (please use --workdir or host.directory with absolute paths instead)');
+            throw new InvalidArgumentException(
+                'cannot configure workdir for existing session' .
+                ' (please use --workdir or host.directory with absolute paths instead)'
+            );
         }
 
         if (null === $connection) {
@@ -39,6 +42,11 @@ abstract class Connection
         return new EnvSessionConnection();
     }
 
+    /**
+     * @deprecated
+     * dagger modules will always have the environment variables set
+     * so we don't need to download a CLI Client
+     */
     public static function newProcessSession(string $workDir, CliDownloader $cliDownloader): ProcessSessionConnection
     {
         return new ProcessSessionConnection($workDir, $cliDownloader);
@@ -47,10 +55,16 @@ abstract class Connection
     protected static function createGraphQlClient(int $port, string $token): Client
     {
         $encodedToken = base64_encode("{$token}:");
-
-        return new Client("http://127.0.0.1:{$port}/query", [
+        $headers = [
             'Authorization' => "Basic {$encodedToken}",
-        ]);
+        ];
+
+        $traceparent = getenv('TRACEPARENT');
+        if ($traceparent) {
+            $headers = array_merge($headers, ['Traceparent' => $traceparent]);
+        }
+
+        return new Client("http://127.0.0.1:{$port}/query", $headers);
     }
 
     abstract public function connect(): Client;

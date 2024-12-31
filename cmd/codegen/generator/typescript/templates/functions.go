@@ -12,47 +12,50 @@ import (
 	"github.com/dagger/dagger/cmd/codegen/introspection"
 )
 
-var (
-	commonFunc = generator.NewCommonFunctions(&FormatTypeFunc{})
-	funcMap    = template.FuncMap{
-		"CommentToLines":      commentToLines,
-		"FormatDeprecation":   formatDeprecation,
-		"FormatReturnType":    commonFunc.FormatReturnType,
-		"FormatInputType":     commonFunc.FormatInputType,
-		"FormatOutputType":    commonFunc.FormatOutputType,
-		"FormatEnum":          formatEnum,
-		"FormatName":          formatName,
-		"QueryToClient":       queryToClient,
-		"GetOptionalArgs":     getOptionalArgs,
-		"GetRequiredArgs":     getRequiredArgs,
-		"HasPrefix":           strings.HasPrefix,
-		"PascalCase":          pascalCase,
-		"IsArgOptional":       isArgOptional,
-		"IsCustomScalar":      isCustomScalar,
-		"IsEnum":              isEnum,
-		"IsKeyword":           isKeyword,
-		"ArgsHaveDescription": argsHaveDescription,
-		"SortInputFields":     sortInputFields,
-		"SortEnumFields":      sortEnumFields,
-		"Solve":               solve,
-		"Subtract":            subtract,
-		"ConvertID":           commonFunc.ConvertID,
-		"IsSelfChainable":     commonFunc.IsSelfChainable,
-		"IsListOfObject":      commonFunc.IsListOfObject,
-		"GetArrayField":       commonFunc.GetArrayField,
-		"ToLowerCase":         commonFunc.ToLowerCase,
-		"ToUpperCase":         commonFunc.ToUpperCase,
-		"ToSingleType":        toSingleType,
-		"GetEnumValues":       getEnumValues,
+func TypescriptTemplateFuncs(
+	schemaVersion string,
+) template.FuncMap {
+	commonFunc := generator.NewCommonFunctions(schemaVersion, &FormatTypeFunc{})
+	return template.FuncMap{
+		"CommentToLines":            commentToLines,
+		"FormatDeprecation":         formatDeprecation,
+		"FormatReturnType":          commonFunc.FormatReturnType,
+		"FormatInputType":           commonFunc.FormatInputType,
+		"FormatOutputType":          commonFunc.FormatOutputType,
+		"FormatEnum":                formatEnum,
+		"FormatName":                formatName,
+		"QueryToClient":             queryToClient,
+		"GetOptionalArgs":           getOptionalArgs,
+		"GetRequiredArgs":           getRequiredArgs,
+		"HasPrefix":                 strings.HasPrefix,
+		"PascalCase":                pascalCase,
+		"IsArgOptional":             isArgOptional,
+		"IsCustomScalar":            isCustomScalar,
+		"IsEnum":                    isEnum,
+		"IsKeyword":                 isKeyword,
+		"ArgsHaveDescription":       argsHaveDescription,
+		"SortInputFields":           sortInputFields,
+		"SortEnumFields":            sortEnumFields,
+		"Solve":                     solve,
+		"Subtract":                  subtract,
+		"ConvertID":                 commonFunc.ConvertID,
+		"IsSelfChainable":           commonFunc.IsSelfChainable,
+		"IsListOfObject":            commonFunc.IsListOfObject,
+		"GetArrayField":             commonFunc.GetArrayField,
+		"ToLowerCase":               commonFunc.ToLowerCase,
+		"ToUpperCase":               commonFunc.ToUpperCase,
+		"ToSingleType":              toSingleType,
+		"GetEnumValues":             getEnumValues,
+		"CheckVersionCompatibility": commonFunc.CheckVersionCompatibility,
 	}
-)
+}
 
 // pascalCase change a type name into pascalCase
 func pascalCase(name string) string {
 	return strcase.ToCamel(name)
 }
 
-// solve checks if a field is solveable.
+// solve checks if a field is solvable.
 func solve(field introspection.Field) bool {
 	if field.TypeRef == nil {
 		return false
@@ -104,7 +107,7 @@ func isCustomScalar(t *introspection.Type) bool {
 func isEnum(t *introspection.Type) bool {
 	return t.Kind == introspection.TypeKindEnum &&
 		// We ignore the internal GraphQL enums
-		!strings.HasPrefix(t.Name, "__")
+		!strings.HasPrefix(t.Name, "_")
 }
 
 func isKeyword(s string) bool {
@@ -211,7 +214,7 @@ func formatEnum(s string) string {
 // They are, if all of there InputValues are optional.
 func isArgOptional(values introspection.InputValues) bool {
 	for _, v := range values {
-		if v.TypeRef != nil && !v.TypeRef.IsOptional() {
+		if !v.IsOptional() {
 			return false
 		}
 	}
@@ -220,9 +223,10 @@ func isArgOptional(values introspection.InputValues) bool {
 
 func splitRequiredOptionalArgs(values introspection.InputValues) (required introspection.InputValues, optionals introspection.InputValues) {
 	for i, v := range values {
-		if v.TypeRef != nil && !v.TypeRef.IsOptional() {
+		if !v.IsOptional() {
 			continue
 		}
+
 		return values[:i], values[i:]
 	}
 	return values, nil

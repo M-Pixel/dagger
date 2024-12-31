@@ -15,12 +15,18 @@ namespace Dagger;
  */
 class Function_ extends Client\AbstractObject implements Client\IdAble
 {
+    /**
+     * Arguments accepted by the function, if any.
+     */
     public function args(): array
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('args');
         return (array)$this->queryLeaf($leafQueryBuilder, 'args');
     }
 
+    /**
+     * A doc string for the function, if any.
+     */
     public function description(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('description');
@@ -36,16 +42,31 @@ class Function_ extends Client\AbstractObject implements Client\IdAble
         return new \Dagger\FunctionId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
+    /**
+     * The name of the function.
+     */
     public function name(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('name');
         return (string)$this->queryLeaf($leafQueryBuilder, 'name');
     }
 
+    /**
+     * The type returned by the function.
+     */
     public function returnType(): TypeDef
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('returnType');
         return new \Dagger\TypeDef($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * The location of this function declaration.
+     */
+    public function sourceMap(): SourceMap
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('sourceMap');
+        return new \Dagger\SourceMap($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
@@ -56,8 +77,10 @@ class Function_ extends Client\AbstractObject implements Client\IdAble
         TypeDefId|TypeDef $typeDef,
         ?string $description = '',
         ?Json $defaultValue = null,
-    ): Function_
-    {
+        ?string $defaultPath = '',
+        ?array $ignore = null,
+        SourceMapId|SourceMap|null $sourceMap = null,
+    ): Function_ {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withArg');
         $innerQueryBuilder->setArgument('name', $name);
         $innerQueryBuilder->setArgument('typeDef', $typeDef);
@@ -66,6 +89,15 @@ class Function_ extends Client\AbstractObject implements Client\IdAble
         }
         if (null !== $defaultValue) {
         $innerQueryBuilder->setArgument('defaultValue', $defaultValue);
+        }
+        if (null !== $defaultPath) {
+        $innerQueryBuilder->setArgument('defaultPath', $defaultPath);
+        }
+        if (null !== $ignore) {
+        $innerQueryBuilder->setArgument('ignore', $ignore);
+        }
+        if (null !== $sourceMap) {
+        $innerQueryBuilder->setArgument('sourceMap', $sourceMap);
         }
         return new \Dagger\Function_($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -77,6 +109,16 @@ class Function_ extends Client\AbstractObject implements Client\IdAble
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withDescription');
         $innerQueryBuilder->setArgument('description', $description);
+        return new \Dagger\Function_($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Returns the function with the given source map.
+     */
+    public function withSourceMap(SourceMapId|SourceMap $sourceMap): Function_
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withSourceMap');
+        $innerQueryBuilder->setArgument('sourceMap', $sourceMap);
         return new \Dagger\Function_($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 }

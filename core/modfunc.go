@@ -3,25 +3,32 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 
-	"github.com/dagger/dagger/core/pipeline"
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
-	"github.com/dagger/dagger/engine"
-	"github.com/dagger/dagger/engine/buildkit"
 	bkgw "github.com/moby/buildkit/frontend/gateway/client"
+	"github.com/moby/buildkit/identity"
+	bksession "github.com/moby/buildkit/session"
+	bksolver "github.com/moby/buildkit/solver"
+	solvererror "github.com/moby/buildkit/solver/errdefs"
+	llberror "github.com/moby/buildkit/solver/llbsolver/errdefs"
+	bksolverpb "github.com/moby/buildkit/solver/pb"
 	"github.com/moby/buildkit/util/bklog"
+	bkworker "github.com/moby/buildkit/worker"
 	"github.com/opencontainers/go-digest"
-	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/vito/progrock"
+
+	"github.com/dagger/dagger/analytics"
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/engine/buildkit"
+	"github.com/dagger/dagger/engine/server/resource"
+	"github.com/dagger/dagger/engine/slog"
 )
 
 type ModuleFunction struct {
 	root    *Query
 	mod     *Module
-	modID   *idproto.ID
 	objDef  *ObjectTypeDef // may be nil for special functions like the module definition function call
 	runtime *Container
 
@@ -39,7 +46,6 @@ func newModFunction(
 	ctx context.Context,
 	root *Query,
 	mod *Module,
-	modID *idproto.ID,
 	objDef *ObjectTypeDef,
 	runtime *Container,
 	metadata *Function,
@@ -70,7 +76,6 @@ func newModFunction(
 	return &ModuleFunction{
 		root:       root,
 		mod:        mod,
-		modID:      modID,
 		objDef:     objDef,
 		runtime:    runtime,
 		metadata:   metadata,
@@ -81,10 +86,11 @@ func newModFunction(
 
 type CallOpts struct {
 	Inputs         []CallInput
-	ParentVal      map[string]any
+	ParentTyped    dagql.Typed
+	ParentFields   map[string]any
 	Cache          bool
-	Pipeline       pipeline.Path
 	SkipSelfSchema bool
+	Server         *dagql.Server
 }
 
 type CallInput struct {
@@ -92,17 +98,35 @@ type CallInput struct {
 	Value dagql.Typed
 }
 
-func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *CallOpts) (t dagql.Typed, rerr error) {
+func (fn *ModuleFunction) recordCall(ctx context.Context) {
 	mod := fn.mod
-
-	lg := bklog.G(ctx).WithField("module", mod.Name()).WithField("function", fn.metadata.Name)
-	if fn.objDef != nil {
-		lg = lg.WithField("object", fn.objDef.Name)
+	if fn.metadata.Name == "" {
+		return
 	}
-	ctx = bklog.WithLogger(ctx, lg)
+	props := map[string]string{
+		"target_function": fn.metadata.Name,
+	}
+	moduleAnalyticsProps(mod, "target_", props)
+	if caller, err := mod.Query.CurrentModule(ctx); err == nil {
+		props["caller_type"] = "module"
+		moduleAnalyticsProps(caller, "caller_", props)
+	} else if dagql.IsInternal(ctx) {
+		props["caller_type"] = "internal"
+	} else {
+		props["caller_type"] = "direct"
+	}
+	analytics.Ctx(ctx).Capture(ctx, "module_call", props)
+}
 
+// setCallInputs sets the call inputs for the function call.
+//
+// It first load the argument set by the user.
+// Then the default values.
+// Finally the contextual arguments.
+func (fn *ModuleFunction) setCallInputs(ctx context.Context, opts *CallOpts) ([]*FunctionCallArgValue, error) {
 	callInputs := make([]*FunctionCallArgValue, len(opts.Inputs))
 	hasArg := map[string]bool{}
+
 	for i, input := range opts.Inputs {
 		normalizedName := gqlArgName(input.Name)
 		arg, ok := fn.args[normalizedName]
@@ -130,6 +154,7 @@ func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *Ca
 		hasArg[name] = true
 	}
 
+	// Load default value
 	for _, arg := range fn.metadata.Args {
 		name := arg.OriginalName
 		if hasArg[name] || arg.DefaultValue == nil {
@@ -139,28 +164,52 @@ func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *Ca
 			Name:  name,
 			Value: arg.DefaultValue,
 		})
+
+		hasArg[name] = true
 	}
 
-	callerDigestInputs := []string{}
-	{
-		callerIDDigest, err := caller.Digest() // FIXME(vito) canonicalize, once all that's implemented
-		if err != nil {
-			return nil, fmt.Errorf("failed to get caller digest: %w", err)
+	// Load contextual arguments
+	for _, arg := range fn.metadata.Args {
+		name := arg.OriginalName
+
+		// Skip contextual arguments if already set.
+		if hasArg[name] || arg.DefaultPath == "" {
+			continue
 		}
-		callerDigestInputs = append(callerDigestInputs, callerIDDigest.String())
-	}
-	if !opts.Cache {
-		// use the ServerID so that we bust cache once-per-session
-		clientMetadata, err := engine.ClientMetadataFromContext(ctx)
+
+		// Load contextual argument value.
+		ctxVal, err := fn.loadContextualArg(ctx, opts.Server, arg)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get client metadata: %w", err)
+			return nil, fmt.Errorf("failed to load contextual arg %q: %w", arg.Name, err)
 		}
-		callerDigestInputs = append(callerDigestInputs, clientMetadata.ServerID)
+
+		callInputs = append(callInputs, &FunctionCallArgValue{
+			Name:  name,
+			Value: ctxVal,
+		})
 	}
 
-	callerDigest := digest.FromString(strings.Join(callerDigestInputs, " "))
+	return callInputs, nil
+}
 
-	ctx = bklog.WithLogger(ctx, bklog.G(ctx).WithField("caller_digest", callerDigest.String()))
+func (fn *ModuleFunction) Call(ctx context.Context, opts *CallOpts) (t dagql.Typed, rerr error) { //nolint: gocyclo
+	mod := fn.mod
+
+	lg := bklog.G(ctx).WithField("module", mod.Name()).WithField("function", fn.metadata.Name)
+	if fn.objDef != nil {
+		lg = lg.WithField("object", fn.objDef.Name)
+	}
+	ctx = bklog.WithLogger(ctx, lg)
+
+	// Capture analytics for the function call.
+	// Calls without function name are internal and excluded.
+	fn.recordCall(ctx)
+
+	callInputs, err := fn.setCallInputs(ctx, opts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set call inputs: %w", err)
+	}
+
 	bklog.G(ctx).Debug("function call")
 	defer func() {
 		bklog.G(ctx).Debug("function call done")
@@ -169,58 +218,98 @@ func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *Ca
 		}
 	}()
 
+	parentJSON, err := json.Marshal(opts.ParentFields)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal parent value: %w", err)
+	}
+
+	execMD := buildkit.ExecutionMetadata{
+		ClientID:        identity.NewID(),
+		CallID:          dagql.CurrentID(ctx),
+		ExecID:          identity.NewID(),
+		CachePerSession: !opts.Cache,
+		CacheByCall:     true, // scope the cache key to the function arguments+receiver values
+		Internal:        true,
+	}
+
+	if opts.ParentTyped != nil {
+		// collect any client resources stored in parent fields (secrets/sockets/etc.) and grant
+		// this function client access
+		parentModType, ok, err := mod.ModTypeFor(ctx, &TypeDef{
+			Kind:     TypeDefKindObject,
+			AsObject: dagql.NonNull(fn.objDef),
+		}, true)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get mod type for parent: %w", err)
+		}
+		if !ok {
+			return nil, fmt.Errorf("failed to find mod type for parent %q", fn.objDef.Name)
+		}
+		execMD.ParentIDs = map[digest.Digest]*resource.ID{}
+		if err := parentModType.CollectCoreIDs(ctx, opts.ParentTyped, execMD.ParentIDs); err != nil {
+			return nil, fmt.Errorf("failed to collect IDs from parent fields: %w", err)
+		}
+	}
+
+	execMD.EncodedModuleID, err = mod.InstanceID.Encode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode module ID: %w", err)
+	}
+
+	fnCall := &FunctionCall{
+		Name:      fn.metadata.OriginalName,
+		Parent:    parentJSON,
+		InputArgs: callInputs,
+	}
+	if fn.objDef != nil {
+		fnCall.ParentName = fn.objDef.OriginalName
+	}
+	execMD.EncodedFunctionCall, err = json.Marshal(fnCall)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal function call: %w", err)
+	}
+
 	ctr := fn.runtime
 
-	metaDir := NewScratchDirectory(mod.Query, mod.Query.Platform)
-	ctr, err := ctr.WithMountedDirectory(ctx, modMetaDirPath, metaDir, "", false)
+	metaDir, err := NewScratchDirectory(ctx, mod.Query, mod.Query.Platform())
+	if err != nil {
+		return nil, fmt.Errorf("failed to create mod metadata directory: %w", err)
+	}
+	ctr, err = ctr.WithMountedDirectory(ctx, modMetaDirPath, metaDir, "", false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to mount mod metadata directory: %w", err)
 	}
 
 	// Setup the Exec for the Function call and evaluate it
 	ctr, err = ctr.WithExec(ctx, ContainerExecOpts{
-		ModuleCallerDigest:            callerDigest,
 		ExperimentalPrivilegedNesting: true,
-		NestedInSameSession:           true,
+		NestedExecMetadata:            &execMD,
+		UseEntrypoint:                 true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to exec function: %w", err)
 	}
 
-	parentJSON, err := json.Marshal(opts.ParentVal)
+	bk, err := fn.root.Buildkit(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal parent value: %w", err)
-	}
-
-	callMeta := &FunctionCall{
-		Query:     fn.root,
-		Name:      fn.metadata.OriginalName,
-		Parent:    parentJSON,
-		InputArgs: callInputs,
-	}
-	if fn.objDef != nil {
-		callMeta.ParentName = fn.objDef.OriginalName
-	}
-
-	var deps *ModDeps
-	if opts.SkipSelfSchema {
-		// Only serve the APIs of the deps of this module. This is currently only needed for the special
-		// case of the function used to get the definition of the module itself (which can't obviously
-		// be served the API its returning the definition of).
-		deps = mod.Deps
-	} else {
-		// by default, serve both deps and the module's own API to itself
-		deps = mod.Deps.Prepend(mod)
-	}
-
-	err = mod.Query.RegisterFunctionCall(callerDigest, deps, fn.modID, callMeta,
-		progrock.FromContext(ctx).Parent)
-	if err != nil {
-		return nil, fmt.Errorf("failed to register function call: %w", err)
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
 	}
 
 	_, err = ctr.Evaluate(ctx)
 	if err != nil {
+		id, ok, extractErr := extractError(ctx, bk, err)
+		if extractErr != nil {
+			// if the module hasn't provided us with a nice error, just return the
+			// original error
+			return nil, err
+		}
+		if ok {
+			errInst, err := id.Load(ctx, opts.Server)
+			if err != nil {
+				return nil, fmt.Errorf("failed to load error instance: %w", err)
+			}
+			return nil, errors.New(errInst.Self.Message)
+		}
 		if fn.metadata.OriginalName == "" {
 			return nil, fmt.Errorf("call constructor: %w", err)
 		} else {
@@ -241,10 +330,6 @@ func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *Ca
 		return nil, fmt.Errorf("function returned nil result")
 	}
 
-	// TODO: if any error happens below, we should really prune the cache of the result, otherwise
-	// we can end up in a state where we have a cached result with a dependency blob that we don't
-	// guarantee the continued existence of...
-
 	// Read the output of the function
 	outputBytes, err := result.Ref.ReadFile(ctx, bkgw.ReadRequest{
 		Filename: modMetaOutputPath,
@@ -257,7 +342,7 @@ func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *Ca
 	dec := json.NewDecoder(strings.NewReader(string(outputBytes)))
 	dec.UseNumber()
 	if err := dec.Decode(&returnValue); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal result: %s", err)
+		return nil, fmt.Errorf("failed to unmarshal result: %w", err)
 	}
 
 	returnValueTyped, err := fn.returnType.ConvertFromSDKResult(ctx, returnValue)
@@ -265,11 +350,96 @@ func (fn *ModuleFunction) Call(ctx context.Context, caller *idproto.ID, opts *Ca
 		return nil, fmt.Errorf("failed to convert return value: %w", err)
 	}
 
-	if err := fn.linkDependencyBlobs(ctx, result, returnValueTyped); err != nil {
-		return nil, fmt.Errorf("failed to link dependency blobs: %w", err)
+	// Get the client ID actually used during the function call - this might not
+	// be the same as execMD.ClientID if the function call was cached at the
+	// buildkit level
+	clientID, err := ctr.usedClientID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not get used client id")
 	}
 
+	// If the function returned anything that's isolated per-client, this caller client should
+	// have access to it now since it was returned to them (i.e. secrets/sockets/etc).
+	returnedIDs := map[digest.Digest]*resource.ID{}
+	if err := fn.returnType.CollectCoreIDs(ctx, returnValueTyped, returnedIDs); err != nil {
+		return nil, fmt.Errorf("failed to collect IDs: %w", err)
+	}
+
+	for _, id := range returnedIDs {
+		if err := fn.root.AddClientResourcesFromID(ctx, id, clientID, false); err != nil {
+			return nil, fmt.Errorf("failed to add client resources from ID: %w", err)
+		}
+	}
+
+	// NOTE: once generalized function caching is enabled we need to ensure that any non-reproducible
+	// cache entries are linked to the result of this call.
+	// See the previous implementation of this for a reference:
+	// https://github.com/dagger/dagger/blob/7c31db76e07c9a17fcdb3f3c4513c915344c1da8/core/modfunc.go#L483
+
 	return returnValueTyped, nil
+}
+
+func extractError(ctx context.Context, client *buildkit.Client, baseErr error) (dagql.ID[*Error], bool, error) {
+	var id dagql.ID[*Error]
+
+	var execErr *llberror.ExecError
+	if errors.As(baseErr, &execErr) {
+		defer func() {
+			execErr.Release()
+			execErr.OwnerBorrowed = true
+		}()
+	}
+
+	var opErr *solvererror.OpError
+	if !errors.As(baseErr, &opErr) {
+		return id, false, nil
+	}
+	op := opErr.Op
+	if op == nil || op.Op == nil {
+		return id, false, nil
+	}
+	execOp, ok := op.Op.(*bksolverpb.Op_Exec)
+	if !ok {
+		return id, false, nil
+	}
+
+	// This was an exec error, we will retrieve the exec's output and include
+	// it in the error message
+
+	// get the mnt containing module response data (in this case, the error ID)
+	var metaMountResult bksolver.Result
+	var foundMounts []string
+	for i, mnt := range execOp.Exec.Mounts {
+		foundMounts = append(foundMounts, mnt.Dest)
+		if mnt.Dest == modMetaDirPath {
+			metaMountResult = execErr.Mounts[i]
+			break
+		}
+	}
+	if metaMountResult == nil {
+		slog.Warn("failed to find meta mount", "mounts", foundMounts, "want", modMetaDirPath)
+		return id, false, nil
+	}
+
+	workerRef, ok := metaMountResult.Sys().(*bkworker.WorkerRef)
+	if !ok {
+		return id, false, errors.Join(baseErr, fmt.Errorf("invalid ref type: %T", metaMountResult.Sys()))
+	}
+	mntable, err := workerRef.ImmutableRef.Mount(ctx, true, bksession.NewGroup(client.ID()))
+	if err != nil {
+		return id, false, errors.Join(err, baseErr)
+	}
+
+	idBytes, err := buildkit.ReadSnapshotPath(ctx, client, mntable, modMetaErrorPath)
+	if err != nil {
+		return id, false, errors.Join(err, baseErr)
+	}
+
+	if err := id.Decode(string(idBytes)); err != nil {
+		return id, false, errors.Join(err, baseErr)
+	}
+
+	return id, true, nil
 }
 
 func (fn *ModuleFunction) ReturnType() (ModType, error) {
@@ -284,42 +454,97 @@ func (fn *ModuleFunction) ArgType(argName string) (ModType, error) {
 	return arg.modType, nil
 }
 
-// If the result of a Function call contains IDs of resources, we need to
-// ensure that the cache entry for the Function call is linked for the cache
-// entries of those resources if those entries aren't reproducible. Right now,
-// the only unreproducible output are local dir imports, which are represented
-// as blob:// sources. linkDependencyBlobs finds all such blob:// sources and
-// adds a cache lease on that blob in the content store to the cacheResult of
-// the function call.
+func moduleAnalyticsProps(mod *Module, prefix string, props map[string]string) {
+	props[prefix+"module_name"] = mod.Name()
+
+	source := mod.Source.Self
+	switch source.Kind {
+	case ModuleSourceKindLocal:
+		local := source.AsLocalSource.Value
+		props[prefix+"source_kind"] = "local"
+		props[prefix+"local_subpath"] = local.RootSubpath
+	case ModuleSourceKindGit:
+		git := source.AsGitSource.Value
+		props[prefix+"source_kind"] = "git"
+		props[prefix+"git_symbolic"] = git.Symbolic()
+		props[prefix+"git_clone_url"] = git.CloneRef // todo(guillaume): remove as deprecated
+		props[prefix+"git_clone_ref"] = git.CloneRef
+		props[prefix+"git_subpath"] = git.RootSubpath
+		props[prefix+"git_version"] = git.Version
+		props[prefix+"git_commit"] = git.Commit
+		props[prefix+"git_html_repo_url"] = git.HTMLRepoURL
+	}
+}
+
+// loadContextualArg loads a contextual argument from the module context directory.
 //
-// If we didn't do this, then it would be possible for Buildkit to prune the
-// content pointed to by the blob:// source without pruning the function call
-// cache entry. That would result callers being able to evaluate the result of
-// a function call but hitting an error about missing content.
-func (fn *ModuleFunction) linkDependencyBlobs(ctx context.Context, cacheResult *buildkit.Result, value dagql.Typed) error {
-	if value == nil {
-		return nil
+// For Directory, it will load the directory from the module context directory.
+// For file, it will loa the directory containing the file and then query the file ID from this directory.
+//
+// This functions returns the ID of the loaded object.
+func (fn *ModuleFunction) loadContextualArg(ctx context.Context, dag *dagql.Server, arg *FunctionArg) (JSON, error) {
+	if arg.TypeDef.Kind != TypeDefKindObject {
+		return nil, fmt.Errorf("contextual argument %q must be a Directory or a File", arg.OriginalName)
 	}
-	pbDefs, err := collectPBDefinitions(ctx, value)
-	if err != nil {
-		return fmt.Errorf("failed to collect pb definitions: %w", err)
+
+	if dag == nil {
+		return nil, fmt.Errorf("dagql server is nil but required for contextual argument %q", arg.OriginalName)
 	}
-	dependencyBlobs := map[digest.Digest]*ocispecs.Descriptor{}
-	for _, pbDef := range pbDefs {
-		dag, err := buildkit.DefToDAG(pbDef)
+
+	switch arg.TypeDef.AsObject.Value.Name {
+	case "Directory":
+		slog.Debug("moduleFunction.loadContextualArg: loading contextual directory", "fn", arg.Name, "dir", arg.DefaultPath)
+
+		dir, err := fn.mod.Source.Self.LoadContext(ctx, dag, arg.DefaultPath, arg.Ignore)
 		if err != nil {
-			return fmt.Errorf("failed to convert pb definition to dag: %w", err)
+			return nil, fmt.Errorf("failed to load contextual directory %q: %w", arg.DefaultPath, err)
 		}
-		blobs, err := dag.BlobDependencies()
+
+		dirID, err := dir.ID().Encode()
 		if err != nil {
-			return fmt.Errorf("failed to get blob dependencies: %w", err)
+			return nil, fmt.Errorf("failed to encode dir ID: %w", err)
 		}
-		for k, v := range blobs {
-			dependencyBlobs[k] = v
+
+		return JSON(fmt.Sprintf(`"%s"`, dirID)), nil
+	case "File":
+		slog.Debug("moduleFunction.loadContextualArg: loading contextual file", "fn", arg.Name, "file", arg.DefaultPath)
+
+		// We first load the directory from the context path, then we load the file from the path relative to the directory.
+		dirPath := filepath.Dir(arg.DefaultPath)
+		filePath := filepath.Base(arg.DefaultPath)
+
+		// Load the directory containing the file.
+		dir, err := fn.mod.Source.Self.LoadContext(ctx, dag, dirPath, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load contextual directory %q: %w", dirPath, err)
 		}
+
+		var fileID FileID
+
+		// We need to load the fileID from the directory itself, because `*File` doesn't have a `ID` field,
+		// we use select instead.
+		err = dag.Select(ctx, dir, &fileID,
+			dagql.Selector{
+				Field: "file",
+				Args: []dagql.NamedInput{
+					{Name: "path", Value: dagql.String(filePath)},
+				},
+			},
+			dagql.Selector{
+				Field: "id",
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load contextual file %q: %w", filePath, err)
+		}
+
+		encodedFileID, err := fileID.Encode()
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode file ID: %w", err)
+		}
+
+		return JSON(fmt.Sprintf(`"%s"`, encodedFileID)), nil
+	default:
+		return nil, fmt.Errorf("unknown contextual argument type %q", arg.TypeDef.AsObject.Value.Name)
 	}
-	if err := cacheResult.Ref.AddDependencyBlobs(ctx, dependencyBlobs); err != nil {
-		return fmt.Errorf("failed to add dependency blob: %w", err)
-	}
-	return nil
 }

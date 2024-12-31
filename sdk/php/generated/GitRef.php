@@ -34,14 +34,11 @@ class GitRef extends Client\AbstractObject implements Client\IdAble
     /**
      * The filesystem tree at this ref.
      */
-    public function tree(?string $sshKnownHosts = null, SocketId|Socket|null $sshAuthSocket = null): Directory
+    public function tree(?bool $discardGitDir = false): Directory
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('tree');
-        if (null !== $sshKnownHosts) {
-        $innerQueryBuilder->setArgument('sshKnownHosts', $sshKnownHosts);
-        }
-        if (null !== $sshAuthSocket) {
-        $innerQueryBuilder->setArgument('sshAuthSocket', $sshAuthSocket);
+        if (null !== $discardGitDir) {
+        $innerQueryBuilder->setArgument('discardGitDir', $discardGitDir);
         }
         return new \Dagger\Directory($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }

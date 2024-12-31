@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dagger/dagger/core"
-	"github.com/dagger/dagger/dagql/idproto"
-	"github.com/dagger/dagger/engine"
-	"github.com/dagger/dagger/engine/buildkit"
 	bkgw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/vektah/gqlparser/v2/ast"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/dagger/dagger/core"
+	"github.com/dagger/dagger/dagql/call"
+	"github.com/dagger/dagger/engine"
 )
 
 func TestServicesStartHappy(t *testing.T) {
@@ -28,8 +28,7 @@ func TestServicesStartHappy(t *testing.T) {
 		ClientID: "fake-client",
 	})
 
-	stubClient := new(buildkit.Client)
-	services := core.NewServices(stubClient)
+	services := core.NewServices()
 
 	svc1 := newStartable("fake-1")
 	svc2 := newStartable("fake-2")
@@ -63,14 +62,13 @@ func TestServicesStartHappyDifferentServers(t *testing.T) {
 
 	ctx := context.Background()
 
-	stubClient := new(buildkit.Client)
-	services := core.NewServices(stubClient)
+	services := core.NewServices()
 
 	svc := newStartable("fake")
 
-	startOne := func(t *testing.T, stub *fakeStartable, serverID string) {
+	startOne := func(t *testing.T, stub *fakeStartable, sessionID string) {
 		ctx := engine.ContextWithClientMetadata(ctx, &engine.ClientMetadata{
-			ServerID: serverID,
+			SessionID: sessionID,
 		})
 
 		expected := stub.Succeed()
@@ -104,8 +102,7 @@ func TestServicesStartSad(t *testing.T) {
 		ClientID: "fake-client",
 	})
 
-	stubClient := new(buildkit.Client)
-	services := core.NewServices(stubClient)
+	services := core.NewServices()
 
 	stub := newStartable("fake")
 
@@ -126,8 +123,7 @@ func TestServicesStartConcurrentHappy(t *testing.T) {
 		ClientID: "fake-client",
 	})
 
-	stubClient := new(buildkit.Client)
-	services := core.NewServices(stubClient)
+	services := core.NewServices()
 
 	stub := newStartable("fake")
 
@@ -173,8 +169,7 @@ func TestServicesStartConcurrentSad(t *testing.T) {
 		ClientID: "fake-client",
 	})
 
-	stubClient := new(buildkit.Client)
-	services := core.NewServices(stubClient)
+	services := core.NewServices()
 
 	stub := newStartable("fake")
 
@@ -229,8 +224,7 @@ func TestServicesStartConcurrentSadThenHappy(t *testing.T) {
 		ClientID: "fake-client",
 	})
 
-	stubClient := new(buildkit.Client)
-	services := core.NewServices(stubClient)
+	services := core.NewServices()
 
 	stub := newStartable("fake")
 
@@ -246,7 +240,7 @@ func TestServicesStartConcurrentSadThenHappy(t *testing.T) {
 	}, 10*time.Second, 10*time.Millisecond)
 
 	// start a few more attempts
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		go func() {
 			_, err := services.Start(ctx, stub.ID(), stub)
 			errs <- err
@@ -303,15 +297,15 @@ func newStartable(id string) *fakeStartable {
 	}
 }
 
-func (f *fakeStartable) ID() *idproto.ID {
-	id := idproto.New().Append(&ast.Type{
+func (f *fakeStartable) ID() *call.ID {
+	id := call.New().Append(&ast.Type{
 		NamedType: "FakeService",
 		NonNull:   true,
-	}, f.name)
+	}, f.name, "", nil, false, 0)
 	return id
 }
 
-func (f *fakeStartable) Start(context.Context, *idproto.ID, bool, func(io.Writer, bkgw.ContainerProcess), func(io.Reader), func(io.Reader)) (*core.RunningService, error) {
+func (f *fakeStartable) Start(context.Context, *call.ID, bool, func(io.Writer, bkgw.ContainerProcess), func(io.Reader), func(io.Reader)) (*core.RunningService, error) {
 	atomic.AddInt32(&f.starts, 1)
 	res := <-f.startResults
 	return res.Started, res.Failed
@@ -324,8 +318,8 @@ func (f *fakeStartable) Starts() int {
 func (f *fakeStartable) Succeed() *core.RunningService {
 	running := &core.RunningService{
 		Key: core.ServiceKey{
-			Digest:   f.digest,
-			ServerID: "doesnt-matter",
+			Digest:    f.digest,
+			SessionID: "doesnt-matter",
 		},
 		Host: f.name + "-host",
 	}

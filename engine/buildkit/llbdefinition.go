@@ -4,15 +4,19 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dagger/dagger/engine/sources/blob"
 	"github.com/moby/buildkit/solver/pb"
 	srctypes "github.com/moby/buildkit/source/types"
 	"github.com/opencontainers/go-digest"
-	ocispecs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
+
+	"github.com/dagger/dagger/engine/sources/blob"
 )
 
 func DefToDAG(def *pb.Definition) (*OpDAG, error) {
+	if len(def.Def) == 0 {
+		return nil, nil
+	}
+
 	digestToOp := map[digest.Digest]*pb.Op{}
 	digestToMetadata := map[digest.Digest]*pb.OpMetadata{}
 	for _, dt := range def.Def {
@@ -128,6 +132,9 @@ func (dag *OpDAG) toString(builder *strings.Builder, indent string) string {
 }
 
 func (dag *OpDAG) Walk(f func(*OpDAG) error) error {
+	if dag == nil {
+		return nil
+	}
 	return dag.walk(f, map[*OpDAG]struct{}{})
 }
 
@@ -136,9 +143,15 @@ func (dag *OpDAG) walk(f func(*OpDAG) error, memo map[*OpDAG]struct{}) error {
 		return nil
 	}
 	memo[dag] = struct{}{}
-	if err := f(dag); err != nil {
+
+	err := f(dag)
+	if err == SkipInputs {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
+
 	for _, input := range dag.Inputs {
 		if err := input.walk(f, memo); err != nil {
 			return err
@@ -146,6 +159,8 @@ func (dag *OpDAG) walk(f func(*OpDAG) error, memo map[*OpDAG]struct{}) error {
 	}
 	return nil
 }
+
+var SkipInputs = fmt.Errorf("skip inputs") //nolint:stylecheck // Err prefix isn't convention for Walk control errors
 
 // Marshal will convert the dag back to a flat pb.Definition, updating all digests
 // based on any modifications made to the dag.
@@ -202,25 +217,6 @@ func (dag *OpDAG) marshal(def *pb.Definition, memo map[digest.Digest]digest.Dige
 	def.Def = append(def.Def, newOpBytes)
 	def.Metadata[newOpDigest] = *dag.Metadata
 	return def, newOpDigest, nil
-}
-
-func (dag *OpDAG) BlobDependencies() (map[digest.Digest]*ocispecs.Descriptor, error) {
-	dependencyBlobs := map[digest.Digest]*ocispecs.Descriptor{}
-	if err := dag.Walk(func(dag *OpDAG) error {
-		blobOp, ok := dag.AsBlob()
-		if !ok {
-			return nil
-		}
-		desc, err := blobOp.OCIDescriptor()
-		if err != nil {
-			return fmt.Errorf("failed to get blob descriptor: %w", err)
-		}
-		dependencyBlobs[desc.Digest] = &desc
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to walk pb definition dag: %w", err)
-	}
-	return dependencyBlobs, nil
 }
 
 type ExecOp struct {
@@ -477,10 +473,10 @@ func (dag *OpDAG) AsBlob() (*BlobOp, bool) {
 	return op, true
 }
 
-func (op *BlobOp) OCIDescriptor() (ocispecs.Descriptor, error) {
+func (op *BlobOp) Digest() (digest.Digest, error) {
 	id, err := blob.IdentifierFromPB(op.SourceOp)
 	if err != nil {
-		return ocispecs.Descriptor{}, err
+		return "", err
 	}
-	return id.Descriptor, nil
+	return id.Digest, nil
 }

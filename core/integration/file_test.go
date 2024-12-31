@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,17 +11,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/moby/buildkit/identity"
+	"github.com/stretchr/testify/require"
+
 	"dagger.io/dagger"
 	"github.com/dagger/dagger/core"
 	"github.com/dagger/dagger/engine/buildkit"
+	"github.com/dagger/dagger/engine/distconsts"
 	"github.com/dagger/dagger/internal/testutil"
-	"github.com/moby/buildkit/identity"
-	"github.com/stretchr/testify/require"
+	"github.com/dagger/dagger/testctx"
 )
 
-func TestFile(t *testing.T) {
-	t.Parallel()
+type FileSuite struct{}
 
+func TestFile(t *testing.T) {
+	testctx.Run(testCtx, t, FileSuite{}, Middleware()...)
+}
+
+func (FileSuite) TestFile(ctx context.Context, t *testctx.T) {
 	var res struct {
 		Directory struct {
 			WithNewFile struct {
@@ -32,7 +40,7 @@ func TestFile(t *testing.T) {
 		}
 	}
 
-	err := testutil.Query(
+	err := testutil.Query(t,
 		`{
 			directory {
 				withNewFile(path: "some-file", contents: "some-content") {
@@ -48,9 +56,7 @@ func TestFile(t *testing.T) {
 	require.Equal(t, "some-content", res.Directory.WithNewFile.File.Contents)
 }
 
-func TestDirectoryFile(t *testing.T) {
-	t.Parallel()
-
+func (FileSuite) TestDirectoryFile(ctx context.Context, t *testctx.T) {
 	var res struct {
 		Directory struct {
 			WithNewFile struct {
@@ -64,7 +70,7 @@ func TestDirectoryFile(t *testing.T) {
 		}
 	}
 
-	err := testutil.Query(
+	err := testutil.Query(t,
 		`{
 			directory {
 				withNewFile(path: "some-dir/some-file", contents: "some-content") {
@@ -82,9 +88,7 @@ func TestDirectoryFile(t *testing.T) {
 	require.Equal(t, "some-content", res.Directory.WithNewFile.Directory.File.Contents)
 }
 
-func TestFileSize(t *testing.T) {
-	t.Parallel()
-
+func (FileSuite) TestSize(ctx context.Context, t *testctx.T) {
 	var res struct {
 		Directory struct {
 			WithNewFile struct {
@@ -96,7 +100,7 @@ func TestFileSize(t *testing.T) {
 		}
 	}
 
-	err := testutil.Query(
+	err := testutil.Query(t,
 		`{
 			directory {
 				withNewFile(path: "some-file", contents: "some-content") {
@@ -112,16 +116,12 @@ func TestFileSize(t *testing.T) {
 	require.Equal(t, len("some-content"), res.Directory.WithNewFile.File.Size)
 }
 
-func TestFileName(t *testing.T) {
-	t.Parallel()
-
+func (FileSuite) TestName(ctx context.Context, t *testctx.T) {
 	wd := t.TempDir()
 
-	c, ctx := connect(t, dagger.WithWorkdir(wd))
+	c := connect(ctx, t, dagger.WithWorkdir(wd))
 
-	t.Run("new file", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("new file", func(ctx context.Context, t *testctx.T) {
 		file := c.Directory().WithNewFile("/foo/bar", "content1").File("foo/bar")
 
 		name, err := file.Name(ctx)
@@ -129,9 +129,7 @@ func TestFileName(t *testing.T) {
 		require.Equal(t, "bar", name)
 	})
 
-	t.Run("container file", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("container file", func(ctx context.Context, t *testctx.T) {
 		file := c.Container().From(alpineImage).File("/etc/alpine-release")
 
 		name, err := file.Name(ctx)
@@ -139,9 +137,7 @@ func TestFileName(t *testing.T) {
 		require.Equal(t, "alpine-release", name)
 	})
 
-	t.Run("container file in dir", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("container file in dir", func(ctx context.Context, t *testctx.T) {
 		file := c.Container().From(alpineImage).Directory("/etc").File("/alpine-release")
 
 		name, err := file.Name(ctx)
@@ -149,9 +145,7 @@ func TestFileName(t *testing.T) {
 		require.Equal(t, "alpine-release", name)
 	})
 
-	t.Run("host file", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("host file", func(ctx context.Context, t *testctx.T) {
 		err := os.WriteFile(filepath.Join(wd, "file.txt"), []byte{}, 0o600)
 		require.NoError(t, err)
 
@@ -160,9 +154,7 @@ func TestFileName(t *testing.T) {
 		require.Equal(t, "file.txt", name)
 	})
 
-	t.Run("host file in dir", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("host file in dir", func(ctx context.Context, t *testctx.T) {
 		err := os.MkdirAll(filepath.Join(wd, "path/to/"), 0o700)
 		require.NoError(t, err)
 		err = os.WriteFile(filepath.Join(wd, "path/to/file.txt"), []byte{}, 0o600)
@@ -174,65 +166,103 @@ func TestFileName(t *testing.T) {
 	})
 }
 
-func TestFileExport(t *testing.T) {
-	t.Parallel()
+func (FileSuite) TestWithName(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
 
-	wd := t.TempDir()
-	targetDir := t.TempDir()
+	t.Run("new file with new name", func(ctx context.Context, t *testctx.T) {
+		file := c.Directory().WithNewFile("/foo/bar", "content").File("foo/bar")
 
-	c, ctx := connect(t, dagger.WithWorkdir(wd))
+		newFile := file.WithName("baz")
 
-	file := c.Container().From(alpineImage).File("/etc/alpine-release")
+		name, err := newFile.Name(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "baz", name)
+	})
 
-	t.Run("to absolute path", func(t *testing.T) {
+	t.Run("mounted file with new name", func(ctx context.Context, t *testctx.T) {
+		file := c.Directory().WithNewFile("/foo/bar", "content").File("foo/bar")
+
+		newFile := file.WithName("baz")
+
+		mountedFile := c.Directory().WithFile("", newFile).File("baz")
+
+		mountedFileName, err := mountedFile.Name(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "baz", mountedFileName)
+
+		mountedFileNameContent, err := mountedFile.Contents(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "content", mountedFileNameContent)
+	})
+}
+
+func (FileSuite) TestExport(ctx context.Context, t *testctx.T) {
+	file := func(c *dagger.Client) *dagger.File {
+		return c.Container().From(alpineImage).File("/etc/alpine-release")
+	}
+
+	t.Run("to absolute path", func(ctx context.Context, t *testctx.T) {
+		c := connect(ctx, t)
+
+		targetDir := t.TempDir()
 		dest := filepath.Join(targetDir, "some-file")
 
-		ok, err := file.Export(ctx, dest)
+		actual, err := file(c).Export(ctx, dest)
 		require.NoError(t, err)
-		require.True(t, ok)
+		require.Equal(t, dest, actual)
 
 		contents, err := os.ReadFile(dest)
 		require.NoError(t, err)
-		require.Equal(t, "3.18.2\n", string(contents))
+		require.True(t, strings.HasPrefix(string(contents), distconsts.AlpineVersion), string(contents))
 
 		entries, err := ls(targetDir)
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 	})
 
-	t.Run("to relative path", func(t *testing.T) {
-		ok, err := file.Export(ctx, "some-file")
+	t.Run("to relative path", func(ctx context.Context, t *testctx.T) {
+		wd := t.TempDir()
+		c := connect(ctx, t, dagger.WithWorkdir(wd))
+		actual, err := file(c).Export(ctx, "some-file")
 		require.NoError(t, err)
-		require.True(t, ok)
+		require.Equal(t, filepath.Join(wd, "some-file"), actual)
 
 		contents, err := os.ReadFile(filepath.Join(wd, "some-file"))
 		require.NoError(t, err)
-		require.Equal(t, "3.18.2\n", string(contents))
+		require.True(t, strings.HasPrefix(string(contents), distconsts.AlpineVersion), string(contents))
 
 		entries, err := ls(wd)
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 	})
 
-	t.Run("to path in outer dir", func(t *testing.T) {
-		ok, err := file.Export(ctx, "../some-file")
+	t.Run("to path in outer dir", func(ctx context.Context, t *testctx.T) {
+		wd := t.TempDir()
+		c := connect(ctx, t, dagger.WithWorkdir(wd))
+		actual, err := file(c).Export(ctx, "../some-file")
 		require.Error(t, err)
-		require.False(t, ok)
+		require.Empty(t, actual)
 	})
 
-	t.Run("to absolute dir", func(t *testing.T) {
-		ok, err := file.Export(ctx, targetDir)
+	t.Run("to absolute dir", func(ctx context.Context, t *testctx.T) {
+		targetDir := t.TempDir()
+		c := connect(ctx, t)
+		actual, err := file(c).Export(ctx, targetDir)
 		require.Error(t, err)
-		require.False(t, ok)
+		require.Empty(t, actual)
 	})
 
-	t.Run("to workdir", func(t *testing.T) {
-		ok, err := file.Export(ctx, ".")
+	t.Run("to workdir", func(ctx context.Context, t *testctx.T) {
+		wd := t.TempDir()
+		c := connect(ctx, t, dagger.WithWorkdir(wd))
+		actual, err := file(c).Export(ctx, ".")
 		require.Error(t, err)
-		require.False(t, ok)
+		require.Empty(t, actual)
 	})
 
-	t.Run("file under subdir", func(t *testing.T) {
+	t.Run("file under subdir", func(ctx context.Context, t *testctx.T) {
+		targetDir := t.TempDir()
+		c := connect(ctx, t)
 		dir := c.Directory().
 			WithNewFile("/file", "content1").
 			WithNewFile("/subdir/file", "content2")
@@ -256,13 +286,22 @@ func TestFileExport(t *testing.T) {
 		require.Equal(t, "content2", string(contents))
 	})
 
-	t.Run("file larger than max chunk size", func(t *testing.T) {
+	t.Run("file larger than max chunk size", func(ctx context.Context, t *testctx.T) {
+		wd := t.TempDir()
+		c := connect(ctx, t, dagger.WithWorkdir(wd))
 		maxChunkSize := buildkit.MaxFileContentsChunkSize
 		fileSizeBytes := maxChunkSize*4 + 1 // +1 so it's not an exact number of chunks, to ensure we cover that case
 
-		_, err := c.Container().From(alpineImage).WithExec([]string{"sh", "-c",
-			fmt.Sprintf("dd if=/dev/zero of=/file bs=%d count=1", fileSizeBytes)}).
-			File("/file").Export(ctx, "some-pretty-big-file")
+		file := c.Container().
+			From(alpineImage).
+			WithExec([]string{"sh", "-c", fmt.Sprintf("dd if=/dev/zero of=/file bs=%d count=1", fileSizeBytes)}).
+			File("/file")
+
+		dt, err := file.Contents(ctx)
+		require.NoError(t, err)
+		require.EqualValues(t, fileSizeBytes, len(dt))
+
+		_, err = file.Export(ctx, "some-pretty-big-file")
 		require.NoError(t, err)
 
 		stat, err := os.Stat(filepath.Join(wd, "some-pretty-big-file"))
@@ -270,20 +309,21 @@ func TestFileExport(t *testing.T) {
 		require.EqualValues(t, fileSizeBytes, stat.Size())
 	})
 
-	t.Run("file permissions are retained", func(t *testing.T) {
+	t.Run("file permissions are retained", func(ctx context.Context, t *testctx.T) {
+		wd := t.TempDir()
+		c := connect(ctx, t, dagger.WithWorkdir(wd))
 		_, err := c.Directory().WithNewFile("/file", "#!/bin/sh\necho hello", dagger.DirectoryWithNewFileOpts{
-			Permissions: 0744,
+			Permissions: 0o744,
 		}).File("/file").Export(ctx, "some-executable-file")
 		require.NoError(t, err)
 		stat, err := os.Stat(filepath.Join(wd, "some-executable-file"))
 		require.NoError(t, err)
-		require.EqualValues(t, 0744, stat.Mode().Perm())
+		require.EqualValues(t, 0o744, stat.Mode().Perm())
 	})
 }
 
-func TestFileWithTimestamps(t *testing.T) {
-	t.Parallel()
-	c, ctx := connect(t)
+func (FileSuite) TestWithTimestamps(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
 
 	reallyImportantTime := time.Date(1985, 10, 26, 8, 15, 0, 0, time.UTC)
 
@@ -303,9 +343,8 @@ func TestFileWithTimestamps(t *testing.T) {
 	require.Contains(t, ls, "Modify: 1985-10-26 08:15:00.000000000 +0000")
 }
 
-func TestFileContents(t *testing.T) {
-	t.Parallel()
-	c, ctx := connect(t)
+func (FileSuite) TestContents(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
 
 	// Set three types of file sizes for test data,
 	// the third one uses a size larger than the max chunk size:
@@ -354,22 +393,65 @@ func TestFileContents(t *testing.T) {
 	}
 }
 
-func TestFileSync(t *testing.T) {
-	t.Parallel()
+func (FileSuite) TestDigest(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
 
-	c, ctx := connect(t)
+	t.Run("compute file digest", func(ctx context.Context, t *testctx.T) {
+		file := c.Directory().WithNewFile("/foo.txt", "Hello, World!")
 
-	t.Run("triggers error", func(t *testing.T) {
+		digest, err := file.File("/foo.txt").Digest(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "sha256:8a887cdd3e476c79e1a14a65a6c401673b56071a24561dadb5e152605e72a613", digest)
+	})
+
+	t.Run("compute file digest without metadata", func(ctx context.Context, t *testctx.T) {
+		file := c.Directory().WithNewFile("/foo.txt", "Hello, World!")
+
+		digest, err := file.File("/foo.txt").Digest(ctx, dagger.FileDigestOpts{ExcludeMetadata: true})
+		require.NoError(t, err)
+		require.Equal(t, "sha256:042a7d64a581ef2ee983f21058801cc35663b705e6c55f62fa8e0f18ecc70989", digest)
+	})
+
+	t.Run("file digest with different metadata should be different", func(ctx context.Context, t *testctx.T) {
+		fileWithOverwrittenMetadata := c.Directory().WithNewFile("foo.txt", "Hello, World!", dagger.DirectoryWithNewFileOpts{
+			Permissions: 0777,
+		}).File("foo.txt")
+		fileWithDefaultMetadata := c.Directory().WithNewFile("foo.txt", "Hello, World!").File("foo.txt")
+
+		digestFileWithOverwrittenMetadata, err := fileWithOverwrittenMetadata.Digest(ctx)
+		require.NoError(t, err)
+
+		digestFileWithDefaultMetadata, err := fileWithDefaultMetadata.Digest(ctx)
+		require.NoError(t, err)
+
+		require.NotEqual(t, digestFileWithOverwrittenMetadata, digestFileWithDefaultMetadata)
+
+		t.Run("except if we exclude them from computation", func(ctx context.Context, t *testctx.T) {
+			digestFileWithOverwrittenMetadata, err := fileWithOverwrittenMetadata.Digest(ctx, dagger.FileDigestOpts{ExcludeMetadata: true})
+			require.NoError(t, err)
+
+			digestFileWithDefaultMetadata, err := fileWithDefaultMetadata.Digest(ctx, dagger.FileDigestOpts{ExcludeMetadata: true})
+			require.NoError(t, err)
+
+			require.Equal(t, digestFileWithOverwrittenMetadata, digestFileWithDefaultMetadata)
+		})
+	})
+}
+
+func (FileSuite) TestSync(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+
+	t.Run("triggers error", func(ctx context.Context, t *testctx.T) {
 		_, err := c.Directory().File("baz").Sync(ctx)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "no such file")
+		requireErrOut(t, err, "no such file")
 
 		_, err = c.Container().From(alpineImage).File("/bar").Sync(ctx)
 		require.Error(t, err)
-		require.Contains(t, err.Error(), "no such file")
+		requireErrOut(t, err, "no such file")
 	})
 
-	t.Run("allows chaining", func(t *testing.T) {
+	t.Run("allows chaining", func(ctx context.Context, t *testctx.T) {
 		file, err := c.Directory().WithNewFile("foo", "bar").File("foo").Sync(ctx)
 		require.NoError(t, err)
 

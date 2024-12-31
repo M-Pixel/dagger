@@ -1,0 +1,12 @@
+{
+  "name": "wolfi",
+  "sdk": "go",
+  "dependencies": [
+    {
+      "name": "alpine",
+      "source": "../alpine"
+    }
+  ],
+  "source": ".",
+  "engineVersion": "v0.13.5"
+}

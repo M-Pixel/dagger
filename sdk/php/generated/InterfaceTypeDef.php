@@ -13,12 +13,18 @@ namespace Dagger;
  */
 class InterfaceTypeDef extends Client\AbstractObject implements Client\IdAble
 {
+    /**
+     * The doc string for the interface, if any.
+     */
     public function description(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('description');
         return (string)$this->queryLeaf($leafQueryBuilder, 'description');
     }
 
+    /**
+     * Functions defined on this interface, if any.
+     */
     public function functions(): array
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('functions');
@@ -34,12 +40,27 @@ class InterfaceTypeDef extends Client\AbstractObject implements Client\IdAble
         return new \Dagger\InterfaceTypeDefId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
+    /**
+     * The name of the interface.
+     */
     public function name(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('name');
         return (string)$this->queryLeaf($leafQueryBuilder, 'name');
     }
 
+    /**
+     * The location of this interface declaration.
+     */
+    public function sourceMap(): SourceMap
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('sourceMap');
+        return new \Dagger\SourceMap($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * If this InterfaceTypeDef is associated with a Module, the name of the module. Unset otherwise.
+     */
     public function sourceModuleName(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('sourceModuleName');

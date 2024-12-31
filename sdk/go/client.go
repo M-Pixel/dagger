@@ -2,9 +2,7 @@ package dagger
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"os"
 
 	"github.com/Khan/genqlient/graphql"
 	"github.com/vektah/gqlparser/v2/gqlerror"
@@ -16,9 +14,9 @@ import (
 // Client is the Dagger Engine Client
 type Client struct {
 	conn engineconn.EngineConn
-	c    graphql.Client
 
-	q *querybuilder.Selection
+	query  *querybuilder.Selection
+	client graphql.Client
 }
 
 // ClientOpt holds a client option
@@ -53,10 +51,33 @@ func WithConn(conn engineconn.EngineConn) ClientOpt {
 	})
 }
 
-// WithSkipCompatibilityCheck disables the version compatibility check
-func WithSkipCompatibilityCheck() ClientOpt {
+// WithVersionOverride requests a specific schema version from the engine.
+// Calling this may cause the schema to be out-of-sync from the codegen - this
+// option is likely *not* desirable for most use cases.
+//
+// This only has effect when connecting via the CLI, and is only exposed for
+// testing purposes.
+func WithVersionOverride(version string) ClientOpt {
 	return clientOptFunc(func(cfg *engineconn.Config) {
-		cfg.SkipCompatibilityCheck = true
+		cfg.VersionOverride = version
+	})
+}
+
+// WithVerbosity sets the verbosity level for the progress output
+func WithVerbosity(level int) ClientOpt {
+	return clientOptFunc(func(cfg *engineconn.Config) {
+		cfg.Verbosity = level
+	})
+}
+
+// WithRunnerHost sets the runner host URL for provisioning and connecting to
+// an engine.
+//
+// This only has effect when connecting via the CLI, and is only exposed for
+// testing purposes.
+func WithRunnerHost(runnerHost string) ClientOpt {
+	return clientOptFunc(func(cfg *engineconn.Config) {
+		cfg.RunnerHost = runnerHost
 	})
 }
 
@@ -75,25 +96,16 @@ func Connect(ctx context.Context, opts ...ClientOpt) (*Client, error) {
 	gql := errorWrappedClient{graphql.NewClient("http://"+conn.Host()+"/query", conn)}
 
 	c := &Client{
-		c:    gql,
-		conn: conn,
-		q:    querybuilder.Query(),
+		query:  querybuilder.Query().Client(gql),
+		client: gql,
+		conn:   conn,
 	}
-
-	if !cfg.SkipCompatibilityCheck {
-		// Call version compatibility.
-		// If versions are not compatible, a warning will be displayed.
-		if _, err = c.CheckVersionCompatibility(ctx, engineconn.CLIVersion); err != nil {
-			fmt.Fprintln(os.Stderr, "failed to check version compatibility:", err)
-		}
-	}
-
 	return c, nil
 }
 
 // GraphQLClient returns the underlying graphql.Client
 func (c *Client) GraphQLClient() graphql.Client {
-	return c.c
+	return c.client
 }
 
 // Close the engine connection
@@ -112,7 +124,7 @@ func (c *Client) Do(ctx context.Context, req *Request, resp *Response) error {
 		r.Errors = resp.Errors
 		r.Extensions = resp.Extensions
 	}
-	return c.c.MakeRequest(ctx, &graphql.Request{
+	return c.client.MakeRequest(ctx, &graphql.Request{
 		Query:     req.Query,
 		Variables: req.Variables,
 		OpName:    req.OpName,

@@ -4,65 +4,20 @@ import (
 	"context"
 	"testing"
 
-	"github.com/dagger/dagger/core"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dagger/dagger/core"
+	"github.com/dagger/dagger/dagql"
 )
-
-func TestNamespaceObjects(t *testing.T) {
-	t.Parallel()
-
-	testCases := []struct {
-		testCase  string
-		namespace string
-		obj       string
-		result    string
-	}{
-		{
-			testCase:  "namespace",
-			namespace: "Foo",
-			obj:       "Bar",
-			result:    "FooBar",
-		},
-		{
-			testCase:  "namespace into camel case",
-			namespace: "foo",
-			obj:       "bar-baz",
-			result:    "FooBarBaz",
-		},
-		{
-			testCase:  "don't namespace when equal",
-			namespace: "foo",
-			obj:       "Foo",
-			result:    "Foo",
-		},
-		{
-			testCase:  "don't namespace when prefixed",
-			namespace: "foo",
-			obj:       "FooBar",
-			result:    "FooBar",
-		},
-		{
-			testCase:  "still namespace when prefixed if not full",
-			namespace: "foo",
-			obj:       "Foobar",
-			result:    "FooFoobar",
-		},
-	}
-	for _, tc := range testCases {
-		t.Run(tc.testCase, func(t *testing.T) {
-			result := namespaceObject(tc.obj, tc.namespace)
-			require.Equal(t, tc.result, result)
-		})
-	}
-}
 
 func TestCoreModTypeDefs(t *testing.T) {
 	ctx := context.Background()
-	api, err := New(ctx, InitializeArgs{})
-	require.NoError(t, err)
-	require.NotNil(t, api.root)
-
-	typeDefs, err := api.root.DefaultDeps.TypeDefs(ctx)
+	root := &core.Query{}
+	dag := dagql.NewServer(root)
+	coreMod := &CoreMod{Dag: dag}
+	coreModDeps := core.NewModDeps(root, []core.Mod{coreMod})
+	require.NoError(t, coreMod.Install(ctx, dag))
+	typeDefs, err := coreModDeps.TypeDefs(ctx)
 	require.NoError(t, err)
 
 	typeByName := make(map[string]*core.TypeDef)
@@ -72,6 +27,8 @@ func TestCoreModTypeDefs(t *testing.T) {
 			typeByName[typeDef.AsObject.Value.Name] = typeDef
 		case core.TypeDefKindInput:
 			typeByName[typeDef.AsInput.Value.Name] = typeDef
+		case core.TypeDefKindEnum:
+			typeByName[typeDef.AsEnum.Value.Name] = typeDef
 		}
 	}
 
@@ -89,12 +46,16 @@ func TestCoreModTypeDefs(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, core.TypeDefKindObject, fileFn.ReturnType.Kind)
 	require.Equal(t, "File", fileFn.ReturnType.AsObject.Value.Name)
-	require.Len(t, fileFn.Args, 1)
+	require.Len(t, fileFn.Args, 2)
 
 	fileFnPathArg := fileFn.Args[0]
 	require.Equal(t, "path", fileFnPathArg.Name)
 	require.Equal(t, core.TypeDefKindString, fileFnPathArg.TypeDef.Kind)
 	require.False(t, fileFnPathArg.TypeDef.Optional)
+
+	fileFnExpandArg := fileFn.Args[1]
+	require.Equal(t, "expand", fileFnExpandArg.Name)
+	require.Equal(t, core.TypeDefKindBoolean, fileFnExpandArg.TypeDef.Kind)
 
 	withMountedDirectoryFn, ok := ctrObj.FunctionByName("withMountedDirectory")
 	require.True(t, ok)
@@ -140,7 +101,7 @@ func TestCoreModTypeDefs(t *testing.T) {
 	require.Equal(t, core.TypeDefKindInteger, backendPortField.TypeDef.Kind)
 	require.False(t, backendPortField.TypeDef.Optional)
 	require.NotNil(t, protocolField)
-	require.Equal(t, core.TypeDefKindString, protocolField.TypeDef.Kind)
+	require.Equal(t, core.TypeDefKindEnum, protocolField.TypeDef.Kind)
 
 	// File
 	fileTypeDef, ok := typeByName["File"]
@@ -152,7 +113,7 @@ func TestCoreModTypeDefs(t *testing.T) {
 
 	exportFn, ok := fileObj.FunctionByName("export")
 	require.True(t, ok)
-	require.Equal(t, core.TypeDefKindBoolean, exportFn.ReturnType.Kind)
+	require.Equal(t, core.TypeDefKindString, exportFn.ReturnType.Kind)
 	require.Len(t, exportFn.Args, 2)
 
 	exportFnPathArg := exportFn.Args[0]

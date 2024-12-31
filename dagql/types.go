@@ -8,9 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
 	"golang.org/x/exp/constraints"
+
+	"github.com/dagger/dagger/dagql/call"
 )
 
 // Typed is any value that knows its GraphQL type.
@@ -38,15 +39,15 @@ type ObjectType interface {
 	// IDType returns the scalar type for the object's IDs.
 	IDType() (IDType, bool)
 	// New creates a new instance of the type.
-	New(*idproto.ID, Typed) (Object, error)
+	New(id *call.ID, val Typed) (Object, error)
 	// ParseField parses the given field and returns a Selector and an expected
 	// return type.
-	ParseField(context.Context, *ast.Field, map[string]any) (Selector, *ast.Type, error)
+	ParseField(ctx context.Context, view string, astField *ast.Field, vars map[string]any) (Selector, *ast.Type, error)
 	// Extend registers an additional field onto the type.
 	//
 	// Unlike natively added fields, the extended func is limited to the external
 	// Object interface.
-	Extend(FieldSpec, FieldFunc)
+	Extend(spec FieldSpec, fun FieldFunc)
 }
 
 type IDType interface {
@@ -61,7 +62,7 @@ type FieldFunc func(context.Context, Object, map[string]Input) (Typed, error)
 
 type IDable interface {
 	// ID returns the ID of the value.
-	ID() *idproto.ID
+	ID() *call.ID
 }
 
 // Object represents an Object in the graph which has an ID and can have
@@ -72,7 +73,7 @@ type Object interface {
 	// ObjectType returns the type of the object.
 	ObjectType() ObjectType
 	// IDFor returns the ID representing the return value of the given field.
-	IDFor(context.Context, Selector) (*idproto.ID, error)
+	IDFor(context.Context, Selector) (*call.ID, error)
 	// Select evaluates the selected field and returns the result.
 	//
 	// The returned value is the raw Typed value returned from the field; it must
@@ -93,7 +94,7 @@ type Input interface {
 	// All Inputs are typed.
 	Typed
 	// All Inputs are able to be represented as a Literal.
-	idproto.Literate
+	call.Literate
 	// All Inputs now how to decode new instances of themselves.
 	Decoder() InputDecoder
 
@@ -130,7 +131,7 @@ func (Int) TypeName() string {
 	return "Int"
 }
 
-func (i Int) TypeDefinition() *ast.Definition {
+func (i Int) TypeDefinition(views ...string) *ast.Definition {
 	return &ast.Definition{
 		Kind:        ast.Scalar,
 		Name:        i.TypeName(),
@@ -178,12 +179,8 @@ func (i Int) Int64() int64 {
 	return int64(i)
 }
 
-func (i Int) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Int{
-			Int: i.Int64(),
-		},
-	}
+func (i Int) ToLiteral() call.Literal {
+	return call.NewLiteralInt(i.Int64())
 }
 
 func (Int) Type() *ast.Type {
@@ -231,7 +228,7 @@ func (Float) TypeName() string {
 	return "Float"
 }
 
-func (f Float) TypeDefinition() *ast.Definition {
+func (f Float) TypeDefinition(views ...string) *ast.Definition {
 	return &ast.Definition{
 		Kind:        ast.Scalar,
 		Name:        f.TypeName(),
@@ -269,12 +266,8 @@ func (Float) Decoder() InputDecoder {
 	return Float(0)
 }
 
-func (f Float) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Float{
-			Float: f.Float64(),
-		},
-	}
+func (f Float) ToLiteral() call.Literal {
+	return call.NewLiteralFloat(f.Float64())
 }
 
 func (f Float) Float64() float64 {
@@ -336,7 +329,7 @@ func (Boolean) TypeName() string {
 	return "Boolean"
 }
 
-func (b Boolean) TypeDefinition() *ast.Definition {
+func (b Boolean) TypeDefinition(views ...string) *ast.Definition {
 	return &ast.Definition{
 		Kind:        ast.Scalar,
 		Name:        b.TypeName(),
@@ -366,12 +359,8 @@ func (Boolean) Decoder() InputDecoder {
 	return Boolean(false)
 }
 
-func (b Boolean) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Bool{
-			Bool: b.Bool(),
-		},
-	}
+func (b Boolean) ToLiteral() call.Literal {
+	return call.NewLiteralBool(b.Bool())
 }
 
 func (b Boolean) Bool() bool {
@@ -425,7 +414,7 @@ func (String) TypeName() string {
 	return "String"
 }
 
-func (s String) TypeDefinition() *ast.Definition {
+func (s String) TypeDefinition(views ...string) *ast.Definition {
 	return &ast.Definition{
 		Kind:        ast.Scalar,
 		Name:        s.TypeName(),
@@ -449,12 +438,8 @@ func (String) Decoder() InputDecoder {
 	return String("")
 }
 
-func (s String) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_String_{
-			String_: s.String(),
-		},
-	}
+func (s String) ToLiteral() call.Literal {
+	return call.NewLiteralString(string(s))
 }
 
 func (s String) MarshalJSON() ([]byte, error) {
@@ -486,19 +471,88 @@ func (s String) SetField(v reflect.Value) error {
 	}
 }
 
+type ScalarValue interface {
+	ScalarType
+	Input
+}
+
+// Scalar is a GraphQL scalar.
+type Scalar[T ScalarValue] struct {
+	Name  string
+	Value T
+}
+
+func NewScalar[T ScalarValue](name string, val T) Scalar[T] {
+	return Scalar[T]{name, val}
+}
+
+var _ Typed = Scalar[ScalarValue]{}
+
+func (s Scalar[T]) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: s.Name,
+		NonNull:   true,
+	}
+}
+
+var _ ScalarValue = Scalar[ScalarValue]{}
+
+func (s Scalar[T]) TypeName() string {
+	return s.Name
+}
+
+func (s Scalar[T]) TypeDefinition(views ...string) *ast.Definition {
+	def := &ast.Definition{
+		Kind: ast.Scalar,
+		Name: s.TypeName(),
+	}
+	var val T
+	if isType, ok := any(val).(Descriptive); ok {
+		def.Description = isType.TypeDescription()
+	}
+	return def
+}
+
+func (s Scalar[T]) DecodeInput(val any) (Input, error) {
+	var empty T
+	input, err := empty.DecodeInput(val)
+	if err != nil {
+		return nil, err
+	}
+	return NewScalar[T](s.Name, input.(T)), nil
+}
+
+var _ Input = Scalar[ScalarValue]{}
+
+func (s Scalar[T]) Decoder() InputDecoder {
+	return s
+}
+
+func (s Scalar[T]) ToLiteral() call.Literal {
+	return s.Value.ToLiteral()
+}
+
+func (s Scalar[T]) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.Value)
+}
+
+func (s *Scalar[T]) UnmarshalJSON(p []byte) error {
+	return json.Unmarshal(p, &s.Value)
+}
+
 // ID is a type-checked ID scalar.
 type ID[T Typed] struct {
-	id    *idproto.ID
+	id    *call.ID
 	inner T
 }
 
-func NewID[T Typed](id *idproto.ID) ID[T] {
+func NewID[T Typed](id *call.ID) ID[T] {
 	return ID[T]{
 		id: id,
 	}
 }
 
-func NewDynamicID[T Typed](id *idproto.ID, typed T) ID[T] {
+func NewDynamicID[T Typed](id *call.ID, typed T) ID[T] {
 	return ID[T]{
 		id:    id,
 		inner: typed,
@@ -527,14 +581,14 @@ func (i ID[T]) Type() *ast.Type {
 var _ IDable = ID[Typed]{}
 
 // ID returns the ID of the value.
-func (i ID[T]) ID() *idproto.ID {
+func (i ID[T]) ID() *call.ID {
 	return i.id
 }
 
 var _ ScalarType = ID[Typed]{}
 
 // TypeDefinition returns the GraphQL definition of the type.
-func (i ID[T]) TypeDefinition() *ast.Definition {
+func (i ID[T]) TypeDefinition(views ...string) *ast.Definition {
 	return &ast.Definition{
 		Kind: ast.Scalar,
 		Name: i.TypeName(),
@@ -549,11 +603,11 @@ func (i ID[T]) TypeDefinition() *ast.Definition {
 
 // New creates a new ID with the given value.
 //
-// It accepts either an *idproto.ID or a string. The string is expected to be
-// the base64-encoded representation of an *idproto.ID.
+// It accepts either an *call.ID or a string. The string is expected to be
+// the base64-encoded representation of an *call.ID.
 func (i ID[T]) DecodeInput(val any) (Input, error) {
 	switch x := val.(type) {
-	case *idproto.ID:
+	case *call.ID:
 		return ID[T]{id: x, inner: i.inner}, nil
 	case string:
 		if err := (&i).Decode(x); err != nil {
@@ -567,18 +621,14 @@ func (i ID[T]) DecodeInput(val any) (Input, error) {
 
 // String returns the ID in ClassID@sha256:... format.
 func (i ID[T]) String() string {
-	dig, err := i.id.Digest()
-	if err != nil {
-		panic(err) // TODO
-	}
-	return fmt.Sprintf("%s@%s", i.inner.Type().Name(), dig)
+	return fmt.Sprintf("%s@%s", i.inner.Type().Name(), i.id.Digest())
 }
 
 var _ Setter = ID[Typed]{}
 
 func (i ID[T]) SetField(v reflect.Value) error {
 	switch v.Interface().(type) {
-	case *idproto.ID:
+	case *call.ID:
 		v.Set(reflect.ValueOf(i.ID))
 		return nil
 	default:
@@ -593,12 +643,8 @@ func (i ID[T]) Decoder() InputDecoder {
 	return ID[T]{inner: i.inner}
 }
 
-func (i ID[T]) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Id{
-			Id: i.id,
-		},
-	}
+func (i ID[T]) ToLiteral() call.Literal {
+	return call.NewLiteralID(i.id)
 }
 
 func (i ID[T]) Encode() (string, error) {
@@ -614,15 +660,15 @@ func (i *ID[T]) Decode(str string) error {
 		return fmt.Errorf("cannot decode empty string as ID")
 	}
 	expectedName := i.inner.Type().Name()
-	var idp idproto.ID
+	var idp call.ID
 	if err := idp.Decode(str); err != nil {
 		return err
 	}
-	if idp.Type == nil {
+	if idp.Type() == nil {
 		return fmt.Errorf("expected %q ID, got untyped ID", expectedName)
 	}
-	if idp.Type.NamedType != expectedName {
-		return fmt.Errorf("expected %q ID, got %s ID", expectedName, idp.Type.ToAST())
+	if idp.Type().NamedType() != expectedName {
+		return fmt.Errorf("expected %q ID, got %s ID", expectedName, idp.Type().ToAST())
 	}
 	i.id = &idp
 	return nil
@@ -712,10 +758,11 @@ func (a ArrayInput[S]) Decoder() InputDecoder {
 var _ InputDecoder = ArrayInput[Input]{}
 
 func (a ArrayInput[I]) DecodeInput(val any) (Input, error) {
-	var zero I
-	decoder := zero.Decoder()
 	switch x := val.(type) {
 	case []any:
+		var zero I
+		decoder := zero.Decoder()
+
 		arr := make(ArrayInput[I], len(x))
 		for i, val := range x {
 			elem, err := decoder.DecodeInput(val)
@@ -738,16 +785,12 @@ func (a ArrayInput[I]) DecodeInput(val any) (Input, error) {
 	}
 }
 
-func (i ArrayInput[S]) ToLiteral() *idproto.Literal {
-	list := &idproto.List{}
+func (i ArrayInput[S]) ToLiteral() call.Literal {
+	lits := make([]call.Literal, 0, len(i))
 	for _, elem := range i {
-		list.Values = append(list.Values, elem.ToLiteral())
+		lits = append(lits, elem.ToLiteral())
 	}
-	return &idproto.Literal{
-		Value: &idproto.Literal_List{
-			List: list,
-		},
-	}
+	return call.NewLiteralList(lits...)
 }
 
 var _ Setter = ArrayInput[Input]{}
@@ -845,7 +888,7 @@ func (e *EnumValues[T]) TypeName() string {
 	return e.Type().Name()
 }
 
-func (e *EnumValues[T]) TypeDefinition() *ast.Definition {
+func (e *EnumValues[T]) TypeDefinition(views ...string) *ast.Definition {
 	def := &ast.Definition{
 		Kind:       ast.Enum,
 		Name:       e.TypeName(),
@@ -859,12 +902,11 @@ func (e *EnumValues[T]) TypeDefinition() *ast.Definition {
 }
 
 func (e *EnumValues[T]) DecodeInput(val any) (Input, error) {
-	switch x := val.(type) {
-	case string:
-		return e.Lookup(x)
-	default:
-		return nil, fmt.Errorf("cannot create Enum from %T", x)
+	v, err := (&EnumValueName{Enum: e.TypeName()}).DecodeInput(val)
+	if err != nil {
+		return nil, err
 	}
+	return e.Lookup(v.(*EnumValueName).Value)
 }
 
 func (e *EnumValues[T]) PossibleValues() ast.EnumValueList {
@@ -875,15 +917,12 @@ func (e *EnumValues[T]) PossibleValues() ast.EnumValueList {
 			Description: e.descriptions[i],
 		})
 	}
+
 	return values
 }
 
-func (e *EnumValues[T]) Literal(val T) *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Enum{
-			Enum: string(val),
-		},
-	}
+func (e *EnumValues[T]) Literal(val T) call.Literal {
+	return call.NewLiteralEnum(string(val))
 }
 
 func (e *EnumValues[T]) Lookup(val string) (T, error) {
@@ -907,8 +946,57 @@ func (e *EnumValues[T]) Install(srv *Server) {
 	srv.scalars[zero.Type().Name()] = e
 }
 
-// InputType represents a GraphQL Input Object type.
-type InputType[T Type] struct{}
+type EnumValueName struct {
+	Enum  string
+	Value string
+}
+
+var _ Input = &EnumValueName{}
+
+func (e *EnumValueName) TypeName() string {
+	return e.Enum
+}
+
+func (e *EnumValueName) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: e.Enum,
+		NonNull:   true,
+	}
+}
+
+func (e *EnumValueName) TypeDefinition(views ...string) *ast.Definition {
+	return &ast.Definition{
+		Kind: ast.Enum,
+		Name: e.TypeName(),
+	}
+}
+
+func (e *EnumValueName) ToLiteral() call.Literal {
+	return call.NewLiteralEnum(e.Value)
+}
+
+func (e *EnumValueName) Decoder() InputDecoder {
+	return e
+}
+
+func (e *EnumValueName) DecodeInput(val any) (Input, error) {
+	switch x := val.(type) {
+	case *EnumValueName:
+		return &EnumValueName{Enum: e.Enum, Value: x.Value}, nil
+	case string:
+		return &EnumValueName{Enum: e.Enum, Value: x}, nil
+	case bool:
+		return nil, fmt.Errorf("invalid enum value %t", x)
+	case nil:
+		return nil, fmt.Errorf("invalid enum value null")
+	default:
+		return nil, fmt.Errorf("cannot create enum name from %T", x)
+	}
+}
+
+func (e *EnumValueName) MarshalJSON() ([]byte, error) {
+	return json.Marshal(e.Value)
+}
 
 func MustInputSpec(val Type) InputObjectSpec {
 	spec := InputObjectSpec{
@@ -946,7 +1034,7 @@ func (spec InputObjectSpec) TypeName() string {
 	return spec.Name
 }
 
-func (spec InputObjectSpec) TypeDefinition() *ast.Definition {
+func (spec InputObjectSpec) TypeDefinition(views ...string) *ast.Definition {
 	return &ast.Definition{
 		Kind:        ast.InputObject,
 		Name:        spec.Name,

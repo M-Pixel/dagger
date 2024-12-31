@@ -2,240 +2,106 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/dagger/dagger/dagql/idtui"
+	"dagger.io/dagger/telemetry"
+	"github.com/dagger/dagger/dagql/dagui"
 	"github.com/dagger/dagger/engine"
 	"github.com/dagger/dagger/engine/client"
-	"github.com/dagger/dagger/internal/tui"
-	"github.com/mattn/go-isatty"
-	"github.com/vito/progrock"
-	"github.com/vito/progrock/console"
+	"github.com/dagger/dagger/engine/slog"
+	enginetel "github.com/dagger/dagger/engine/telemetry"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
-
-var silent bool
-
-var progress string
-var stdoutIsTTY = isatty.IsTerminal(os.Stdout.Fd())
-var stderrIsTTY = isatty.IsTerminal(os.Stderr.Fd())
-
-var autoTTY = stdoutIsTTY || stderrIsTTY
-
-func init() {
-	rootCmd.PersistentFlags().BoolVarP(
-		&silent,
-		"silent",
-		"s",
-		false,
-		"disable terminal UI and progress output",
-	)
-
-	rootCmd.PersistentFlags().StringVar(
-		&progress,
-		"progress",
-		"auto",
-		"progress output format (auto, plain, tty)",
-	)
-}
-
-// show only focused vertices
-var focus bool
-
-// show errored vertices even if focused
-//
-// set this to false if your command handles errors (e.g. dagger checks)
-var revealErrored = true
-
-var interactive = os.Getenv("_EXPERIMENTAL_DAGGER_INTERACTIVE_TUI") != ""
 
 type runClientCallback func(context.Context, *client.Client) error
 
-func withEngineAndTUI(
+func withEngine(
 	ctx context.Context,
 	params client.Params,
 	fn runClientCallback,
 ) error {
-	if params.RunnerHost == "" {
-		params.RunnerHost = engine.RunnerHost()
-	}
+	return Frontend.Run(ctx, opts, func(ctx context.Context) (rerr error) {
+		// Init tracing as early as possible and shutdown after the command
+		// completes, ensuring progress is fully flushed to the frontend.
+		ctx, cleanupTelemetry := initEngineTelemetry(ctx)
+		defer func() { cleanupTelemetry(rerr) }()
 
-	params.DisableHostRW = disableHostRW
-
-	if params.JournalFile == "" {
-		params.JournalFile = os.Getenv("_EXPERIMENTAL_DAGGER_JOURNAL")
-	}
-
-	if !silent {
-		if progress == "auto" && autoTTY || progress == "tty" {
-			if interactive {
-				return interactiveTUI(ctx, params, fn)
-			}
-
-			return inlineTUI(ctx, params, fn)
-		}
-
-		opts := []console.WriterOpt{
-			console.ShowInternal(debug),
-		}
 		if debug {
-			opts = append(opts, console.WithMessageLevel(progrock.MessageLevel_DEBUG))
+			params.LogLevel = slog.LevelDebug
 		}
 
-		progW := console.NewWriter(os.Stderr, opts...)
-		progW, engineErr := progrockTee(progW)
-		if engineErr != nil {
-			return engineErr
+		if params.RunnerHost == "" {
+			params.RunnerHost = engine.RunnerHost()
 		}
 
-		params.ProgrockWriter = progW
+		params.DisableHostRW = disableHostRW
 
-		params.EngineNameCallback = func(name string) {
-			fmt.Fprintln(os.Stderr, "Connected to engine", name)
+		params.EngineCallback = Frontend.ConnectedToEngine
+		params.CloudURLCallback = Frontend.SetCloudURL
+
+		params.EngineTrace = telemetry.SpanForwarder{
+			Processors: telemetry.SpanProcessors,
 		}
-
-		params.CloudURLCallback = func(cloudURL string) {
-			fmt.Fprintln(os.Stderr, "Dagger Cloud URL:", cloudURL)
+		params.EngineLogs = telemetry.LogForwarder{
+			Processors: telemetry.LogProcessors,
 		}
-	}
+		params.EngineMetrics = telemetry.MetricExporters
 
-	engineClient, ctx, err := client.Connect(ctx, params)
-	if err != nil {
-		return err
-	}
-	defer engineClient.Close()
-	return fn(ctx, engineClient)
-}
+		params.WithTerminal = withTerminal
+		params.Interactive = interactive
+		params.InteractiveCommand = interactiveCommandParsed
 
-func progrockTee(progW progrock.Writer) (progrock.Writer, error) {
-	if log := os.Getenv("_EXPERIMENTAL_DAGGER_PROGROCK_JOURNAL"); log != "" {
-		fileW, err := newProgrockWriter(log)
-		if err != nil {
-			return nil, fmt.Errorf("open progrock log: %w", err)
-		}
-
-		return progrock.MultiWriter{progW, fileW}, nil
-	}
-
-	return progW, nil
-}
-
-func interactiveTUI(
-	ctx context.Context,
-	params client.Params,
-	fn runClientCallback,
-) error {
-	progR, progW := progrock.Pipe()
-	progW, err := progrockTee(progW)
-	if err != nil {
-		return err
-	}
-
-	params.ProgrockWriter = progW
-
-	ctx, quit := context.WithCancel(ctx)
-	defer quit()
-
-	program := tea.NewProgram(tui.New(quit, progR), tea.WithAltScreen())
-
-	tuiDone := make(chan error, 1)
-	go func() {
-		_, err := program.Run()
-		tuiDone <- err
-	}()
-
-	sess, ctx, err := client.Connect(ctx, params)
-	if err != nil {
-		tuiErr := <-tuiDone
-		return errors.Join(tuiErr, err)
-	}
-
-	err = fn(ctx, sess)
-
-	closeErr := sess.Close()
-
-	tuiErr := <-tuiDone
-	return errors.Join(tuiErr, closeErr, err)
-}
-
-func inlineTUI(
-	ctx context.Context,
-	params client.Params,
-	fn runClientCallback,
-) error {
-	tape := progrock.NewTape()
-	tape.ShowInternal(debug)
-	tape.Focus(focus)
-	tape.RevealErrored(revealErrored)
-
-	if os.Getenv("IDS") != "" {
-		tape.SetFrontend(idtui.New())
-	}
-
-	if debug {
-		tape.MessageLevel(progrock.MessageLevel_DEBUG)
-	}
-
-	progW, engineErr := progrockTee(tape)
-	if engineErr != nil {
-		return engineErr
-	}
-
-	params.ProgrockWriter = progW
-
-	return progrock.DefaultUI().Run(ctx, tape, func(ctx context.Context, ui progrock.UIClient) error {
-		params.CloudURLCallback = func(cloudURL string) {
-			ui.SetStatusInfo(progrock.StatusInfo{
-				Name:  "Cloud URL",
-				Value: cloudURL,
-				Order: 1,
-			})
-		}
-
-		params.EngineNameCallback = func(name string) {
-			ui.SetStatusInfo(progrock.StatusInfo{
-				Name:  "Engine",
-				Value: name,
-				Order: 2,
-			})
-		}
-
+		// Connect to and run with the engine
 		sess, ctx, err := client.Connect(ctx, params)
 		if err != nil {
 			return err
 		}
 		defer sess.Close()
+
 		return fn(ctx, sess)
 	})
 }
 
-func newProgrockWriter(dest string) (progrock.Writer, error) {
-	f, err := os.Create(dest)
-	if err != nil {
-		return nil, err
+func initEngineTelemetry(ctx context.Context) (context.Context, func(error)) {
+	// Setup telemetry config
+	telemetryCfg := telemetry.Config{
+		Detect:   true,
+		Resource: Resource(ctx),
+
+		LiveTraceExporters:  []sdktrace.SpanExporter{Frontend.SpanExporter()},
+		LiveLogExporters:    []sdklog.Exporter{Frontend.LogExporter()},
+		LiveMetricExporters: []sdkmetric.Exporter{Frontend.MetricExporter()},
 	}
+	if spans, logs, metrics, ok := enginetel.ConfiguredCloudExporters(ctx); ok {
+		telemetryCfg.LiveTraceExporters = append(telemetryCfg.LiveTraceExporters, spans)
+		telemetryCfg.LiveLogExporters = append(telemetryCfg.LiveLogExporters, logs)
+		telemetryCfg.LiveMetricExporters = append(telemetryCfg.LiveMetricExporters, metrics)
+	}
+	ctx = telemetry.Init(ctx, telemetryCfg)
 
-	return progrockFileWriter{
-		enc: json.NewEncoder(f),
-		c:   f,
-	}, nil
-}
+	// Set the full command string as the name of the root span.
+	//
+	// If you pass credentials in plaintext, yes, they will be leaked; don't do
+	// that, since they will also be leaked in various other places (like the
+	// process tree). Use Secret arguments instead.
+	ctx, span := Tracer().Start(ctx, spanName(os.Args))
 
-type progrockFileWriter struct {
-	enc *json.Encoder
-	c   io.Closer
-}
+	// Set up global slog to log to the primary span output.
+	slog.SetDefault(slog.SpanLogger(ctx, InstrumentationLibrary))
 
-var _ progrock.Writer = progrockFileWriter{}
+	// Set the span as the primary span for the frontend.
+	Frontend.SetPrimary(dagui.SpanID{SpanID: span.SpanContext().SpanID()})
 
-func (p progrockFileWriter) WriteStatus(update *progrock.StatusUpdate) error {
-	return p.enc.Encode(update)
-}
+	// Direct command stdout/stderr to span stdio via OpenTelemetry.
+	stdio := telemetry.SpanStdio(ctx, InstrumentationLibrary)
+	rootCmd.SetOut(stdio.Stdout)
+	rootCmd.SetErr(stdio.Stderr)
 
-func (p progrockFileWriter) Close() error {
-	return p.c.Close()
+	return ctx, func(rerr error) {
+		stdio.Close()
+		telemetry.End(span, func() error { return rerr })
+		telemetry.Close()
+	}
 }

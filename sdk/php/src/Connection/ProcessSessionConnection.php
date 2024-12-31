@@ -10,6 +10,11 @@ use Psr\Log\NullLogger;
 use RuntimeException;
 use Symfony\Component\Process\Process;
 
+/**
+ * @deprecated
+ * dagger modules will always have the environment variables set
+ * so we don't need to download a CLI Client
+ */
 class ProcessSessionConnection extends Connection implements LoggerAwareInterface
 {
     private ?Process $sessionProcess;
@@ -82,8 +87,8 @@ class ProcessSessionConnection extends Connection implements LoggerAwareInterfac
         $port = $sessionInformation->port;
         $token = $sessionInformation->session_token;
 
-        $this->client = new Client('http://127.0.0.1:'.$port.'/query', [
-            'Authorization' => 'Basic '.base64_encode($token.':'),
+        $this->client = new Client('http://127.0.0.1:' . $port . '/query', [
+            'Authorization' => 'Basic ' . base64_encode($token . ':'),
         ]);
 
         $this->sessionProcess = $process;

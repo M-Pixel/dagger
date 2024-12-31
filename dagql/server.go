@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime/debug"
 	"sort"
 	"sync"
 
 	"github.com/99designs/gqlgen/graphql"
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/iancoleman/strcase"
 	"github.com/opencontainers/go-digest"
 	"github.com/sourcegraph/conc/pool"
@@ -18,6 +18,8 @@ import (
 	"github.com/vektah/gqlparser/v2/gqlerror"
 	"github.com/vektah/gqlparser/v2/parser"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/dagger/dagger/dagql/call"
 )
 
 // Server represents a GraphQL server whose schema is dynamically modified at
@@ -30,6 +32,9 @@ type Server struct {
 	typeDefs    map[string]TypeDef
 	directives  map[string]DirectiveSpec
 	installLock *sync.Mutex
+
+	// View is the view that is applied to all queries on this server
+	View string
 
 	// Cache is the inner cache used by the server. It can be replicated to
 	// another *Server to inherit and share caches.
@@ -45,9 +50,8 @@ type Server struct {
 type AroundFunc func(
 	context.Context,
 	Object,
-	*idproto.ID,
-	func(context.Context) (Typed, error),
-) func(context.Context) (Typed, error)
+	*call.ID,
+) (context.Context, func(res Typed, cached bool, err error))
 
 // Cache stores results of pure selections against Server.
 type Cache interface {
@@ -55,7 +59,7 @@ type Cache interface {
 		context.Context,
 		digest.Digest,
 		func(context.Context) (Typed, error),
-	) (Typed, error)
+	) (Typed, bool, error)
 }
 
 // TypeDef is a type whose sole practical purpose is to define a GraphQL type,
@@ -67,7 +71,7 @@ type TypeDef interface {
 
 // NewServer returns a new Server with the given root object.
 func NewServer[T Typed](root T) *Server {
-	rootClass := NewClass[T](ClassOpts[T]{
+	rootClass := NewClass(ClassOpts[T]{
 		// NB: there's nothing actually stopping this from being a thing, except it
 		// currently confuses the Dagger Go SDK. could be a nifty way to pass
 		// around global config I suppose.
@@ -158,6 +162,37 @@ var coreDirectives = []DirectiveSpec{
 			DirectiveLocationFieldDefinition,
 		},
 	},
+	{
+		Name:        "sourceMap",
+		Description: FormatDescription(`Indicates the source information for where a given field is defined.`),
+		Args: []InputSpec{
+			{
+				Name: "module",
+				Type: String(""),
+			},
+			{
+				Name: "filename",
+				Type: String(""),
+			},
+			{
+				Name: "line",
+				Type: Int(0),
+			}, {
+				Name: "column",
+				Type: Int(0),
+			},
+		},
+		Locations: []DirectiveLocation{
+			DirectiveLocationScalar,
+			DirectiveLocationObject,
+			DirectiveLocationFieldDefinition,
+			DirectiveLocationArgumentDefinition,
+			DirectiveLocationUnion,
+			DirectiveLocationEnum,
+			DirectiveLocationEnumValue,
+			DirectiveLocationInputObject,
+		},
+	},
 }
 
 // Root returns the root object of the server. It is suitable for passing to
@@ -174,10 +209,10 @@ type Loadable interface {
 func (s *Server) InstallObject(class ObjectType) {
 	s.installLock.Lock()
 	defer s.installLock.Unlock()
-	s.installObjectLocked(class)
+	s.installObject(class)
 }
 
-func (s *Server) installObjectLocked(class ObjectType) {
+func (s *Server) installObject(class ObjectType) {
 	s.objects[class.TypeName()] = class
 
 	if idType, hasID := class.IDType(); hasID {
@@ -201,8 +236,8 @@ func (s *Server) installObjectLocked(class ObjectType) {
 					return nil, fmt.Errorf("expected IDable, got %T", args["id"])
 				}
 				id := idable.ID()
-				if id.Type.ToAST().NamedType != class.TypeName() {
-					return nil, fmt.Errorf("expected ID of type %q, got %q", class.TypeName(), id.Type.ToAST().NamedType)
+				if id.Type().ToAST().NamedType != class.TypeName() {
+					return nil, fmt.Errorf("expected ID of type %q, got %q", class.TypeName(), id.Type().ToAST().NamedType)
 				}
 				res, err := s.Load(ctx, idable.ID())
 				if err != nil {
@@ -284,17 +319,17 @@ func (s *Server) Schema() *ast.Schema { // TODO: change this to be updated whene
 	queryType := s.Root().Type().Name()
 	schema := &ast.Schema{}
 	for _, t := range s.objects { // TODO stable order
-		def := definition(ast.Object, t)
+		def := definition(ast.Object, t, s.View)
 		if def.Name == queryType {
 			schema.Query = def
 		}
 		schema.AddTypes(def)
 	}
 	for _, t := range s.scalars {
-		schema.AddTypes(definition(ast.Scalar, t))
+		schema.AddTypes(definition(ast.Scalar, t, s.View))
 	}
 	for _, t := range s.typeDefs {
-		schema.AddTypes(t.TypeDefinition())
+		schema.AddTypes(t.TypeDefinition(s.View))
 	}
 	schema.Directives = map[string]*ast.DirectiveDefinition{}
 	for n, d := range s.directives {
@@ -317,7 +352,7 @@ type ExtendedError interface {
 
 // Exec implements graphql.ExecutableSchema.
 func (s *Server) Exec(ctx1 context.Context) graphql.ResponseHandler {
-	return func(ctx context.Context) *graphql.Response {
+	return func(ctx context.Context) (res *graphql.Response) {
 		gqlOp := graphql.GetOperationContext(ctx)
 
 		if err := gqlOp.Validate(ctx); err != nil {
@@ -326,24 +361,13 @@ func (s *Server) Exec(ctx1 context.Context) graphql.ResponseHandler {
 
 		results, err := s.ExecOp(ctx, gqlOp)
 		if err != nil {
-			gqlOp.Error(ctx, err)
-			gqlErr := &gqlerror.Error{
-				Err:     err,
-				Message: err.Error(),
-				// TODO Path would correspond nicely to an ID
-			}
-			var ext ExtendedError
-			if errors.As(err, &ext) {
-				gqlErr.Extensions = ext.Extensions()
-			}
 			return &graphql.Response{
-				Errors: gqlerror.List{gqlErr},
+				Errors: gqlErrs(err),
 			}
 		}
 
 		data, err := json.Marshal(results)
 		if err != nil {
-			gqlOp.Error(ctx, err)
 			return graphql.ErrorResponse(ctx, "marshal: %s", err)
 		}
 
@@ -353,15 +377,28 @@ func (s *Server) Exec(ctx1 context.Context) graphql.ResponseHandler {
 	}
 }
 
+func gqlErrs(err error) (errs gqlerror.List) {
+	if list, ok := err.(gqlerror.List); ok {
+		return list
+	}
+	if unwrap, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, e := range unwrap.Unwrap() {
+			errs = append(errs, gqlErrs(e)...)
+		}
+	} else if err != nil {
+		errs = append(errs, gqlErr(err, nil))
+	}
+	return
+}
+
 func (s *Server) ExecOp(ctx context.Context, gqlOp *graphql.OperationContext) (map[string]any, error) {
 	if gqlOp.Doc == nil {
 		var err error
 		gqlOp.Doc, err = parser.ParseQuery(&ast.Source{Input: gqlOp.RawQuery})
 		if err != nil {
-			return nil, err
+			return nil, gqlErrs(err)
 		}
 	}
-
 	results := make(map[string]any)
 	for _, op := range gqlOp.Doc.Operations {
 		switch op.Operation {
@@ -375,7 +412,7 @@ func (s *Server) ExecOp(ctx context.Context, gqlOp *graphql.OperationContext) (m
 			}
 			results, err = s.Resolve(ctx, s.root, sels...)
 			if err != nil {
-				return nil, fmt.Errorf("resolve: %w", err)
+				return nil, err
 			}
 		case ast.Mutation:
 			// TODO
@@ -395,20 +432,19 @@ func (s *Server) ExecOp(ctx context.Context, gqlOp *graphql.OperationContext) (m
 func (s *Server) Resolve(ctx context.Context, self Object, sels ...Selection) (map[string]any, error) {
 	results := new(sync.Map)
 
-	pool := new(pool.ErrorPool)
+	pool := pool.New().WithErrors()
 	for _, sel := range sels {
-		sel := sel
 		pool.Go(func() error {
 			res, err := s.resolvePath(ctx, self, sel)
 			if err != nil {
-				return fmt.Errorf("%s: %w", sel.Name(), err)
+				return err
 			}
 			results.Store(sel.Name(), res)
 			return nil
 		})
 	}
 	if err := pool.Wait(); err != nil {
-		return nil, err
+		return nil, gqlErrs(err)
 	}
 
 	resultsMap := make(map[string]any)
@@ -420,63 +456,120 @@ func (s *Server) Resolve(ctx context.Context, self Object, sels ...Selection) (m
 }
 
 // Load loads the object with the given ID.
-func (s *Server) Load(ctx context.Context, id *idproto.ID) (Object, error) {
+func (s *Server) Load(ctx context.Context, id *call.ID) (Object, error) {
 	var base Object
 	var err error
-	if id.Parent != nil {
-		base, err = s.Load(ctx, id.Parent)
+	if id.Receiver() != nil {
+		base, err = s.Load(ctx, id.Receiver())
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("load base: %w", err)
 		}
 	} else {
 		base = s.root
 	}
 	astField := &ast.Field{
-		Name: id.Field,
+		Name: id.Field(),
 	}
 	vars := map[string]any{}
-	for _, arg := range id.Args {
-		vars[arg.Name] = arg.Value.ToInput()
+	for _, arg := range id.Args() {
+		vars[arg.Name()] = arg.Value().ToInput()
 		astField.Arguments = append(astField.Arguments, &ast.Argument{
-			Name: arg.Name,
+			Name: arg.Name(),
 			Value: &ast.Value{
 				Kind: ast.Variable,
-				Raw:  arg.Name,
+				Raw:  arg.Name(),
 			},
 		})
 	}
-	sel, _, err := base.ObjectType().ParseField(ctx, astField, vars)
+	sel, _, err := base.ObjectType().ParseField(ctx, id.View(), astField, vars)
 	if err != nil {
 		return nil, fmt.Errorf("parse field %q: %w", astField.Name, err)
 	}
-	sel.Nth = int(id.Nth)
+	sel.Nth = int(id.Nth())
 	res, id, err := s.cachedSelect(ctx, base, sel)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load: %w", err)
 	}
 	return s.toSelectable(id, res)
 }
 
+// Select evaluates a series of chained field selections starting from the
+// given object and assigns the final result value into dest.
 func (s *Server) Select(ctx context.Context, self Object, dest any, sels ...Selector) error {
-	for _, sel := range sels {
-		res, id, err := s.cachedSelect(ctx, self, sel)
+	// Annotate ctx with the internal flag so we can distinguish self-calls from
+	// user-calls in the UI.
+	ctx = withInternal(ctx)
+
+	var res Typed = self
+	var id *call.ID
+	var err error
+	for i, sel := range sels {
+		res, id, err = s.cachedSelect(ctx, self, sel)
 		if err != nil {
-			return err
+			return fmt.Errorf("select: %w", err)
 		}
-		self, err = s.toSelectable(id, res)
-		if err != nil {
-			return err
+
+		if _, ok := s.ObjectType(res.Type().Name()); ok {
+			enum, isEnum := res.(Enumerable)
+			if sel.Nth != 0 {
+				if !isEnum {
+					return fmt.Errorf("nth used on non enumerable %s", res.Type())
+				}
+				res, err = enum.Nth(sel.Nth)
+				if err != nil {
+					return fmt.Errorf("selector nth %d: %w", sel.Nth, err)
+				}
+			} else if isEnum {
+				// HACK: list of objects must be the last selection right now unless nth used in Selector.
+				if i+1 < len(sels) {
+					return fmt.Errorf("cannot sub-select enum of %s", res.Type())
+				}
+				for nth := 1; nth <= enum.Len(); nth++ {
+					val, err := enum.Nth(nth)
+					if err != nil {
+						return fmt.Errorf("nth %d: %w", nth, err)
+					}
+					if wrapped, ok := val.(Derefable); ok {
+						val, ok = wrapped.Deref()
+						if !ok {
+							if err := appendAssign(reflect.ValueOf(dest).Elem(), nil); err != nil {
+								return err
+							}
+							continue
+						}
+					}
+					nthID := id.SelectNth(nth)
+					obj, err := s.toSelectable(nthID, val)
+					if err != nil {
+						return fmt.Errorf("select %dth array element: %w", nth, err)
+					}
+					if err := appendAssign(reflect.ValueOf(dest).Elem(), obj); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+
+			// if the result is an Object, set it as the next selection target, and
+			// assign res to the "hydrated" Object
+			self, err = s.toSelectable(id, res)
+			if err != nil {
+				return err
+			}
+			res = self
+		} else if i+1 < len(sels) {
+			// if the result is not an object and there are further selections,
+			// that's a logic error.
+			return fmt.Errorf("cannot sub-select %s", res.Type())
 		}
 	}
-	return assign(reflect.ValueOf(dest).Elem(), self)
+	return assign(reflect.ValueOf(dest).Elem(), res)
 }
 
 func LoadIDs[T Typed](ctx context.Context, srv *Server, ids []ID[T]) ([]T, error) {
 	out := make([]T, len(ids))
 	eg := new(errgroup.Group)
 	for i, id := range ids {
-		i := i
-		id := id
 		eg.Go(func() error {
 			val, err := id.Load(ctx, srv)
 			if err != nil {
@@ -487,46 +580,71 @@ func LoadIDs[T Typed](ctx context.Context, srv *Server, ids []ID[T]) ([]T, error
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return nil, err
+		return out, err
 	}
 	return out, nil
 }
 
 type idCtx struct{}
 
-func idToContext(ctx context.Context, id *idproto.ID) context.Context {
+func idToContext(ctx context.Context, id *call.ID) context.Context {
 	return context.WithValue(ctx, idCtx{}, id)
 }
 
-func CurrentID(ctx context.Context) *idproto.ID {
+func CurrentID(ctx context.Context) *call.ID {
 	val := ctx.Value(idCtx{})
 	if val == nil {
 		return nil
 	}
-	return val.(*idproto.ID)
+	return val.(*call.ID)
 }
 
-func (s *Server) cachedSelect(ctx context.Context, self Object, sel Selector) (res Typed, chained *idproto.ID, rerr error) {
+// NewInstanceForCurrentID creates a new Instance that's set to the current ID from
+// the given self value.
+func NewInstanceForCurrentID[P, T Typed](
+	ctx context.Context,
+	srv *Server,
+	parent Instance[P],
+	self T,
+) (Instance[T], error) {
+	objType, ok := srv.ObjectType(self.Type().Name())
+	if !ok {
+		return Instance[T]{}, fmt.Errorf("unknown type %q", self.Type().Name())
+	}
+	class, ok := objType.(Class[T])
+	if !ok {
+		return Instance[T]{}, fmt.Errorf("not a Class: %T", objType)
+	}
+	return Instance[T]{
+		Constructor: CurrentID(ctx),
+		Self:        self,
+		Class:       class,
+		Module:      parent.Module,
+	}, nil
+}
+
+func NoopDone(res Typed, cached bool, rerr error) {}
+
+func (s *Server) cachedSelect(ctx context.Context, self Object, sel Selector) (res Typed, chained *call.ID, rerr error) {
 	chainedID, err := self.IDFor(ctx, sel)
 	if err != nil {
 		return nil, nil, err
 	}
 	ctx = idToContext(ctx, chainedID)
-	dig, err := chainedID.Canonical().Digest()
-	if err != nil {
-		return nil, nil, err
-	}
-	doSelect := func(ctx context.Context) (Typed, error) {
+	dig := chainedID.Digest()
+	var val Typed
+	doSelect := func(ctx context.Context) (innerVal Typed, innerErr error) {
+		if s.telemetry != nil {
+			wrappedCtx, done := s.telemetry(ctx, self, chainedID)
+			defer func() { done(innerVal, false, innerErr) }()
+			ctx = wrappedCtx
+		}
 		return self.Select(ctx, sel)
 	}
-	if s.telemetry != nil {
-		doSelect = s.telemetry(ctx, self, chainedID, doSelect)
-	}
-	var val Typed
 	if chainedID.IsTainted() {
 		val, err = doSelect(ctx)
 	} else {
-		val, err = s.Cache.GetOrInitialize(ctx, dig, doSelect)
+		val, _, err = s.Cache.GetOrInitialize(ctx, dig, doSelect)
 	}
 	if err != nil {
 		return nil, nil, err
@@ -534,7 +652,57 @@ func (s *Server) cachedSelect(ctx context.Context, self Object, sel Selector) (r
 	return val, chainedID, nil
 }
 
+func idToPath(id *call.ID) ast.Path {
+	path := ast.Path{}
+	if id == nil { // Query
+		return path
+	}
+	if id.Receiver() != nil {
+		path = idToPath(id.Receiver())
+	}
+	path = append(path, ast.PathName(id.Field()))
+	if id.Nth() != 0 {
+		path = append(path, ast.PathIndex(id.Nth()-1))
+	}
+	return path
+}
+
+func gqlErr(rerr error, path ast.Path) *gqlerror.Error {
+	var gqlErr *gqlerror.Error
+	if errors.As(rerr, &gqlErr) {
+		if len(gqlErr.Path) == 0 {
+			gqlErr.Path = path
+		}
+		return gqlErr
+	}
+	gqlErr = &gqlerror.Error{
+		Err:     rerr,
+		Message: rerr.Error(),
+		Path:    path,
+	}
+	var ext ExtendedError
+	if errors.As(rerr, &ext) {
+		gqlErr.Extensions = ext.Extensions()
+	}
+	return gqlErr
+}
+
 func (s *Server) resolvePath(ctx context.Context, self Object, sel Selection) (res any, rerr error) {
+	defer func() {
+		if r := recover(); r != nil {
+			rerr = PanicError{
+				Cause:     r,
+				Self:      self,
+				Selection: sel,
+				Stack:     debug.Stack(),
+			}
+		}
+
+		if rerr != nil {
+			rerr = gqlErr(rerr, append(idToPath(self.ID()), ast.PathName(sel.Name())))
+		}
+	}()
+
 	val, chainedID, err := s.cachedSelect(ctx, self, sel.Selector)
 	if err != nil {
 		return nil, err
@@ -567,8 +735,7 @@ func (s *Server) resolvePath(ctx context.Context, self Object, sel Selection) (r
 			if len(sel.Subselections) == 0 {
 				results = append(results, val)
 			} else {
-				nthID := chainedID.Clone()
-				nthID.SelectNth(nth)
+				nthID := chainedID.SelectNth(nth)
 				node, err := s.toSelectable(nthID, val)
 				if err != nil {
 					return nil, fmt.Errorf("instantiate %dth array element: %w", nth, err)
@@ -596,14 +763,13 @@ func (s *Server) resolvePath(ctx context.Context, self Object, sel Selection) (r
 	return s.Resolve(ctx, node, sel.Subselections...)
 }
 
-func (s *Server) toSelectable(chainedID *idproto.ID, val Typed) (Object, error) {
+func (s *Server) toSelectable(chainedID *call.ID, val Typed) (Object, error) {
 	if sel, ok := val.(Object); ok {
 		// We always support returning something that's already Selectable, e.g. an
 		// object loaded from its ID.
 		return sel, nil
 	}
-
-	class, ok := s.objects[val.Type().Name()]
+	class, ok := s.ObjectType(val.Type().Name())
 	if !ok {
 		return nil, fmt.Errorf("toSelectable: unknown type %q", val.Type().Name())
 	}
@@ -622,7 +788,7 @@ func (s *Server) parseASTSelections(ctx context.Context, gqlOp *graphql.Operatio
 	for _, sel := range astSels {
 		switch x := sel.(type) {
 		case *ast.Field:
-			sel, resType, err := class.ParseField(ctx, x, vars)
+			sel, resType, err := class.ParseField(ctx, s.View, x, vars)
 			if err != nil {
 				return nil, fmt.Errorf("parse field %q: %w", x.Name, err)
 			}
@@ -679,6 +845,18 @@ type Selector struct {
 	Field string
 	Args  []NamedInput
 	Nth   int
+	View  string
+
+	// Override the default purity of the field. Typically used so that an impure
+	// resolver call can return a pure result, by calling to itself or another
+	// field with pure arguments.
+	//
+	// If Pure is false, and the field is marked Impure, the selection will not
+	// be cached and the object's ID will be tainted.
+	//
+	// If Pure is true, the selection will be cached regardless of the field's
+	// purity, and the object's ID will be untainted.
+	Pure bool
 }
 
 func (sel Selector) String() string {
@@ -699,10 +877,10 @@ func (sel Selector) String() string {
 	return str
 }
 
-func (sel Selector) AppendTo(id *idproto.ID, spec FieldSpec) *idproto.ID {
+func (sel Selector) AppendTo(id *call.ID, spec FieldSpec) *call.ID {
 	astType := spec.Type.Type()
-	tainted := spec.ImpurityReason != ""
-	idArgs := make([]*idproto.Argument, 0, len(sel.Args))
+	tainted := !sel.Pure && spec.ImpurityReason != ""
+	idArgs := make([]*call.Argument, 0, len(sel.Args))
 	for _, arg := range sel.Args {
 		if arg.Value == nil {
 			// we don't include null arguments, since they would needlessly bust caches
@@ -711,28 +889,27 @@ func (sel Selector) AppendTo(id *idproto.ID, spec FieldSpec) *idproto.ID {
 		if arg, found := spec.Args.Lookup(arg.Name); found && arg.Sensitive {
 			continue
 		}
-		idArgs = append(idArgs, &idproto.Argument{
-			Name:  arg.Name,
-			Value: arg.Value.ToLiteral(),
-		})
+		idArgs = append(idArgs, call.NewArgument(
+			arg.Name,
+			arg.Value.ToLiteral(),
+		))
 	}
 	// TODO: it's better DX if it matches schema order
 	sort.Slice(idArgs, func(i, j int) bool {
-		return idArgs[i].Name < idArgs[j].Name
+		return idArgs[i].Name() < idArgs[j].Name()
 	})
-	appended := id.Append(
+	if sel.Nth != 0 {
+		astType = astType.Elem
+	}
+	return id.Append(
 		astType,
 		sel.Field,
+		sel.View,
+		spec.Module,
+		tainted,
+		sel.Nth,
 		idArgs...,
 	)
-	appended.Module = spec.Module
-	if appended.IsTainted() != tainted {
-		appended.SetTainted(tainted)
-	}
-	if sel.Nth != 0 {
-		appended.SelectNth(sel.Nth)
-	}
-	return appended
 }
 
 type Inputs []NamedInput
@@ -800,7 +977,7 @@ func setInputObjectFields(obj any, vals map[string]any) error {
 		// TODO handle pointer?
 		return fmt.Errorf("object must be a struct, got %T", obj)
 	}
-	for i := 0; i < objT.NumField(); i++ {
+	for i := range objT.NumField() {
 		fieldT := objT.Field(i)
 		fieldV := objV.Elem().Field(i)
 		name := fieldT.Tag.Get("name")
@@ -849,30 +1026,24 @@ func setInputObjectFields(obj any, vals map[string]any) error {
 	return nil
 }
 
-func (input InputObject[T]) ToLiteral() *idproto.Literal {
+func (input InputObject[T]) ToLiteral() call.Literal {
 	obj := input.Value
 	args, err := collectLiteralArgs(obj)
 	if err != nil {
 		panic(fmt.Errorf("collectLiteralArgs: %w", err))
 	}
-	return &idproto.Literal{
-		Value: &idproto.Literal_Object{
-			Object: &idproto.Object{
-				Values: args,
-			},
-		},
-	}
+	return call.NewLiteralObject(args...)
 }
 
-func collectLiteralArgs(obj any) ([]*idproto.Argument, error) {
+func collectLiteralArgs(obj any) ([]*call.Argument, error) {
 	objT := reflect.TypeOf(obj)
 	objV := reflect.ValueOf(obj)
 	if objV.Kind() != reflect.Struct {
 		// TODO handle pointer?
 		return nil, fmt.Errorf("object must be a struct, got %T", obj)
 	}
-	args := []*idproto.Argument{}
-	for i := 0; i < objV.NumField(); i++ {
+	args := []*call.Argument{}
+	for i := range objV.NumField() {
 		fieldT := objT.Field(i)
 		name := fieldT.Tag.Get("name")
 		if name == "" {
@@ -894,10 +1065,10 @@ func collectLiteralArgs(obj any) ([]*idproto.Argument, error) {
 		if err != nil {
 			return nil, fmt.Errorf("arg %q: %w", fieldT.Name, err)
 		}
-		args = append(args, &idproto.Argument{
-			Name:  name,
-			Value: input.ToLiteral(),
-		})
+		args = append(args, call.NewArgument(
+			name,
+			input.ToLiteral(),
+		))
 	}
 	return args, nil
 }

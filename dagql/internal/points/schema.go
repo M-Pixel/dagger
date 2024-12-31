@@ -4,9 +4,10 @@ import (
 	"context"
 	"math"
 
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 )
 
 type Point struct {
@@ -26,8 +27,8 @@ func (*Point) TypeDescription() string {
 }
 
 type Line struct {
-	From *Point
-	To   *Point
+	From *Point `field:"true"`
+	To   *Point `field:"true"`
 }
 
 func (*Line) Type() *ast.Type {
@@ -59,7 +60,7 @@ func (Direction) Decoder() dagql.InputDecoder {
 	return Directions
 }
 
-func (d Direction) ToLiteral() *idproto.Literal {
+func (d Direction) ToLiteral() call.Literal {
 	return Directions.Literal(d)
 }
 

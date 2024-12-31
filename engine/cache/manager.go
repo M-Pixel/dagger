@@ -2,13 +2,16 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/containerd/containerd/content"
+	"github.com/dagger/dagger/engine/distconsts"
 	"github.com/moby/buildkit/cache"
 	cacheconfig "github.com/moby/buildkit/cache/config"
 	remotecache "github.com/moby/buildkit/cache/remotecache/v1"
@@ -52,6 +55,16 @@ const (
 	backgroundImportTimeout = 10 * time.Minute
 )
 
+var contentStoreLayers = map[string]struct{}{}
+
+func init() {
+	layerInfo, _ := os.ReadDir(distconsts.EngineContainerBuiltinContentDir + "/blobs/sha256/")
+
+	for _, li := range layerInfo {
+		contentStoreLayers[li.Name()] = struct{}{}
+	}
+}
+
 func NewManager(ctx context.Context, managerConfig ManagerConfig) (Manager, error) {
 	localCache := solver.NewCacheManager(ctx, LocalCacheID, managerConfig.KeyStore, managerConfig.ResultStore)
 	m := &manager{
@@ -89,10 +102,10 @@ func NewManager(ctx context.Context, managerConfig ManagerConfig) (Manager, erro
 	}
 	m.runtimeConfig = *config
 
-	importParentCtx, cancelImport := context.WithCancel(context.Background())
+	importParentCtx, cancelImport := context.WithCancelCause(context.Background())
 	go func() {
 		<-m.startCloseCh
-		cancelImport()
+		cancelImport(errors.New("cache manager closing"))
 	}()
 
 	// do an initial synchronous import at start
@@ -297,6 +310,9 @@ func (m *manager) Export(ctx context.Context) error {
 				if _, ok := pushedLayers[layer.Digest.String()]; ok {
 					continue
 				}
+				if _, ok := contentStoreLayers[layer.Digest.String()]; ok {
+					continue
+				}
 				if err := m.pushLayer(ctx, layer, remote.Provider); err != nil {
 					return err
 				}
@@ -329,13 +345,24 @@ func (m *manager) Export(ctx context.Context) error {
 func (m *manager) pushLayer(ctx context.Context, layerDesc ocispecs.Descriptor, provider content.Provider) error {
 	bklog.G(ctx).Debugf("pushing layer %s", layerDesc.Digest)
 	pushLayerStart := time.Now()
+
+	var skipped bool
 	defer func() {
-		bklog.G(ctx).Debugf("finished pushing layer %s in %s", layerDesc.Digest, time.Since(pushLayerStart))
+		verbPrefix := "finished"
+		if skipped {
+			verbPrefix = "skipped"
+		}
+
+		bklog.G(ctx).Debugf("%s pushing layer %s in %s", verbPrefix, layerDesc.Digest, time.Since(pushLayerStart))
 	}()
 
 	getURLResp, err := m.cacheClient.GetLayerUploadURL(ctx, GetLayerUploadURLRequest{Digest: layerDesc.Digest})
 	if err != nil {
 		return err
+	}
+
+	if skipped = getURLResp.Skip; skipped {
+		return nil
 	}
 
 	readerAt, err := provider.ReaderAt(ctx, layerDesc)
@@ -499,7 +526,6 @@ func (m *manager) descriptorProviderPair(layerMetadata remotecache.CacheLayer) (
 type Manager interface {
 	solver.CacheManager
 	StartCacheMountSynchronization(context.Context) error
-	ReleaseUnreferenced(context.Context) error
 	Close(context.Context) error
 }
 
@@ -514,13 +540,7 @@ func (defaultCacheManager) StartCacheMountSynchronization(ctx context.Context) e
 }
 
 func (c defaultCacheManager) ReleaseUnreferenced(ctx context.Context) error {
-	// this method isn't in the solver.CacheManager interface (this is how buildkit calls it upstream too)
-	if c, ok := c.CacheManager.(interface {
-		ReleaseUnreferenced(context.Context) error
-	}); ok {
-		return c.ReleaseUnreferenced(ctx)
-	}
-	return nil
+	return c.CacheManager.ReleaseUnreferenced(ctx)
 }
 
 func (defaultCacheManager) Close(context.Context) error {

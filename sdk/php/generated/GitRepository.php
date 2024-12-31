@@ -34,12 +34,31 @@ class GitRepository extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * Returns details for HEAD.
+     */
+    public function head(): GitRef
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('head');
+        return new \Dagger\GitRef($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
      * A unique identifier for this GitRepository.
      */
     public function id(): GitRepositoryId
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('id');
         return new \Dagger\GitRepositoryId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
+    }
+
+    /**
+     * Returns details of a ref.
+     */
+    public function ref(string $name): GitRef
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('ref');
+        $innerQueryBuilder->setArgument('name', $name);
+        return new \Dagger\GitRef($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
@@ -50,5 +69,37 @@ class GitRepository extends Client\AbstractObject implements Client\IdAble
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('tag');
         $innerQueryBuilder->setArgument('name', $name);
         return new \Dagger\GitRef($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * tags that match any of the given glob patterns.
+     */
+    public function tags(?array $patterns = null): array
+    {
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('tags');
+        if (null !== $patterns) {
+        $leafQueryBuilder->setArgument('patterns', $patterns);
+        }
+        return (array)$this->queryLeaf($leafQueryBuilder, 'tags');
+    }
+
+    /**
+     * Header to authenticate the remote with.
+     */
+    public function withAuthHeader(SecretId|Secret $header): GitRepository
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withAuthHeader');
+        $innerQueryBuilder->setArgument('header', $header);
+        return new \Dagger\GitRepository($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Token to authenticate the remote with.
+     */
+    public function withAuthToken(SecretId|Secret $token): GitRepository
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withAuthToken');
+        $innerQueryBuilder->setArgument('token', $token);
+        return new \Dagger\GitRepository($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 }

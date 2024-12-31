@@ -3,6 +3,7 @@ package templates
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/types"
 	"maps"
 	"strconv"
@@ -14,7 +15,7 @@ import (
 const errorTypeName = "error"
 
 var voidDef = Qual("dag", "TypeDef").Call().
-	Dot("WithKind").Call(Id("VoidKind")).
+	Dot("WithKind").Call(Id("dagger").Dot("TypeDefKindVoidKind")).
 	Dot("WithOptional").Call(Lit(true))
 
 func (ps *parseState) parseGoFunc(parentType *types.Named, fn *types.Func) (*funcTypeSpec, error) {
@@ -27,6 +28,7 @@ func (ps *parseState) parseGoFunc(parentType *types.Named, fn *types.Func) (*fun
 		return nil, fmt.Errorf("failed to find decl for method %s: %w", fn.Name(), err)
 	}
 	spec.doc = funcDecl.Doc.Text()
+	spec.sourceMap = ps.sourceMap(funcDecl)
 
 	sig, ok := fn.Type().(*types.Signature)
 	if !ok {
@@ -78,8 +80,9 @@ func (ps *parseState) parseGoFunc(parentType *types.Named, fn *types.Func) (*fun
 }
 
 type funcTypeSpec struct {
-	name string
-	doc  string
+	name      string
+	doc       string
+	sourceMap *sourceMap
 
 	argSpecs []paramSpec
 
@@ -108,9 +111,12 @@ func (spec *funcTypeSpec) TypeDefCode() (*Statement, error) {
 	if spec.doc != "" {
 		fnTypeDefCode = dotLine(fnTypeDefCode, "WithDescription").Call(Lit(strings.TrimSpace(spec.doc)))
 	}
+	if spec.sourceMap != nil {
+		fnTypeDefCode = dotLine(fnTypeDefCode, "WithSourceMap").Call(spec.sourceMap.TypeDefCode())
+	}
 
-	for i, argSpec := range spec.argSpecs {
-		if i == 0 && argSpec.paramType.String() == contextTypename {
+	for _, argSpec := range spec.argSpecs {
+		if argSpec.isContext {
 			// ignore ctx arg
 			continue
 		}
@@ -127,24 +133,34 @@ func (spec *funcTypeSpec) TypeDefCode() (*Statement, error) {
 		if argSpec.description != "" {
 			argOptsCode = append(argOptsCode, Id("Description").Op(":").Lit(argSpec.description))
 		}
+		if argSpec.sourceMap != nil {
+			argOptsCode = append(argOptsCode, Id("SourceMap").Op(":").Add(argSpec.sourceMap.TypeDefCode()))
+		}
 		if argSpec.defaultValue != "" {
-			var jsonEnc string
-			if argSpec.typeSpec.GoType().String() == "string" {
-				enc, err := json.Marshal(argSpec.defaultValue)
-				if err != nil {
-					return nil, fmt.Errorf("failed to marshal default value: %w", err)
-				}
-				jsonEnc = string(enc)
-			} else {
-				jsonEnc = argSpec.defaultValue
+			var v any
+			if err := json.Unmarshal([]byte(argSpec.defaultValue), &v); err != nil {
+				return nil, fmt.Errorf("default value %q must be valid JSON: %w", argSpec.defaultValue, err)
 			}
-			argOptsCode = append(argOptsCode, Id("DefaultValue").Op(":").Id("JSON").Call(Lit(jsonEnc)))
+			argOptsCode = append(argOptsCode, Id("DefaultValue").Op(":").Id("dagger").Dot("JSON").Call(Lit(argSpec.defaultValue)))
+		}
+
+		if argSpec.defaultPath != "" {
+			argOptsCode = append(argOptsCode, Id("DefaultPath").Op(":").Lit(argSpec.defaultPath))
+		}
+
+		if len(argSpec.ignore) > 0 {
+			ignores := make([]Code, 0, len(argSpec.ignore))
+			for _, pattern := range argSpec.ignore {
+				ignores = append(ignores, Lit(pattern))
+			}
+
+			argOptsCode = append(argOptsCode, Id("Ignore").Op(":").Index().String().Values(ignores...))
 		}
 
 		// arguments to WithArg (args to arg... ugh, at least the name of the variable is honest?)
 		argTypeDefArgCode := []Code{Lit(argSpec.name), argTypeDefCode}
 		if len(argOptsCode) > 0 {
-			argTypeDefArgCode = append(argTypeDefArgCode, Id("FunctionWithArgOpts").Values(argOptsCode...))
+			argTypeDefArgCode = append(argTypeDefArgCode, Id("dagger").Dot("FunctionWithArgOpts").Values(argOptsCode...))
 		}
 		fnTypeDefCode = dotLine(fnTypeDefCode, "WithArg").Call(argTypeDefArgCode...)
 	}
@@ -181,13 +197,8 @@ func (ps *parseState) parseParamSpecs(parentType *types.Named, fn *types.Func) (
 	specs := make([]paramSpec, 0, params.Len())
 
 	i := 0
-	if params.At(i).Type().String() == contextTypename {
-		spec, err := ps.parseParamSpecVar(params.At(i), "", "")
-		if err != nil {
-			return nil, err
-		}
+	if spec, err := ps.parseParamSpecVar(params.At(i), nil, "", ""); err == nil && spec.isContext {
 		specs = append(specs, spec)
-
 		i++
 	}
 
@@ -214,9 +225,12 @@ func (ps *parseState) parseParamSpecs(parentType *types.Named, fn *types.Func) (
 
 			paramFields := unpackASTFields(stype.Fields)
 			for f := 0; f < paramType.NumFields(); f++ {
-				spec, err := ps.parseParamSpecVar(paramType.Field(f), paramFields[f].Doc.Text(), paramFields[f].Comment.Text())
+				spec, err := ps.parseParamSpecVar(paramType.Field(f), paramFields[f], paramFields[f].Doc.Text(), paramFields[f].Comment.Text())
 				if err != nil {
 					return nil, err
+				}
+				if spec.isContext {
+					return nil, fmt.Errorf("unexpected context type in inline field %s", spec.name)
 				}
 				spec.parent = parent
 				specs = append(specs, spec)
@@ -230,9 +244,12 @@ func (ps *parseState) parseParamSpecs(parentType *types.Named, fn *types.Func) (
 	paramFields := unpackASTFields(fnDecl.Type.Params)
 	for ; i < params.Len(); i++ {
 		docComment, lineComment := ps.commentForFuncField(fnDecl, paramFields, i)
-		spec, err := ps.parseParamSpecVar(params.At(i), docComment.Text(), lineComment.Text())
+		spec, err := ps.parseParamSpecVar(params.At(i), paramFields[i], docComment.Text(), lineComment.Text())
 		if err != nil {
 			return nil, err
+		}
+		if spec.isContext {
+			return nil, fmt.Errorf("unexpected context type for arg %s", spec.name)
 		}
 		if sig.Variadic() && i == params.Len()-1 {
 			spec.variadic = true
@@ -242,7 +259,7 @@ func (ps *parseState) parseParamSpecs(parentType *types.Named, fn *types.Func) (
 	return specs, nil
 }
 
-func (ps *parseState) parseParamSpecVar(field *types.Var, docComment string, lineComment string) (paramSpec, error) {
+func (ps *parseState) parseParamSpecVar(field *types.Var, astField *ast.Field, docComment string, lineComment string) (paramSpec, error) {
 	if _, ok := field.Type().(*types.Struct); ok {
 		return paramSpec{}, fmt.Errorf("nested structs are not supported")
 	}
@@ -259,27 +276,6 @@ func (ps *parseState) parseParamSpecVar(field *types.Var, docComment string, lin
 		baseType = ptr.Elem()
 	}
 
-	optional := false
-	defaultValue := ""
-
-	wrappedType, isOptionalType, err := ps.isOptionalWrapper(baseType)
-	if err != nil {
-		return paramSpec{}, fmt.Errorf("failed to check if type is optional: %w", err)
-	}
-	if isOptionalType {
-		optional = true
-		baseType = wrappedType
-		isPtr = false
-		for {
-			ptr, ok := baseType.(*types.Pointer)
-			if !ok {
-				break
-			}
-			isPtr = true
-			baseType = ptr.Elem()
-		}
-	}
-
 	docPragmas, docComment := parsePragmaComment(docComment)
 	linePragmas, lineComment := parsePragmaComment(lineComment)
 	comment := strings.TrimSpace(docComment)
@@ -290,14 +286,32 @@ func (ps *parseState) parseParamSpecVar(field *types.Var, docComment string, lin
 	pragmas := make(map[string]string)
 	maps.Copy(pragmas, docPragmas)
 	maps.Copy(pragmas, linePragmas)
+	defaultValue := ""
 	if v, ok := pragmas["default"]; ok {
 		defaultValue = v
 	}
+	optional := false
 	if v, ok := pragmas["optional"]; ok {
 		if v == "" {
 			optional = true
 		} else {
 			optional, _ = strconv.ParseBool(v)
+		}
+	}
+	defaultPath := ""
+	if v, ok := pragmas["defaultPath"]; ok {
+		defaultPath = v
+		if strings.HasPrefix(v, `"`) && strings.HasSuffix(v, `"`) {
+			defaultPath = v[1 : len(v)-1]
+		}
+
+		optional = true // If defaultPath is set, the argument becomes optional
+	}
+
+	ignore := []string{}
+	if v, ok := pragmas["ignore"]; ok {
+		if err := json.Unmarshal([]byte(v), &ignore); err != nil {
+			return paramSpec{}, fmt.Errorf("ignore pragma '%s', must be a valid JSON array: %w", v, err)
 		}
 	}
 
@@ -318,39 +332,55 @@ func (ps *parseState) parseParamSpecVar(field *types.Var, docComment string, lin
 		name = typeSpec.GoType().String()
 	}
 
+	var sourceMap *sourceMap
+	if astField != nil {
+		sourceMap = ps.sourceMap(astField)
+	}
+
 	return paramSpec{
-		name:               name,
-		paramType:          paramType,
-		typeSpec:           typeSpec,
-		optional:           optional,
-		hasOptionalWrapper: isOptionalType,
-		isContext:          isContext,
-		defaultValue:       defaultValue,
-		description:        comment,
+		name:         name,
+		paramType:    paramType,
+		sourceMap:    sourceMap,
+		typeSpec:     typeSpec,
+		optional:     optional,
+		isContext:    isContext,
+		defaultValue: defaultValue,
+		description:  comment,
+		defaultPath:  defaultPath,
+		ignore:       ignore,
 	}, nil
 }
 
 type paramSpec struct {
 	name        string
 	description string
+	sourceMap   *sourceMap
 
 	optional bool
 	variadic bool
-	// hasOptionalWrapper is true if the type is wrapped in the Optional generic type
-	hasOptionalWrapper bool
 	// isContext is true if the type is context.Context
 	isContext bool
 
+	// Set a default value for the argument. Value must be a json-encoded literal value
 	defaultValue string
 
 	// paramType is the full type declared in the function signature, which may
-	// include pointer types, Optional, etc
+	// include pointer types, etc
 	paramType types.Type
 	// typeSpec is the parsed TypeSpec of the argument's "base type", which doesn't
-	// include pointers, Optional, etc
+	// include pointers, etc
 	typeSpec ParsedType
 
 	// parent is set if this paramSpec is nested inside a parent inline struct,
 	// and is used to create a declaration of the entire inline struct
 	parent *paramSpec
+
+	// Only applies to arguments of type File or Directory.
+	// If the argument is not set, load it from the given path in the context directory
+	defaultPath string
+
+	// Only applies to arguments of type Directory.
+	// The ignore patterns are applied to the input directory, and
+	// matching entries are filtered out, in a cache-efficient manner.
+	ignore []string
 }

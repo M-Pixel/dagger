@@ -3,9 +3,10 @@ package core
 import (
 	"strings"
 
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 )
 
 // Port configures a port to exposed from a container or service.
@@ -52,7 +53,7 @@ func (proto NetworkProtocol) Decoder() dagql.InputDecoder {
 	return NetworkProtocols
 }
 
-func (proto NetworkProtocol) ToLiteral() *idproto.Literal {
+func (proto NetworkProtocol) ToLiteral() call.Literal {
 	return NetworkProtocols.Literal(proto)
 }
 
@@ -64,9 +65,9 @@ func (proto NetworkProtocol) Network() string {
 }
 
 type PortForward struct {
-	Frontend *int            `doc:"Port to expose to clients. If unspecified, a default will be chosen."`
-	Backend  int             `doc:"Destination port for traffic."`
-	Protocol NetworkProtocol `doc:"Transport layer protocol to use for traffic." default:"TCP"`
+	Frontend *int            `doc:"Port to expose to clients. If unspecified, a default will be chosen." json:"frontend,omitempty"`
+	Backend  int             `doc:"Destination port for traffic." json:"backend"`
+	Protocol NetworkProtocol `doc:"Transport layer protocol to use for traffic." default:"TCP" json:"protocol,omitempty"`
 }
 
 func (pf PortForward) TypeName() string {

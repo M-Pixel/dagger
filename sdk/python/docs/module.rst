@@ -11,5 +11,14 @@ Experimental Dagger modules support.
 
 .. autodecorator:: function
 
-.. autoclass:: Arg
+.. autodecorator:: enum_type
 
+.. autoclass:: DefaultPath
+
+.. autoclass:: Ignore
+
+.. autoclass:: Enum
+
+.. autoclass:: Name
+
+.. autoclass:: Doc

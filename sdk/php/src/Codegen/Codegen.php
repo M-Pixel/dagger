@@ -16,8 +16,8 @@ class Codegen
     public function __construct(
         private readonly Schema $schema,
         private readonly string $writeDir,
-        private readonly SymfonyStyle $io)
-    {
+        private readonly SymfonyStyle $io
+    ) {
     }
 
     public function generate(): void
@@ -25,7 +25,7 @@ class Codegen
         $schemaVisitor = new CodegenVisitor($this->schema, $this->writeDir);
 
         $filteredTypes = array_filter($this->schema->getTypeMap(), function ($type) {
-            return !str_starts_with($type->name ?? '', '__');
+            return !str_starts_with($type->name ?? '', '_');
         });
 
         $scalarTypes = array_filter($filteredTypes, function ($type) {

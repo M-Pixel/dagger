@@ -8,14 +8,16 @@ import (
 // Filename is the name of the module config file.
 const Filename = "dagger.json"
 
-// TODO: update message
-const legacyRootUsageMessage = `Cannot load module config with legacy "root" setting %q, manual updates needed. Delete the current dagger.json file and re-initialize the module from the directory where root is pointing, using the -m flag to point to the module's source directory.
-`
+// EngineVersionLatest is replaced by the current engine.Version during module init.
+const EngineVersionLatest string = "latest"
 
 // ModuleConfig is the config for a single module as loaded from a dagger.json file.
 type ModuleConfig struct {
 	// The name of the module.
-	Name string `json:"name,omitempty"`
+	Name string `json:"name"`
+
+	// The version of the engine this module was last updated with.
+	EngineVersion string `json:"engineVersion"`
 
 	// The SDK this module uses
 	SDK string `json:"sdk,omitempty"`
@@ -29,30 +31,39 @@ type ModuleConfig struct {
 	// The modules this module depends on.
 	Dependencies []*ModuleConfigDependency `json:"dependencies,omitempty"`
 
-	// Modules in subdirs that this config is the root for, which impacts those modules'
-	// root directory and possibly other global settings that propagate from the root.
-	RootFor []*ModuleConfigRootFor `json:"root-for,omitempty"`
+	// The path, relative to this config file, to the subdir containing the module's implementation source code.
+	Source string `json:"source,omitempty"`
 
-	// Deprecated: use Source instead, only used to identify legacy config files
-	Root string `json:"root,omitempty"`
+	// Named views defined for this module, which are sets of directory filters that can be applied to
+	// directory arguments provided to functions.
+	Views []*ModuleConfigView `json:"views,omitempty"`
+
+	// Codegen configuration for this module.
+	Codegen *ModuleCodegenConfig `json:"codegen,omitempty"`
 }
 
-func (modCfg *ModuleConfig) Validate() error {
-	if modCfg.Root != "" {
-		// this is too hard to handle automatically, just tell the user they need to update via error message
-		//nolint:stylecheck // we're okay with an error message formated as full sentences in this case
-		return fmt.Errorf(legacyRootUsageMessage, modCfg.Root)
+func (modCfg *ModuleConfig) UnmarshalJSON(data []byte) error {
+	if modCfg == nil {
+		return fmt.Errorf("cannot unmarshal into nil ModuleConfig")
 	}
+	if len(data) == 0 {
+		return nil
+	}
+
+	type alias ModuleConfig // lets us use the default json unmashaler
+	var tmp alias
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return fmt.Errorf("unmarshal module config: %w", err)
+	}
+
+	// Detect the case where SDK is set but Source isn't, which should only happen when loading an older config.
+	// For those cases, the Source was implicitly ".", so set it to that.
+	if tmp.SDK != "" && tmp.Source == "" {
+		tmp.Source = "."
+	}
+
+	*modCfg = ModuleConfig(tmp)
 	return nil
-}
-
-func (modCfg *ModuleConfig) IsRootFor(source string) bool {
-	for _, rootFor := range modCfg.RootFor {
-		if rootFor.Source == source {
-			return true
-		}
-	}
-	return false
 }
 
 func (modCfg *ModuleConfig) DependencyByName(name string) (*ModuleConfigDependency, bool) {
@@ -64,11 +75,6 @@ func (modCfg *ModuleConfig) DependencyByName(name string) (*ModuleConfigDependen
 	return nil, false
 }
 
-type ModuleConfigRootFor struct {
-	// The path to the module that this config is the root for, relative to the configuration file.
-	Source string `json:"source"`
-}
-
 type ModuleConfigDependency struct {
 	// The name to use for this dependency. By default, the same as the dependency module's name,
 	// but can also be overridden to use a different name.
@@ -76,6 +82,9 @@ type ModuleConfigDependency struct {
 
 	// The source ref of the module dependency.
 	Source string `json:"source"`
+
+	// The pinned version of the module dependency.
+	Pin string `json:"pin,omitempty"`
 }
 
 func (depCfg *ModuleConfigDependency) UnmarshalJSON(data []byte) error {
@@ -104,4 +113,14 @@ func (depCfg *ModuleConfigDependency) UnmarshalJSON(data []byte) error {
 	}
 	*depCfg = ModuleConfigDependency(tmp)
 	return nil
+}
+
+type ModuleConfigView struct {
+	Name     string   `json:"name"`
+	Patterns []string `json:"patterns,omitempty"`
+}
+
+type ModuleCodegenConfig struct {
+	// Whether to automatically generate a .gitignore file for this module.
+	AutomaticGitignore *bool `json:"automaticGitignore,omitempty"`
 }

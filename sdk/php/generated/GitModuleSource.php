@@ -14,18 +14,39 @@ namespace Dagger;
 class GitModuleSource extends Client\AbstractObject implements Client\IdAble
 {
     /**
-     * The URL from which the source's git repo can be cloned.
+     * The ref to clone the root of the git repo from
      */
-    public function cloneURL(): string
+    public function cloneRef(): string
     {
-        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('cloneURL');
-        return (string)$this->queryLeaf($leafQueryBuilder, 'cloneURL');
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('cloneRef');
+        return (string)$this->queryLeaf($leafQueryBuilder, 'cloneRef');
     }
 
+    /**
+     * The resolved commit of the git repo this source points to.
+     */
     public function commit(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('commit');
         return (string)$this->queryLeaf($leafQueryBuilder, 'commit');
+    }
+
+    /**
+     * The directory containing everything needed to load load and use the module.
+     */
+    public function contextDirectory(): Directory
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('contextDirectory');
+        return new \Dagger\Directory($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * The URL to access the web view of the repository (e.g., GitHub, GitLab, Bitbucket)
+     */
+    public function htmlRepoURL(): string
+    {
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('htmlRepoURL');
+        return (string)$this->queryLeaf($leafQueryBuilder, 'htmlRepoURL');
     }
 
     /**
@@ -46,12 +67,27 @@ class GitModuleSource extends Client\AbstractObject implements Client\IdAble
         return new \Dagger\GitModuleSourceId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
-    public function sourceSubpath(): string
+    /**
+     * The clean module name of the root of the module
+     */
+    public function root(): string
     {
-        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('sourceSubpath');
-        return (string)$this->queryLeaf($leafQueryBuilder, 'sourceSubpath');
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('root');
+        return (string)$this->queryLeaf($leafQueryBuilder, 'root');
     }
 
+    /**
+     * The path to the root of the module source under the context directory. This directory contains its configuration file. It also contains its source code (possibly as a subdirectory).
+     */
+    public function rootSubpath(): string
+    {
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('rootSubpath');
+        return (string)$this->queryLeaf($leafQueryBuilder, 'rootSubpath');
+    }
+
+    /**
+     * The specified version of the git repo this source points to.
+     */
     public function version(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('version');

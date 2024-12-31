@@ -2,15 +2,26 @@ package schema
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
-	"github.com/containerd/containerd/labels"
-	"github.com/dagger/dagger/core"
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/engine/sources/blob"
+	"github.com/containerd/containerd/content"
+	"github.com/containerd/containerd/content/local"
+	"github.com/moby/buildkit/client/llb"
+	bkgw "github.com/moby/buildkit/frontend/gateway/client"
+	bkworker "github.com/moby/buildkit/worker"
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/dagger/dagger/core"
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/engine"
+	"github.com/dagger/dagger/engine/buildkit"
+	"github.com/dagger/dagger/engine/distconsts"
+	"github.com/dagger/dagger/engine/slog"
+	"github.com/dagger/dagger/engine/sources/blob"
 )
 
 type hostSchema struct {
@@ -24,40 +35,125 @@ func (s *hostSchema) Install() {
 		dagql.Func("host", func(ctx context.Context, parent *core.Query, args struct{}) (*core.Host, error) {
 			return parent.NewHost(), nil
 		}).Doc(`Queries the host environment.`),
+
 		dagql.Func("blob", func(ctx context.Context, parent *core.Query, args struct {
-			Digest       string `doc:"Digest of the blob"`
-			Size         int64  `doc:"Size of the blob"`
-			MediaType    string `doc:"Media type of the blob"`
-			Uncompressed string `doc:"Digest of the uncompressed blob"`
+			Digest string `doc:"Digest of the blob"`
 		}) (*core.Directory, error) {
 			dig, err := digest.Parse(args.Digest)
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse digest: %s", err)
+				return nil, fmt.Errorf("failed to parse digest: %w", err)
 			}
-			uncompressedDig, err := digest.Parse(args.Uncompressed)
+			blobDef, err := blob.LLB(dig).Marshal(ctx, buildkit.WithTracePropagation(ctx))
 			if err != nil {
-				return nil, fmt.Errorf("failed to parse digest: %s", err)
+				return nil, fmt.Errorf("failed to marshal blob source: %w", err)
 			}
-			blobDef, err := blob.LLB(specs.Descriptor{
-				MediaType: args.MediaType,
-				Digest:    dig,
-				Size:      args.Size,
-				Annotations: map[string]string{
-					// uncompressed label is required to be set by buildkit's GetByBlob
-					// implementation
-					labels.LabelUncompressed: uncompressedDig.String(),
-				},
-			}).Marshal(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("failed to marshal blob source: %s", err)
-			}
-			return core.NewDirectory(parent, blobDef.ToPB(), "", parent.Platform, nil), nil
+			return core.NewDirectory(parent, blobDef.ToPB(), "/", parent.Platform(), nil), nil
 		}).Doc("Retrieves a content-addressed blob."),
+
+		dagql.Func("builtinContainer", func(ctx context.Context, parent *core.Query, args struct {
+			Digest string `doc:"Digest of the image manifest"`
+		}) (*core.Container, error) {
+			st := llb.OCILayout(
+				fmt.Sprintf("dagger/import@%s", args.Digest),
+				llb.OCIStore("", buildkit.BuiltinContentOCIStoreName),
+				llb.Platform(parent.Platform().Spec()),
+				buildkit.WithTracePropagation(ctx),
+			)
+
+			ctrDef, err := st.Marshal(ctx, llb.Platform(parent.Platform().Spec()))
+			if err != nil {
+				return nil, fmt.Errorf("marshal root: %w", err)
+			}
+
+			// synchronously solve+unlazy so we don't have to deal with lazy blobs in any subsequent calls
+			// that don't handle them (i.e. buildkit's cache volume code)
+			// TODO: can be deleted once https://github.com/dagger/dagger/pull/8871 is closed
+			bk, err := parent.Buildkit(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+			}
+			res, err := bk.Solve(ctx, bkgw.SolveRequest{
+				Definition: ctrDef.ToPB(),
+				Evaluate:   true,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to solve builtin container: %w", err)
+			}
+			resultProxy, err := res.SingleRef()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get single ref: %w", err)
+			}
+			cachedRes, err := resultProxy.Result(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get result: %w", err)
+			}
+			workerRef, ok := cachedRes.Sys().(*bkworker.WorkerRef)
+			if !ok {
+				return nil, fmt.Errorf("invalid ref: %T", cachedRes.Sys())
+			}
+			layerRefs := workerRef.ImmutableRef.LayerChain()
+			defer layerRefs.Release(context.WithoutCancel(ctx))
+			var eg errgroup.Group
+			for _, layerRef := range layerRefs {
+				layerRef := layerRef
+				eg.Go(func() error {
+					// FileList is the secret method that actually forces an unlazy of blobs in the cases
+					// we want here...
+					_, err := layerRef.FileList(ctx, nil)
+					return err
+				})
+			}
+			if err := eg.Wait(); err != nil {
+				// this is a best effort attempt to unlazy the refs, it fails yell about it
+				// but not worth being fatal
+				slog.ErrorContext(ctx, "failed to unlazy layers", "err", err)
+			}
+
+			container, err := core.NewContainer(parent, parent.Platform())
+			if err != nil {
+				return nil, fmt.Errorf("new container: %w", err)
+			}
+
+			container.FS = ctrDef.ToPB()
+
+			goSDKContentStore, err := local.NewStore(distconsts.EngineContainerBuiltinContentDir)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create go sdk content store: %w", err)
+			}
+
+			manifestBlob, err := content.ReadBlob(ctx, goSDKContentStore, specs.Descriptor{
+				Digest: digest.Digest(args.Digest),
+			})
+			if err != nil {
+				return nil, fmt.Errorf("image archive read manifest blob: %w", err)
+			}
+
+			var man specs.Manifest
+			err = json.Unmarshal(manifestBlob, &man)
+			if err != nil {
+				return nil, fmt.Errorf("image archive unmarshal manifest: %w", err)
+			}
+
+			configBlob, err := content.ReadBlob(ctx, goSDKContentStore, man.Config)
+			if err != nil {
+				return nil, fmt.Errorf("image archive read image config blob %s: %w", man.Config.Digest, err)
+			}
+
+			var imgSpec specs.Image
+			err = json.Unmarshal(configBlob, &imgSpec)
+			if err != nil {
+				return nil, fmt.Errorf("load image config: %w", err)
+			}
+
+			container.Config = imgSpec.Config
+
+			return container, nil
+		}).Doc("Retrieves a container builtin to the engine."),
 	}.Install(s.srv)
 
 	dagql.Fields[*core.Host]{
 		dagql.Func("directory", s.directory).
-			Impure("The `directory` field loads data from the local machine.",
+			Impure("Loads data from the local machine.",
 				`Despite being impure, this field returns a pure Directory object. It
 				does this by uploading the requested path to the internal content store
 				and returning a content-addressed Directory using the `+"`blob()` API.").
@@ -67,7 +163,7 @@ func (s *hostSchema) Install() {
 			ArgDoc("include", `Include only artifacts that match the given pattern (e.g., ["app/", "package.*"]).`),
 
 		dagql.Func("file", s.file).
-			Impure("The `field` field loads data from the local machine.",
+			Impure("Loads data from the local machine.",
 				`Despite being impure, this field returns a pure File object. It does
 				this by uploading the requested path to the internal content store and
 				returning a content-addressed File using from the `+"`blob()` API.").
@@ -76,11 +172,17 @@ func (s *hostSchema) Install() {
 
 		dagql.Func("unixSocket", s.socket).
 			Doc(`Accesses a Unix socket on the host.`).
+			Impure("Value depends on the caller as it points to their host.").
 			ArgDoc("path", `Location of the Unix socket (e.g., "/var/run/docker.sock").`),
+
+		dagql.Func("__internalSocket", s.internalSocket).
+			Doc(`(Internal-only) Accesses a socket on the host (unix or ip) with the given internal client resource name.`),
 
 		dagql.Func("tunnel", s.tunnel).
 			Doc(`Creates a tunnel that forwards traffic from the host to a service.`).
 			ArgDoc("service", `Service to send traffic from the tunnel.`).
+			ArgDoc("ports", `List of frontend/backend port mappings to forward.`,
+				`Frontend is the port accepting traffic on the host, backend is the service port.`).
 			ArgDoc("native",
 				`Map each service port to the same port on the host, as if the service were running natively.`,
 				`Note: enabling may result in port conflicts.`).
@@ -94,6 +196,7 @@ func (s *hostSchema) Install() {
 				`If ports are given and native is true, the ports are additive.`),
 
 		dagql.Func("service", s.service).
+			Impure("Value depends on the caller as it points to their host.").
 			Doc(`Creates a service that forwards traffic to a specified address via the host.`).
 			ArgDoc("ports",
 				`Ports to expose via the service, forwarding through the host network.`,
@@ -101,6 +204,10 @@ func (s *hostSchema) Install() {
 				the backend port.`,
 				`An empty set of ports is not valid; an error will be returned.`).
 			ArgDoc("host", `Upstream host to forward traffic to.`),
+
+		// hidden from external clients via the __ prefix
+		dagql.Func("__internalService", s.internalService).
+			Doc(`(Internal-only) "service" but scoped to the exact right buildkit session ID.`),
 
 		dagql.Func("setSecretFile", s.setSecretFile).
 			Impure("`setSecretFile` reads its value from the local machine.").
@@ -136,8 +243,43 @@ type hostSocketArgs struct {
 	Path string
 }
 
-func (s *hostSchema) socket(ctx context.Context, host *core.Host, args hostSocketArgs) (*core.Socket, error) {
-	return host.Socket(args.Path), nil
+func (s *hostSchema) socket(ctx context.Context, host *core.Host, args hostSocketArgs) (inst dagql.Instance[*core.Socket], err error) {
+	socketStore, err := host.Query.Sockets(ctx)
+	if err != nil {
+		return inst, fmt.Errorf("failed to get socket store: %w", err)
+	}
+
+	accessor, err := core.GetClientResourceAccessor(ctx, host.Query, args.Path)
+	if err != nil {
+		return inst, fmt.Errorf("failed to get client resource name: %w", err)
+	}
+
+	if err := s.srv.Select(ctx, s.srv.Root(), &inst,
+		dagql.Selector{
+			Field: "host",
+		},
+		dagql.Selector{
+			Field: "__internalSocket",
+			Args: []dagql.NamedInput{
+				{
+					Name:  "accessor",
+					Value: dagql.NewString(accessor),
+				},
+			},
+		},
+	); err != nil {
+		return inst, fmt.Errorf("failed to select internal socket: %w", err)
+	}
+
+	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
+	if err != nil {
+		return inst, fmt.Errorf("failed to get client metadata: %w", err)
+	}
+	if err := socketStore.AddUnixSocket(inst.Self, clientMetadata.ClientID, args.Path); err != nil {
+		return inst, fmt.Errorf("failed to add unix socket to store: %w", err)
+	}
+
+	return inst, nil
 }
 
 type hostFileArgs struct {
@@ -197,7 +339,7 @@ func (s *hostSchema) tunnel(ctx context.Context, parent *core.Host, args hostTun
 		return nil, errors.New("no ports to forward")
 	}
 
-	return parent.Query.NewTunnelService(inst, ports), nil
+	return parent.Query.NewTunnelService(ctx, inst, ports), nil
 }
 
 type hostServiceArgs struct {
@@ -205,10 +347,103 @@ type hostServiceArgs struct {
 	Ports []dagql.InputObject[core.PortForward]
 }
 
-func (s *hostSchema) service(ctx context.Context, parent *core.Host, args hostServiceArgs) (*core.Service, error) {
+func (s *hostSchema) service(ctx context.Context, parent *core.Host, args hostServiceArgs) (inst dagql.Instance[*core.Service], err error) {
 	if len(args.Ports) == 0 {
-		return nil, errors.New("no ports specified")
+		return inst, errors.New("no ports specified")
 	}
 
-	return parent.Query.NewHostService(args.Host, collectInputsSlice(args.Ports)), nil
+	socketStore, err := parent.Query.Sockets(ctx)
+	if err != nil {
+		return inst, fmt.Errorf("failed to get socket store: %w", err)
+	}
+
+	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
+	if err != nil {
+		return inst, fmt.Errorf("failed to get client metadata: %w", err)
+	}
+
+	ports := collectInputsSlice(args.Ports)
+	sockIDs := make([]dagql.ID[*core.Socket], 0, len(ports))
+	for _, port := range ports {
+		accessor, err := core.GetHostIPSocketAccessor(ctx, parent.Query, args.Host, port)
+		if err != nil {
+			return inst, fmt.Errorf("failed to get host ip socket accessor: %w", err)
+		}
+
+		var sockInst dagql.Instance[*core.Socket]
+		err = s.srv.Select(ctx, s.srv.Root(), &sockInst,
+			dagql.Selector{
+				Field: "host",
+			},
+			dagql.Selector{
+				Field: "__internalSocket",
+				Args: []dagql.NamedInput{
+					{
+						Name:  "accessor",
+						Value: dagql.NewString(accessor),
+					},
+				},
+			},
+		)
+		if err != nil {
+			return inst, fmt.Errorf("failed to select internal socket: %w", err)
+		}
+
+		if err := socketStore.AddIPSocket(sockInst.Self, clientMetadata.ClientID, args.Host, port); err != nil {
+			return inst, fmt.Errorf("failed to add ip socket to store: %w", err)
+		}
+
+		sockIDs = append(sockIDs, dagql.NewID[*core.Socket](sockInst.ID()))
+	}
+
+	err = s.srv.Select(ctx, s.srv.Root(), &inst,
+		dagql.Selector{
+			Field: "host",
+		},
+		dagql.Selector{
+			Field: "__internalService",
+			Args: []dagql.NamedInput{
+				{
+					Name:  "socks",
+					Value: dagql.ArrayInput[dagql.ID[*core.Socket]](sockIDs),
+				},
+			},
+		},
+	)
+	return inst, err
+}
+
+type hostInternalServiceArgs struct {
+	Socks dagql.ArrayInput[dagql.ID[*core.Socket]]
+}
+
+func (s *hostSchema) internalService(ctx context.Context, parent *core.Host, args hostInternalServiceArgs) (*core.Service, error) {
+	if len(args.Socks) == 0 {
+		return nil, errors.New("no host sockets specified")
+	}
+
+	socks := make([]*core.Socket, 0, len(args.Socks))
+	for _, sockID := range args.Socks {
+		sockInst, err := sockID.Load(ctx, s.srv)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load socket: %w", err)
+		}
+		socks = append(socks, sockInst.Self)
+	}
+
+	return parent.Query.NewHostService(ctx, socks), nil
+}
+
+type hostInternalSocketArgs struct {
+	// Accessor is the scoped per-module name, which should guarantee uniqueness.
+	// It is used to ensure the dagql ID digest is unique per module; the digest is what's
+	// used as the actual key for the socket store.
+	Accessor string
+}
+
+func (s *hostSchema) internalSocket(ctx context.Context, host *core.Host, args hostInternalSocketArgs) (*core.Socket, error) {
+	if args.Accessor == "" {
+		return nil, errors.New("socket accessor must be provided")
+	}
+	return &core.Socket{IDDigest: dagql.CurrentID(ctx).Digest()}, nil
 }

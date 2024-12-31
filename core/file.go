@@ -2,23 +2,21 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
-	"io/fs"
-
 	"io"
+	"io/fs"
 	"path"
 	"time"
 
 	"github.com/moby/buildkit/client/llb"
 	bkgw "github.com/moby/buildkit/frontend/gateway/client"
-	"github.com/moby/buildkit/identity"
 	"github.com/moby/buildkit/solver/pb"
 	"github.com/opencontainers/go-digest"
 	fstypes "github.com/tonistiigi/fsutil/types"
 	"github.com/vektah/gqlparser/v2/ast"
-	"github.com/vito/progrock"
 
-	"github.com/dagger/dagger/core/pipeline"
+	"dagger.io/dagger/telemetry"
 	"github.com/dagger/dagger/core/reffs"
 	"github.com/dagger/dagger/engine/buildkit"
 )
@@ -86,7 +84,11 @@ func NewFileWithContents(
 	ownership *Ownership,
 	platform Platform,
 ) (*File, error) {
-	dir, err := NewScratchDirectory(query, platform).WithNewFile(ctx, name, content, permissions, ownership)
+	dir, err := NewScratchDirectory(ctx, query, platform)
+	if err != nil {
+		return nil, err
+	}
+	dir, err = dir.WithNewFile(ctx, name, content, permissions, ownership)
 	if err != nil {
 		return nil, err
 	}
@@ -110,19 +112,19 @@ func (file *File) Clone() *File {
 	return &cp
 }
 
-var _ pipeline.Pipelineable = (*File)(nil)
-
-func (file *File) PipelinePath() pipeline.Path {
-	return file.Query.Pipeline
-}
-
 func (file *File) State() (llb.State, error) {
 	return defToState(file.LLB)
 }
 
 func (file *File) Evaluate(ctx context.Context) (*buildkit.Result, error) {
-	svcs := file.Query.Services
-	bk := file.Query.Buildkit
+	svcs, err := file.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := file.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	detach, _, err := svcs.StartBindings(ctx, file.Services)
 	if err != nil {
@@ -138,8 +140,14 @@ func (file *File) Evaluate(ctx context.Context) (*buildkit.Result, error) {
 
 // Contents handles file content retrieval
 func (file *File) Contents(ctx context.Context) ([]byte, error) {
-	svcs := file.Query.Services
-	bk := file.Query.Buildkit
+	svcs, err := file.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := file.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	detach, _, err := svcs.StartBindings(ctx, file.Services)
 	if err != nil {
@@ -190,9 +198,47 @@ func (file *File) Contents(ctx context.Context) ([]byte, error) {
 	return contents, nil
 }
 
+func (file *File) Digest(ctx context.Context, excludeMetadata bool) (string, error) {
+	// If metadata are included, directly compute the digest of the file
+	if !excludeMetadata {
+		result, err := file.Evaluate(ctx)
+		if err != nil {
+			return "", fmt.Errorf("failed to evaluate file: %w", err)
+		}
+
+		digest, err := result.Ref.Digest(ctx, file.File)
+		if err != nil {
+			return "", fmt.Errorf("failed to compute digest: %w", err)
+		}
+
+		return digest.String(), nil
+	}
+
+	// If metadata are excluded, compute the digest of the file from its content.
+	reader, err := file.Open(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to open file to compute digest: %w", err)
+	}
+
+	defer reader.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, reader); err != nil {
+		return "", fmt.Errorf("failed to copy file content into hasher: %w", err)
+	}
+
+	return digest.FromBytes(h.Sum(nil)).String(), nil
+}
+
 func (file *File) Stat(ctx context.Context) (*fstypes.Stat, error) {
-	svcs := file.Query.Services
-	bk := file.Query.Buildkit
+	svcs, err := file.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := file.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	detach, _, err := svcs.StartBindings(ctx, file.Services)
 	if err != nil {
@@ -208,6 +254,29 @@ func (file *File) Stat(ctx context.Context) (*fstypes.Stat, error) {
 	return ref.StatFile(ctx, bkgw.StatRequest{
 		Path: file.File,
 	})
+}
+
+func (file *File) WithName(ctx context.Context, filename string) (*File, error) {
+	// Clone the file
+	file = file.Clone()
+
+	st, err := file.State()
+	if err != nil {
+		return nil, err
+	}
+
+	// Create a new file with the new name
+	newFile := llb.Scratch().File(llb.Copy(st, file.File, path.Base(filename)))
+
+	def, err := newFile.Marshal(ctx, llb.Platform(file.Platform.Spec()))
+	if err != nil {
+		return nil, err
+	}
+
+	file.LLB = def.ToPB()
+	file.File = path.Base(filename)
+
+	return file, nil
 }
 
 func (file *File) WithTimestamps(ctx context.Context, unix int) (*File, error) {
@@ -233,8 +302,14 @@ func (file *File) WithTimestamps(ctx context.Context, unix int) (*File, error) {
 }
 
 func (file *File) Open(ctx context.Context) (io.ReadCloser, error) {
-	bk := file.Query.Buildkit
-	svcs := file.Query.Services
+	bk, err := file.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+	svcs, err := file.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
 
 	detach, _, err := svcs.StartBindings(ctx, file.Services)
 	if err != nil {
@@ -250,9 +325,15 @@ func (file *File) Open(ctx context.Context) (io.ReadCloser, error) {
 	return fs.Open(file.File)
 }
 
-func (file *File) Export(ctx context.Context, dest string, allowParentDirPath bool) error {
-	svcs := file.Query.Services
-	bk := file.Query.Buildkit
+func (file *File) Export(ctx context.Context, dest string, allowParentDirPath bool) (rerr error) {
+	svcs, err := file.Query.Services(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := file.Query.Buildkit(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	src, err := file.State()
 	if err != nil {
@@ -263,13 +344,8 @@ func (file *File) Export(ctx context.Context, dest string, allowParentDirPath bo
 		return err
 	}
 
-	rec := progrock.FromContext(ctx)
-
-	vtx := rec.Vertex(
-		digest.Digest(identity.NewID()),
-		fmt.Sprintf("export file %s to host %s", file.File, dest),
-	)
-	defer vtx.Done(err)
+	ctx, vtx := Tracer(ctx).Start(ctx, fmt.Sprintf("export file %s to host %s", file.File, dest))
+	defer telemetry.End(vtx, func() error { return rerr })
 
 	detach, _, err := svcs.StartBindings(ctx, file.Services)
 	if err != nil {

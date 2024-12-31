@@ -11,22 +11,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dagger/dagger/engine/client"
-	"github.com/dagger/dagger/internal/tui"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
-	"github.com/vito/progrock"
+
+	"dagger.io/dagger/telemetry"
+	"github.com/dagger/dagger/dagql/idtui"
+	"github.com/dagger/dagger/engine/client"
 )
 
 var runCmd = &cobra.Command{
-	Use:     "run [flags] COMMAND",
+	Use:     "run [options] <command>...",
 	Aliases: []string{"r"},
 	Short:   "Run a command in a Dagger session",
 	Long: strings.ReplaceAll(
 		`Executes the specified command in a Dagger Session and displays
 live progress in a TUI.
 
-´DAGGER_SESSION_PORT´ and ´DAGGER_SESSION_TOKEN´ will be convieniently
+´DAGGER_SESSION_PORT´ and ´DAGGER_SESSION_TOKEN´ will be conveniently
 injected automatically.
 
 For example:
@@ -36,7 +37,7 @@ jq -n '{query:"{container{id}}"}' | \
     -u $DAGGER_SESSION_TOKEN: \
     -H "content-type:application/json" \
     -d @- \
-    http://127.0.0.1:$DAGGER_SESSION_PORT/query
+    http://127.0.0.1:$DAGGER_SESSION_PORT/query'
 ´´´`,
 		"´",
 		"`",
@@ -48,9 +49,12 @@ dagger run python main.py
 `,
 	),
 	GroupID:      execGroup.ID,
-	Run:          Run,
+	RunE:         Run,
 	Args:         cobra.MinimumNArgs(1),
 	SilenceUsage: true,
+	Annotations: map[string]string{
+		printTraceLinkKey: "true",
+	},
 }
 
 var waitDelay time.Duration
@@ -70,24 +74,30 @@ func init() {
 	runCmd.Flags().BoolVar(&runFocus, "focus", false, "Only show output for focused commands.")
 }
 
-func Run(cmd *cobra.Command, args []string) {
-	ctx := context.Background()
+func Run(cmd *cobra.Command, args []string) error {
+	if isPrintTraceLinkEnabled(cmd.Annotations) {
+		cmd.SetContext(idtui.WithPrintTraceLink(cmd.Context(), true))
+	}
 
-	err := run(ctx, args)
+	err := run(cmd, args)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Fprintln(os.Stderr, "run canceled")
-			os.Exit(2)
-			return
+			return ExitError{Code: 2}
 		}
-
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-		return
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return ExitError{Code: exitErr.ExitCode()}
+		}
+		return err
 	}
+
+	return nil
 }
 
-func run(ctx context.Context, args []string) error {
+func run(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
+
 	u, err := uuid.NewRandom()
 	if err != nil {
 		return fmt.Errorf("generate uuid: %w", err)
@@ -95,8 +105,7 @@ func run(ctx context.Context, args []string) error {
 
 	sessionToken := u.String()
 
-	focus = runFocus
-	return withEngineAndTUI(ctx, client.Params{
+	return withEngine(ctx, client.Params{
 		SecretToken: sessionToken,
 	}, func(ctx context.Context, engineClient *client.Client) error {
 		sessionL, err := net.Listen("tcp", "127.0.0.1:0")
@@ -105,11 +114,15 @@ func run(ctx context.Context, args []string) error {
 		}
 		defer sessionL.Close()
 
+		env := os.Environ()
 		sessionPort := fmt.Sprintf("%d", sessionL.Addr().(*net.TCPAddr).Port)
-		os.Setenv("DAGGER_SESSION_PORT", sessionPort)
-		os.Setenv("DAGGER_SESSION_TOKEN", sessionToken)
+		env = append(env, "DAGGER_SESSION_PORT="+sessionPort)
+		env = append(env, "DAGGER_SESSION_TOKEN="+sessionToken)
+		env = append(env, telemetry.PropagationEnv(ctx)...)
 
 		subCmd := exec.CommandContext(ctx, args[0], args[1:]...) // #nosec
+
+		subCmd.Env = env
 
 		// allow piping to the command
 		subCmd.Stdin = os.Stdin
@@ -119,29 +132,30 @@ func run(ctx context.Context, args []string) error {
 		// shell because Ctrl+C sends to the process group.)
 		ensureChildProcessesAreKilled(subCmd)
 
-		go http.Serve(sessionL, engineClient) //nolint:gosec
+		srv := &http.Server{ //nolint:gosec
+			Handler: engineClient,
+			BaseContext: func(listener net.Listener) context.Context {
+				return ctx
+			},
+		}
+
+		go srv.Serve(sessionL)
 
 		var cmdErr error
 		if !silent {
-			rec := progrock.FromContext(ctx)
-
-			cmdline := strings.Join(subCmd.Args, " ")
-			cmdVtx := rec.Vertex(tui.RootVertex, cmdline)
-
 			if stdoutIsTTY {
-				subCmd.Stdout = cmdVtx.Stdout()
+				subCmd.Stdout = cmd.OutOrStdout()
 			} else {
 				subCmd.Stdout = os.Stdout
 			}
 
 			if stderrIsTTY {
-				subCmd.Stderr = cmdVtx.Stderr()
+				subCmd.Stderr = cmd.ErrOrStderr()
 			} else {
 				subCmd.Stderr = os.Stderr
 			}
 
 			cmdErr = subCmd.Run()
-			cmdVtx.Done(cmdErr)
 		} else {
 			subCmd.Stdout = os.Stdout
 			subCmd.Stderr = os.Stderr

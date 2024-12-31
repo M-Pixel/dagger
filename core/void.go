@@ -3,9 +3,10 @@ package core
 import (
 	"fmt"
 
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 )
 
 type Void struct{}
@@ -35,21 +36,13 @@ func (p Void) Decoder() dagql.InputDecoder {
 	return p
 }
 
-func (p Void) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_Null{
-			Null: true,
-		},
-	}
+func (p Void) ToLiteral() call.Literal {
+	return call.NewLiteralNull()
 }
 
 var _ dagql.ScalarType = Void{}
 
 func (Void) DecodeInput(val any) (dagql.Input, error) {
-	switch val.(type) {
-	case nil:
-		return nil, nil
-	default:
-		return nil, fmt.Errorf("cannot convert %T to Void", val)
-	}
+	// void types cannot be constructed - they have no corresponding valid values
+	return nil, fmt.Errorf("cannot convert %T to Void", val)
 }

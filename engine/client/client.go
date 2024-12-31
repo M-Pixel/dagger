@@ -1,27 +1,23 @@
 package client
 
 import (
+	"bufio"
 	"context"
-	"encoding/base64"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"dagger.io/dagger"
 	"github.com/Khan/genqlient/graphql"
-	"github.com/cenkalti/backoff/v4"
-
 	"github.com/docker/cli/cli/config"
 	"github.com/google/uuid"
 	controlapi "github.com/moby/buildkit/api/services/control"
@@ -29,68 +25,89 @@ import (
 	"github.com/moby/buildkit/identity"
 	bksession "github.com/moby/buildkit/session"
 	"github.com/moby/buildkit/session/auth/authprovider"
-	"github.com/moby/buildkit/session/filesync"
-	"github.com/moby/buildkit/session/grpchijack"
 	"github.com/moby/buildkit/util/grpcerrors"
-	"github.com/opencontainers/go-digest"
-	"github.com/tonistiigi/fsutil"
-	fstypes "github.com/tonistiigi/fsutil/types"
-	"github.com/vito/progrock"
+	"github.com/moby/buildkit/util/tracing"
+	"github.com/vito/go-sse/sse"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
+	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
+	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"golang.org/x/net/http2"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/dagger/dagger/core/pipeline"
+	"dagger.io/dagger"
+	"dagger.io/dagger/telemetry"
+	"github.com/dagger/dagger/analytics"
 	"github.com/dagger/dagger/engine"
+	"github.com/dagger/dagger/engine/client/drivers"
 	"github.com/dagger/dagger/engine/session"
-	"github.com/dagger/dagger/telemetry"
+	"github.com/dagger/dagger/engine/slog"
+	enginetel "github.com/dagger/dagger/engine/telemetry"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 type Params struct {
-	// The id of the server to connect to, or if blank a new one
-	// should be started.
-	ServerID string
+	// The id to connect to the API server with. If blank, will be set to a
+	// new random value.
+	ID string
 
-	// Parent client IDs of this Dagger client.
-	//
-	// Used by Dagger-in-Dagger so that nested sessions can resolve addresses
-	// passed from the parent.
-	ParentClientIDs []string
+	// The id of the session to connect to, or if blank a new one should be started.
+	SessionID string
+
+	Version string
 
 	SecretToken string
 
 	RunnerHost string // host of dagger engine runner serving buildkit apis
-	UserAgent  string
 
 	DisableHostRW bool
 
-	JournalFile        string
-	ProgrockWriter     progrock.Writer
-	ProgrockParent     string
-	EngineNameCallback func(string)
-	CloudURLCallback   func(string)
+	EngineCallback   func(context.Context, string, string, string)
+	CloudURLCallback func(context.Context, string, string, bool)
 
-	// If this client is for a module function, this digest will be set in the
-	// grpc context metadata for any api requests back to the engine. It's used by the API
-	// server to determine which schema to serve and other module context metadata.
-	ModuleCallerDigest digest.Digest
+	EngineTrace   sdktrace.SpanExporter
+	EngineLogs    sdklog.Exporter
+	EngineMetrics []sdkmetric.Exporter
+
+	// Log level (0 = INFO)
+	LogLevel slog.Level
+
+	Interactive        bool
+	InteractiveCommand []string
+
+	WithTerminal session.WithTerminalFunc
 }
 
 type Client struct {
 	Params
-	eg             *errgroup.Group
+
+	eg *errgroup.Group
+
+	connector drivers.Connector
+
 	internalCtx    context.Context
-	internalCancel context.CancelFunc
+	internalCancel context.CancelCauseFunc
 
 	closeCtx      context.Context
-	closeRequests context.CancelFunc
+	closeRequests context.CancelCauseFunc
 	closeMu       sync.RWMutex
 
-	Recorder *progrock.Recorder
+	telemetry *errgroup.Group
 
-	httpClient *http.Client
+	httpClient *httpClient
 	bkClient   *bkclient.Client
-	bkSession  *bksession.Session
+	bkVersion  string
+	sessionSrv *BuildkitSessionServer
 
 	// A client for the dagger API that is directly hooked up to this engine client.
 	// Currently used for the dagger CLI so it can avoid making a subprocess of itself...
@@ -99,57 +116,66 @@ type Client struct {
 	upstreamCacheImportOptions []*controlapi.CacheOptionsEntry
 	upstreamCacheExportOptions []*controlapi.CacheOptionsEntry
 
-	hostname string
+	hostname       string
+	stableClientID string
 
 	nestedSessionPort int
 
-	labels []pipeline.Label
+	labels enginetel.Labels
 }
 
 func Connect(ctx context.Context, params Params) (_ *Client, _ context.Context, rerr error) {
 	c := &Client{Params: params}
+
+	if c.ID == "" {
+		c.ID = os.Getenv("DAGGER_SESSION_CLIENT_ID")
+	}
+	if c.ID == "" {
+		c.ID = identity.NewID()
+	}
+	configuredSessionID := c.SessionID
+	if c.SessionID == "" {
+		c.SessionID = identity.NewID()
+	}
 	if c.SecretToken == "" {
 		c.SecretToken = uuid.New().String()
 	}
-	if c.ServerID == "" {
-		c.ServerID = identity.NewID()
-	}
 
-	c.internalCtx, c.internalCancel = context.WithCancel(context.Background())
+	// NB: decouple from the originator's cancel ctx
+	c.internalCtx, c.internalCancel = context.WithCancelCause(context.WithoutCancel(ctx))
+	c.closeCtx, c.closeRequests = context.WithCancelCause(context.WithoutCancel(ctx))
+
 	c.eg, c.internalCtx = errgroup.WithContext(c.internalCtx)
+
 	defer func() {
 		if rerr != nil {
-			c.internalCancel()
+			c.internalCancel(errors.New("Connect failed"))
 		}
 	}()
-	c.closeCtx, c.closeRequests = context.WithCancel(context.Background())
 
-	// progress
-	progMultiW := progrock.MultiWriter{}
-	if c.ProgrockWriter != nil {
-		progMultiW = append(progMultiW, c.ProgrockWriter)
-	}
-	if c.JournalFile != "" {
-		fw, err := newProgrockFileWriter(c.JournalFile)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		progMultiW = append(progMultiW, fw)
+	workdir, err := os.Getwd()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get workdir: %w", err)
 	}
 
-	tel := telemetry.New()
-	var cloudURL string
-	if tel.Enabled() {
-		cloudURL = tel.URL()
-		progMultiW = append(progMultiW, telemetry.NewWriter(tel))
+	c.labels = enginetel.LoadDefaultLabels(workdir, engine.Version)
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		return nil, nil, fmt.Errorf("get hostname: %w", err)
 	}
-	if c.ProgrockParent != "" {
-		c.Recorder = progrock.NewSubRecorder(progMultiW, c.ProgrockParent)
-	} else {
-		c.Recorder = progrock.NewRecorder(progMultiW)
+	c.hostname = hostname
+
+	connectSpanOpts := []trace.SpanStartOption{}
+	if configuredSessionID != "" {
+		// infer that this is not a main client caller, server ID is never set for those currently
+		connectSpanOpts = append(connectSpanOpts, telemetry.Internal())
 	}
-	ctx = progrock.ToContext(ctx, c.Recorder)
+
+	// NB: don't propagate this ctx, we don't want everything tucked beneath connect
+	connectCtx, span := Tracer(ctx).Start(ctx, "connect", connectSpanOpts...)
+	defer telemetry.End(span, func() error { return rerr })
+	slog := slog.SpanLogger(connectCtx, InstrumentationLibrary)
 
 	nestedSessionPortVal, isNestedSession := os.LookupEnv("DAGGER_SESSION_PORT")
 	if isNestedSession {
@@ -159,180 +185,54 @@ func Connect(ctx context.Context, params Params) (_ *Client, _ context.Context, 
 		}
 		c.nestedSessionPort = nestedSessionPort
 		c.SecretToken = os.Getenv("DAGGER_SESSION_TOKEN")
-		c.httpClient = &http.Client{
-			Transport: &http.Transport{
-				DialContext:       c.DialContext,
-				DisableKeepAlives: true,
-			},
+		c.httpClient = c.newHTTPClient()
+		if err := c.init(connectCtx); err != nil {
+			return nil, nil, fmt.Errorf("initialize nested client: %w", err)
 		}
-		if err := c.daggerConnect(ctx); err != nil {
+		if err := c.subscribeTelemetry(connectCtx); err != nil {
+			return nil, nil, fmt.Errorf("subscribe to telemetry: %w", err)
+		}
+		if err := c.daggerConnect(connectCtx); err != nil {
 			return nil, nil, fmt.Errorf("failed to connect to dagger: %w", err)
 		}
 		return c, ctx, nil
 	}
 
-	// sneakily using ModuleCallerDigest here because it seems nicer than just
-	// making something up, and should be pretty much 1:1 I think (even
-	// non-cached things will have a different caller digest each time)
-	connectDigest := params.ModuleCallerDigest
-	if connectDigest == "" {
-		connectDigest = digest.FromString("_root") // arbitrary
-	}
-
-	loader := c.Recorder.Vertex(connectDigest, "connect")
-	defer func() {
-		loader.Done(rerr)
-	}()
-
 	// Check if any of the upstream cache importers/exporters are enabled.
 	// Note that this is not the cache service support in engine/cache/, that
 	// is a different feature which is configured in the engine daemon.
-
-	var err error
 	c.upstreamCacheImportOptions, c.upstreamCacheExportOptions, err = allCacheConfigsFromEnv()
 	if err != nil {
 		return nil, nil, fmt.Errorf("cache config from env: %w", err)
 	}
 
-	remote, err := url.Parse(c.RunnerHost)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse runner host: %w", err)
+	c.stableClientID = GetHostStableID(slog)
+
+	if err := c.startEngine(connectCtx); err != nil {
+		return nil, nil, fmt.Errorf("start engine: %w", err)
+	}
+	if !engine.CheckVersionCompatibility(engine.NormalizeVersion(c.bkVersion), engine.MinimumEngineVersion) {
+		return nil, nil, fmt.Errorf("incompatible engine version %s", engine.NormalizeVersion(c.bkVersion))
 	}
 
-	bkClient, bkInfo, err := newBuildkitClient(ctx, loader, remote, c.UserAgent)
-	if err != nil {
-		return nil, nil, fmt.Errorf("new client: %w", err)
-	}
-
-	c.bkClient = bkClient
 	defer func() {
 		if rerr != nil {
 			c.bkClient.Close()
 		}
 	}()
 
-	if c.EngineNameCallback != nil {
-		engineName := fmt.Sprintf("%s (version %s)", bkInfo.BuildkitVersion.Revision, bkInfo.BuildkitVersion.Version)
-		c.EngineNameCallback(engineName)
+	if err := c.startSession(connectCtx); err != nil {
+		return nil, nil, fmt.Errorf("start session: %w", err)
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get hostname: %w", err)
-	}
-	c.hostname = hostname
-
-	sessionTask := loader.Task("starting session")
-
-	sharedKey := c.ServerID // share a session across servers
-	bkSession, err := bksession.NewSession(ctx, identity.NewID(), sharedKey)
-	if err != nil {
-		return nil, nil, fmt.Errorf("new s: %w", err)
-	}
-	c.bkSession = bkSession
 	defer func() {
 		if rerr != nil {
-			c.bkSession.Close()
+			c.sessionSrv.Stop()
 		}
 	}()
 
-	workdir, err := os.Getwd()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get workdir: %w", err)
-	}
-
-	c.labels = pipeline.LoadVCSLabels(workdir)
-	c.labels = append(c.labels, pipeline.LoadClientLabels(engine.Version)...)
-
-	c.internalCtx = engine.ContextWithClientMetadata(c.internalCtx, &engine.ClientMetadata{
-		ClientID:           c.ID(),
-		ClientSecretToken:  c.SecretToken,
-		ServerID:           c.ServerID,
-		ClientHostname:     c.hostname,
-		Labels:             c.labels,
-		ParentClientIDs:    c.ParentClientIDs,
-		ModuleCallerDigest: c.ModuleCallerDigest,
-	})
-
-	// progress
-	bkSession.Allow(progRockAttachable{progMultiW})
-
-	// filesync
-	if !c.DisableHostRW {
-		bkSession.Allow(AnyDirSource{})
-		bkSession.Allow(AnyDirTarget{})
-	}
-
-	// sockets
-	bkSession.Allow(SocketProvider{
-		EnableHostNetworkAccess: !c.DisableHostRW,
-	})
-
-	// registry auth
-	bkSession.Allow(authprovider.NewDockerAuthProvider(config.LoadDefaultConfigFile(os.Stderr), nil))
-
-	// host=>container networking
-	bkSession.Allow(session.NewTunnelListenerAttachable(c.Recorder))
-	ctx = progrock.ToContext(ctx, c.Recorder)
-
-	// connect to the server, registering our session attachables and starting the server if not
-	// already started
-	c.eg.Go(func() error {
-		return bkSession.Run(c.internalCtx, func(ctx context.Context, proto string, meta map[string][]string) (net.Conn, error) {
-			return grpchijack.Dialer(c.bkClient.ControlClient())(ctx, proto, engine.ClientMetadata{
-				RegisterClient:            true,
-				ClientID:                  c.ID(),
-				ClientSecretToken:         c.SecretToken,
-				ServerID:                  c.ServerID,
-				ParentClientIDs:           c.ParentClientIDs,
-				ClientHostname:            hostname,
-				UpstreamCacheImportConfig: c.upstreamCacheImportOptions,
-				Labels:                    c.labels,
-				ModuleCallerDigest:        c.ModuleCallerDigest,
-			}.AppendToMD(meta))
-		})
-	})
-
-	// Try connecting to the session server to make sure it's running
-	c.httpClient = &http.Client{Transport: &http.Transport{
-		DialContext: c.DialContext,
-		// connection re-use in combination with the underlying grpc stream makes
-		// managing the lifetime of connections very confusing, so disabling for now
-		// TODO: For performance, it would be better to figure out a way to re-enable this
-		DisableKeepAlives: true,
-	}}
-
-	bo := backoff.NewExponentialBackOff()
-	bo.InitialInterval = 100 * time.Millisecond
-	connectRetryCtx, connectRetryCancel := context.WithTimeout(ctx, 300*time.Second)
-	defer connectRetryCancel()
-	err = backoff.Retry(func() error {
-		nextBackoff := bo.NextBackOff()
-		ctx, cancel := context.WithTimeout(connectRetryCtx, nextBackoff)
-		defer cancel()
-
-		innerErr := c.Do(ctx, `{defaultPlatform}`, "", nil, nil)
-		if innerErr != nil {
-			// only show errors once the time between attempts exceeds this threshold, otherwise common
-			// cases of 1 or 2 retries become too noisy
-			if nextBackoff > time.Second {
-				fmt.Fprintln(loader.Stdout(), "Failed to connect; retrying...", progrock.ErrorLabel(innerErr))
-			}
-		} else {
-			fmt.Fprintln(loader.Stdout(), "OK!")
-		}
-
-		return innerErr
-	}, backoff.WithContext(bo, connectRetryCtx))
-
-	sessionTask.Done(err)
-
-	if err != nil {
-		return nil, nil, fmt.Errorf("connect: %w", err)
-	}
-
-	if c.CloudURLCallback != nil && cloudURL != "" {
-		c.CloudURLCallback(cloudURL)
+	if err := c.subscribeTelemetry(connectCtx); err != nil {
+		return nil, nil, fmt.Errorf("subscribe to telemetry: %w", err)
 	}
 
 	if err := c.daggerConnect(ctx); err != nil {
@@ -342,11 +242,273 @@ func Connect(ctx context.Context, params Params) (_ *Client, _ context.Context, 
 	return c, ctx, nil
 }
 
+func (c *Client) startEngine(ctx context.Context) (rerr error) {
+	remote, err := url.Parse(c.RunnerHost)
+	if err != nil {
+		return fmt.Errorf("parse runner host: %w", err)
+	}
+
+	driver, err := drivers.GetDriver(remote.Scheme)
+	if err != nil {
+		return err
+	}
+
+	var cloudToken string
+	if v, ok := os.LookupEnv(drivers.EnvDaggerCloudToken); ok {
+		cloudToken = v
+	} else if _, ok := os.LookupEnv(envDaggerCloudCachetoken); ok {
+		cloudToken = v
+	}
+
+	provisionCtx, provisionSpan := Tracer(ctx).Start(ctx, "starting engine")
+	provisionCtx, provisionCancel := context.WithTimeout(provisionCtx, 10*time.Minute)
+	c.connector, err = driver.Provision(provisionCtx, remote, &drivers.DriverOpts{
+		DaggerCloudToken: cloudToken,
+		GPUSupport:       os.Getenv(drivers.EnvGPUSupport),
+	})
+	provisionCancel()
+	telemetry.End(provisionSpan, func() error { return err })
+	if err != nil {
+		return err
+	}
+
+	ctx, span := Tracer(ctx).Start(ctx, "connecting to engine")
+	defer telemetry.End(span, func() error { return rerr })
+
+	slog := slog.SpanLogger(ctx, InstrumentationLibrary)
+
+	slog.Debug("connecting", "runner", c.RunnerHost, "client", c.ID)
+
+	bkClient, bkInfo, err := newBuildkitClient(ctx, remote, c.connector)
+	if err != nil {
+		return fmt.Errorf("new client: %w", err)
+	}
+	c.bkClient = bkClient
+	c.bkVersion = bkInfo.BuildkitVersion.Version
+
+	if c.EngineCallback != nil {
+		c.EngineCallback(ctx, bkInfo.BuildkitVersion.Revision, bkInfo.BuildkitVersion.Version, c.ID)
+	}
+	if c.CloudURLCallback != nil {
+		if url, msg, ok := enginetel.URLForTrace(ctx); ok {
+			c.CloudURLCallback(ctx, url, msg, ok)
+		} else {
+			c.CloudURLCallback(ctx, "https://dagger.cloud/traces/setup", "", ok)
+		}
+	}
+
+	return nil
+}
+
+func (c *Client) subscribeTelemetry(ctx context.Context) (rerr error) {
+	ctx, span := Tracer(ctx).Start(ctx, "subscribing to telemetry",
+		telemetry.Encapsulated())
+	defer telemetry.End(span, func() error { return rerr })
+
+	slog := slog.With("client", c.ID)
+
+	slog.Debug("subscribing to telemetry", "remote", c.RunnerHost)
+
+	c.telemetry = new(errgroup.Group)
+	httpClient := c.newTelemetryHTTPClient()
+	if c.EngineTrace != nil {
+		if err := c.exportTraces(ctx, httpClient); err != nil {
+			return fmt.Errorf("export traces: %w", err)
+		}
+	}
+	if c.EngineLogs != nil {
+		if err := c.exportLogs(ctx, httpClient); err != nil {
+			return fmt.Errorf("export logs: %w", err)
+		}
+	}
+	if c.EngineMetrics != nil {
+		if err := c.exportMetrics(ctx, httpClient); err != nil {
+			// metrics are best effort and only in newer engines, so don't fail the client if they aren't found
+			slog.Error("export metrics failed", "err", err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) startSession(ctx context.Context) (rerr error) {
+	ctx, sessionSpan := Tracer(ctx).Start(ctx, "starting session", telemetry.Encapsulate())
+	defer telemetry.End(sessionSpan, func() error { return rerr })
+
+	clientMetadata := c.clientMetadata()
+	c.internalCtx = engine.ContextWithClientMetadata(c.internalCtx, &clientMetadata)
+
+	attachables := []bksession.Attachable{
+		// sockets
+		SocketProvider{EnableHostNetworkAccess: !c.DisableHostRW},
+		// registry auth
+		authprovider.NewDockerAuthProvider(config.LoadDefaultConfigFile(os.Stderr), nil),
+		// host=>container networking
+		session.NewTunnelListenerAttachable(ctx, nil),
+		// terminal
+		session.NewTerminalAttachable(ctx, c.Params.WithTerminal),
+		// Git credentials
+		session.NewGitCredentialAttachable(ctx),
+	}
+	// filesync
+	if !c.DisableHostRW {
+		filesyncer, err := NewFilesyncer("", "", nil, nil)
+		if err != nil {
+			return fmt.Errorf("new filesyncer: %w", err)
+		}
+		attachables = append(attachables, filesyncer.AsSource(), filesyncer.AsTarget())
+	}
+
+	sessionConn, err := c.DialContext(ctx, "", "")
+	if err != nil {
+		return fmt.Errorf("dial for session attachables: %w", err)
+	}
+	defer func() {
+		if rerr != nil {
+			sessionConn.Close()
+		}
+	}()
+
+	c.sessionSrv, err = ConnectBuildkitSession(ctx,
+		sessionConn,
+		c.AppendHTTPRequestHeaders(http.Header{}),
+		attachables...,
+	)
+	if err != nil {
+		return fmt.Errorf("connect buildkit session: %w", err)
+	}
+
+	c.eg.Go(func() error {
+		ctx, cancel, err := c.withClientCloseCancel(ctx)
+		if err != nil {
+			return err
+		}
+		go func() {
+			<-ctx.Done()
+			cancel(errors.New("startSession context done"))
+		}()
+		c.sessionSrv.Run(ctx)
+		return nil
+	})
+
+	c.httpClient = c.newHTTPClient()
+	return nil
+}
+
+func ConnectBuildkitSession(
+	ctx context.Context,
+	conn net.Conn,
+	headers http.Header,
+	attachables ...bksession.Attachable,
+) (*BuildkitSessionServer, error) {
+	sessionSrv := NewBuildkitSessionServer(ctx, conn, attachables...)
+	for _, methodURL := range sessionSrv.MethodURLs {
+		headers.Add(engine.SessionMethodNameMetaKey, methodURL)
+	}
+	telemetry.Propagator.Inject(ctx, propagation.HeaderCarrier(headers))
+
+	req := &http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Scheme: "http",
+			Host:   "dagger",
+			Path:   engine.SessionAttachablesEndpoint,
+		},
+		Header: headers,
+		Host:   "dagger",
+	}
+	if err := req.Write(conn); err != nil {
+		return nil, fmt.Errorf("write request: %w", err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		var respBody []byte
+		if resp.Body != nil {
+			respBody, _ = io.ReadAll(resp.Body)
+		}
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	// We tell the server that we have fully read the response and will now switch to serving gRPC
+	// by sending a single byte ack. This prevents the server from starting to send gRPC client
+	// traffic while we are still reading the previous HTTP response.
+	if _, err := conn.Write([]byte{0}); err != nil {
+		return nil, fmt.Errorf("write ack: %w", err)
+	}
+
+	return sessionSrv, nil
+}
+
+func NewBuildkitSessionServer(ctx context.Context, conn net.Conn, attachables ...bksession.Attachable) *BuildkitSessionServer {
+	sessionSrvOpts := []grpc.ServerOption{
+		grpc.UnaryInterceptor(grpcerrors.UnaryServerInterceptor),
+		grpc.StreamInterceptor(grpcerrors.StreamServerInterceptor),
+	}
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		statsHandler := tracing.ServerStatsHandler(
+			otelgrpc.WithTracerProvider(span.TracerProvider()),
+			otelgrpc.WithPropagators(telemetry.Propagator),
+		)
+		sessionSrvOpts = append(sessionSrvOpts, grpc.StatsHandler(statsHandler))
+	}
+
+	srv := grpc.NewServer(sessionSrvOpts...)
+	grpc_health_v1.RegisterHealthServer(srv, health.NewServer())
+	for _, attachable := range attachables {
+		attachable.Register(srv)
+	}
+
+	var methodURLs []string
+	for name, svc := range srv.GetServiceInfo() {
+		for _, method := range svc.Methods {
+			methodURLs = append(methodURLs, bksession.MethodURL(name, method.Name))
+		}
+	}
+
+	return &BuildkitSessionServer{
+		Server:     srv,
+		MethodURLs: methodURLs,
+		Conn:       conn,
+	}
+}
+
+type BuildkitSessionServer struct {
+	*grpc.Server
+	MethodURLs []string
+	Conn       net.Conn
+}
+
+func (srv *BuildkitSessionServer) Run(ctx context.Context) {
+	defer srv.Conn.Close()
+	defer srv.Stop()
+
+	doneCh := make(chan struct{})
+	go func() {
+		defer close(doneCh)
+		(&http2.Server{}).ServeConn(srv.Conn, &http2.ServeConnOpts{
+			Context: ctx,
+			Handler: srv.Server,
+		})
+	}()
+
+	select {
+	case <-ctx.Done():
+	case <-doneCh:
+	}
+}
+
 func (c *Client) daggerConnect(ctx context.Context) error {
 	var err error
-	c.daggerClient, err = dagger.Connect(context.Background(),
+	c.daggerClient, err = dagger.Connect(
+		context.WithoutCancel(ctx),
 		dagger.WithConn(EngineConn(c)),
-		dagger.WithSkipCompatibilityCheck())
+	)
 	return err
 }
 
@@ -366,21 +528,10 @@ func (c *Client) Close() (rerr error) {
 	default:
 	}
 
-	if len(c.upstreamCacheExportOptions) > 0 {
-		cacheExportCtx, cacheExportCancel := context.WithTimeout(c.internalCtx, 600*time.Second)
-		defer cacheExportCancel()
-		_, err := c.bkClient.ControlClient().Solve(cacheExportCtx, &controlapi.SolveRequest{
-			Cache: controlapi.CacheOptions{
-				Exports: c.upstreamCacheExportOptions,
-			},
-		})
-		rerr = errors.Join(rerr, err)
-	}
-
-	c.closeRequests()
+	c.closeRequests(errors.New("Client.Close"))
 
 	if c.internalCancel != nil {
-		c.internalCancel()
+		c.internalCancel(errors.New("Client.Close"))
 	}
 
 	if c.daggerClient != nil {
@@ -388,14 +539,14 @@ func (c *Client) Close() (rerr error) {
 	}
 
 	if c.httpClient != nil {
-		c.eg.Go(func() error {
-			c.httpClient.CloseIdleConnections()
-			return nil
-		})
+		c.eg.Go(c.httpClient.Close)
 	}
 
-	if c.bkSession != nil {
-		c.eg.Go(c.bkSession.Close)
+	if c.sessionSrv != nil {
+		c.eg.Go(func() error {
+			c.sessionSrv.Stop()
+			return nil
+		})
 	}
 	if c.bkClient != nil {
 		c.eg.Go(c.bkClient.Close)
@@ -404,21 +555,180 @@ func (c *Client) Close() (rerr error) {
 		rerr = errors.Join(rerr, err)
 	}
 
-	// mark all groups completed
-	// close the recorder so the UI exits
-	if c.Recorder != nil {
-		c.Recorder.Complete()
-		c.Recorder.Close()
+	// Wait for telemetry to finish draining
+	if c.telemetry != nil {
+		if err := c.telemetry.Wait(); err != nil {
+			rerr = errors.Join(rerr, fmt.Errorf("wait for telemetry: %w", err))
+		}
 	}
 
 	return rerr
 }
 
-func (c *Client) shutdownServer() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+type otlpConsumer struct {
+	httpClient *httpClient
+	path       string
+	traceID    trace.TraceID
+	clientID   string
+	eg         *errgroup.Group
+}
+
+func (c *otlpConsumer) Consume(ctx context.Context, cb func([]byte) error) (rerr error) {
+	ctx, span := Tracer(ctx).Start(ctx, "consuming "+c.path)
+	defer telemetry.End(span, func() error { return rerr })
+
+	slog := slog.With("path", c.path, "traceID", c.traceID, "clientID", c.clientID)
+
+	defer func() {
+		if rerr != nil {
+			slog.Error("consume failed", "err", rerr)
+		} else {
+			slog.ExtraDebug("done consuming", "ctxErr", ctx.Err())
+		}
+	}()
+
+	sseConn, err := sse.Connect(c.httpClient, time.Second, func() *http.Request {
+		return (&http.Request{
+			Method: http.MethodGet,
+			URL: &url.URL{
+				Scheme: "http",
+				Host:   "dagger",
+				Path:   c.path,
+			},
+		}).WithContext(ctx)
+	})
+	if err != nil {
+		return fmt.Errorf("connect to SSE: %w", err)
+	}
+
+	c.eg.Go(func() error {
+		defer sseConn.Close()
+
+		for {
+			event, err := sseConn.Next()
+			if err != nil {
+				if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
+					return nil
+				}
+				return fmt.Errorf("decode: %w", err)
+			}
+			if event.Name == "attached" {
+				continue
+			}
+
+			data := event.Data
+
+			span.AddEvent("data", trace.WithAttributes(
+				attribute.String("cursor", event.ID),
+				attribute.Int("bytes", len(data)),
+			))
+
+			if len(data) == 0 {
+				continue
+			}
+
+			if err := cb(data); err != nil {
+				slog.Warn("consume error", "err", err)
+				span.AddEvent("consume error", trace.WithAttributes(
+					attribute.String("error", err.Error()),
+				))
+			}
+		}
+	})
+
+	return nil
+}
+
+func (c *Client) exportTraces(ctx context.Context, httpClient *httpClient) error {
+	// NB: we never actually want to interrupt this, since it's relied upon for
+	// seeing what's going on, even during shutdown
+	ctx = context.WithoutCancel(ctx)
+
+	exp := &otlpConsumer{
+		path:       "/v1/traces",
+		traceID:    trace.SpanContextFromContext(ctx).TraceID(),
+		clientID:   c.ID,
+		httpClient: httpClient,
+		eg:         c.telemetry,
+	}
+
+	return exp.Consume(ctx, func(data []byte) error {
+		var req coltracepb.ExportTraceServiceRequest
+		if err := protojson.Unmarshal(data, &req); err != nil {
+			return fmt.Errorf("unmarshal: %w", err)
+		}
+
+		spans := telemetry.SpansFromPB(req.GetResourceSpans())
+
+		slog.ExtraDebug("received spans from engine", "len", len(spans))
+
+		for _, span := range spans {
+			slog.ExtraDebug("received span from engine", "span", span.Name(), "id", span.SpanContext().SpanID(), "endTime", span.EndTime())
+		}
+
+		if err := c.Params.EngineTrace.ExportSpans(ctx, spans); err != nil {
+			return fmt.Errorf("export %d spans: %w", len(spans), err)
+		}
+
+		return nil
+	})
+}
+
+func (c *Client) exportLogs(ctx context.Context, httpClient *httpClient) error {
+	// NB: we never actually want to interrupt this, since it's relied upon for
+	// seeing what's going on, even during shutdown
+	ctx = context.WithoutCancel(ctx)
+
+	exp := &otlpConsumer{
+		path:       "/v1/logs",
+		traceID:    trace.SpanContextFromContext(ctx).TraceID(),
+		clientID:   c.ID,
+		httpClient: httpClient,
+		eg:         c.telemetry,
+	}
+
+	return exp.Consume(ctx, func(data []byte) error {
+		var req collogspb.ExportLogsServiceRequest
+		if err := protojson.Unmarshal(data, &req); err != nil {
+			return fmt.Errorf("unmarshal spans: %w", err)
+		}
+		if err := telemetry.ReexportLogsFromPB(ctx, c.EngineLogs, &req); err != nil {
+			return fmt.Errorf("re-export logs: %w", err)
+		}
+		return nil
+	})
+}
+
+func (c *Client) exportMetrics(ctx context.Context, httpClient *httpClient) error {
+	// NB: we never actually want to interrupt this, since it's relied upon for
+	// seeing what's going on, even during shutdown
+	ctx = context.WithoutCancel(ctx)
+
+	exp := &otlpConsumer{
+		path:       "/v1/metrics",
+		traceID:    trace.SpanContextFromContext(ctx).TraceID(),
+		clientID:   c.ID,
+		httpClient: httpClient,
+		eg:         c.telemetry,
+	}
+
+	return exp.Consume(ctx, func(data []byte) error {
+		var req colmetricspb.ExportMetricsServiceRequest
+		if err := protojson.Unmarshal(data, &req); err != nil {
+			return fmt.Errorf("unmarshal metrics: %w", err)
+		}
+		if err := enginetel.ReexportMetricsFromPB(ctx, c.EngineMetrics, &req); err != nil {
+			return fmt.Errorf("re-export metrics: %w", err)
+		}
+		return nil
+	})
+}
+
+func (c *Client) init(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "http://dagger/shutdown", nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://dagger"+engine.InitEndpoint, nil)
 	if err != nil {
 		return fmt.Errorf("new request: %w", err)
 	}
@@ -433,7 +743,30 @@ func (c *Client) shutdownServer() error {
 	return resp.Body.Close()
 }
 
-func (c *Client) withClientCloseCancel(ctx context.Context) (context.Context, context.CancelFunc, error) {
+func (c *Client) shutdownServer() error {
+	// don't immediately cancel shutdown if we're shutting down because we were
+	// canceled
+	ctx := context.WithoutCancel(c.internalCtx)
+
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://dagger"+engine.ShutdownEndpoint, nil)
+	if err != nil {
+		return fmt.Errorf("new request: %w", err)
+	}
+
+	req.SetBasicAuth(c.SecretToken, "")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("do shutdown: %w", err)
+	}
+
+	return resp.Body.Close()
+}
+
+func (c *Client) withClientCloseCancel(ctx context.Context) (context.Context, context.CancelCauseFunc, error) {
 	c.closeMu.RLock()
 	defer c.closeMu.RUnlock()
 	select {
@@ -441,67 +774,56 @@ func (c *Client) withClientCloseCancel(ctx context.Context) (context.Context, co
 		return nil, nil, errors.New("client closed")
 	default:
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	go func() {
 		select {
 		case <-c.closeCtx.Done():
-			cancel()
+			cancel(fmt.Errorf("client closed: %w", context.Cause(c.closeCtx)))
 		case <-ctx.Done():
 		}
 	}()
 	return ctx, cancel, nil
 }
 
-func (c *Client) ID() string {
-	return c.bkSession.ID()
-}
-
 func (c *Client) DialContext(ctx context.Context, _, _ string) (conn net.Conn, err error) {
-	// NOTE: the context given to grpchijack.Dialer is for the lifetime of the stream.
-	// If http connection re-use is enabled, that can be far past this DialContext call.
 	ctx, cancel, err := c.withClientCloseCancel(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	isNestedSession := c.nestedSessionPort != 0
-	if isNestedSession {
-		conn, err = (&net.Dialer{
-			Cancel:    ctx.Done(),
-			KeepAlive: -1, // disable for now
-		}).Dial("tcp", "127.0.0.1:"+strconv.Itoa(c.nestedSessionPort))
-	} else {
-		conn, err = grpchijack.Dialer(c.bkClient.ControlClient())(ctx, "", engine.ClientMetadata{
-			ClientID:           c.ID(),
-			ClientSecretToken:  c.SecretToken,
-			ServerID:           c.ServerID,
-			ClientHostname:     c.hostname,
-			ParentClientIDs:    c.ParentClientIDs,
-			Labels:             c.labels,
-			ModuleCallerDigest: c.ModuleCallerDigest,
-		}.ToGRPCMD())
-	}
+	conn, err = c.dialContextNoClientClose(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	go func() {
 		<-c.closeCtx.Done()
-		cancel()
+		cancel(errors.New("dial context closed"))
 		conn.Close()
 	}()
 	return conn, nil
 }
 
+func (c *Client) dialContextNoClientClose(ctx context.Context) (net.Conn, error) {
+	isNestedSession := c.nestedSessionPort != 0
+	if isNestedSession {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", fmt.Sprintf("127.0.0.1:%d", c.nestedSessionPort))
+	} else {
+		return c.connector.Connect(ctx)
+	}
+}
+
 func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel, err := c.withClientCloseCancel(r.Context())
+	// propagate span from per-request client headers, otherwise all spans
+	// end up beneath the client session span
+	ctx := telemetry.Propagator.Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+
+	ctx, cancel, err := c.withClientCloseCancel(ctx)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte("client has closed: " + err.Error()))
 		return
 	}
 	r = r.WithContext(ctx)
-	defer cancel()
+	defer cancel(errors.New("client done serving HTTP"))
 
 	if c.SecretToken != "" {
 		username, _, ok := r.BasicAuth()
@@ -511,6 +833,7 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	proxyReq := &http.Request{
 		Method: r.Method,
 		URL: &url.URL{
@@ -540,13 +863,35 @@ func (c *Client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header()[k] = v
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, err = io.Copy(w, resp.Body)
-	if err != nil {
+	_, err = io.Copy(writeFlusher{w}, resp.Body)
+	if err != nil && !errors.Is(err, context.Canceled) {
 		panic(err) // don't write header because we already wrote to the body, which isn't allowed
 	}
 }
 
-func (c *Client) serveHijackedHTTP(ctx context.Context, cancel context.CancelFunc, w http.ResponseWriter, r *http.Request) {
+// writeFlusher flushes after every write.
+//
+// This is particularly important for streamed response bodies like /v1/logs and /v1/traces,
+// and possibly GraphQL subscriptions in the future, though those might use WebSockets anyway,
+// which is already given special treatment.
+type writeFlusher struct {
+	http.ResponseWriter
+}
+
+func (w writeFlusher) Write(p []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(p)
+	if err != nil {
+		return n, err
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return n, nil
+}
+
+func (c *Client) serveHijackedHTTP(ctx context.Context, cancel context.CancelCauseFunc, w http.ResponseWriter, r *http.Request) {
+	slog.Warn("serving hijacked HTTP with trace", "ctx", trace.SpanContextFromContext(ctx).TraceID())
+
 	serverConn, err := c.DialContext(ctx, "", "")
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -572,11 +917,12 @@ func (c *Client) serveHijackedHTTP(ctx context.Context, cancel context.CancelFun
 	}
 	go func() {
 		<-c.closeCtx.Done()
-		cancel()
+		cancel(errors.New("client closing hijacked HTTP"))
 		clientConn.Close()
 	}()
 
 	// send the initial client http upgrade request to the server
+	r.Header = c.AppendHTTPRequestHeaders(r.Header)
 	if err := r.Write(serverConn); err != nil {
 		panic(fmt.Errorf("write upgrade request: %w", err))
 	}
@@ -623,14 +969,9 @@ func (c *Client) Do(
 	if err != nil {
 		return err
 	}
-	defer cancel()
+	defer cancel(errors.New("Client.Do done"))
 
-	gqlClient := graphql.NewClient("http://dagger/query", doerWithHeaders{
-		inner: c.httpClient,
-		headers: http.Header{
-			"Authorization": []string{"Basic " + base64.StdEncoding.EncodeToString([]byte(c.SecretToken+":"))},
-		},
-	})
+	gqlClient := graphql.NewClient("http://dagger"+engine.QueryEndpoint, c.httpClient)
 
 	req := &graphql.Request{
 		Query:     query,
@@ -667,167 +1008,6 @@ func (c *Client) Do(
 // A client to the Dagger API hooked up directly with this engine client.
 func (c *Client) Dagger() *dagger.Client {
 	return c.daggerClient
-}
-
-// Local dir imports
-type AnyDirSource struct{}
-
-func (s AnyDirSource) Register(server *grpc.Server) {
-	filesync.RegisterFileSyncServer(server, s)
-}
-
-func (s AnyDirSource) TarStream(stream filesync.FileSync_TarStreamServer) error {
-	return fmt.Errorf("tarstream not supported")
-}
-
-func (s AnyDirSource) DiffCopy(stream filesync.FileSync_DiffCopyServer) error {
-	opts, err := engine.LocalImportOptsFromContext(stream.Context())
-	if err != nil {
-		return fmt.Errorf("get local import opts: %w", err)
-	}
-
-	if opts.ReadSingleFileOnly {
-		// just stream the file bytes to the caller
-		fileContents, err := os.ReadFile(opts.Path)
-		if err != nil {
-			return fmt.Errorf("read file: %w", err)
-		}
-		if len(fileContents) > int(opts.MaxFileSize) {
-			// NOTE: can lift this size restriction by chunking if ever needed
-			return fmt.Errorf("file contents too large: %d > %d", len(fileContents), opts.MaxFileSize)
-		}
-		return stream.SendMsg(&filesync.BytesMessage{Data: fileContents})
-	}
-
-	// otherwise, do the whole directory sync back to the caller
-	fs, err := fsutil.NewFS(opts.Path)
-	if err != nil {
-		return err
-	}
-	fs, err = fsutil.NewFilterFS(fs, &fsutil.FilterOpt{
-		IncludePatterns: opts.IncludePatterns,
-		ExcludePatterns: opts.ExcludePatterns,
-		FollowPaths:     opts.FollowPaths,
-		Map: func(p string, st *fstypes.Stat) fsutil.MapResult {
-			st.Uid = 0
-			st.Gid = 0
-			return fsutil.MapResultKeep
-		},
-	})
-	if err != nil {
-		return err
-	}
-	return fsutil.Send(stream.Context(), stream, fs, nil)
-}
-
-// Local dir exports
-type AnyDirTarget struct{}
-
-func (t AnyDirTarget) Register(server *grpc.Server) {
-	filesync.RegisterFileSendServer(server, t)
-}
-
-func (AnyDirTarget) DiffCopy(stream filesync.FileSend_DiffCopyServer) (rerr error) {
-	opts, err := engine.LocalExportOptsFromContext(stream.Context())
-	if err != nil {
-		return fmt.Errorf("get local export opts: %w", err)
-	}
-
-	if !opts.IsFileStream {
-		// we're writing a full directory tree, normal fsutil.Receive is good
-		if err := os.MkdirAll(opts.Path, 0o700); err != nil {
-			return fmt.Errorf("failed to create synctarget dest dir %s: %w", opts.Path, err)
-		}
-
-		err := fsutil.Receive(stream.Context(), stream, opts.Path, fsutil.ReceiveOpt{
-			Merge: true,
-			Filter: func(path string, stat *fstypes.Stat) bool {
-				stat.Uid = uint32(os.Getuid())
-				stat.Gid = uint32(os.Getgid())
-				return true
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to receive fs changes: %w", err)
-		}
-		return nil
-	}
-
-	// This is either a file export or a container tarball export, we'll just be receiving BytesMessages with
-	// the contents and can write them directly to the destination path.
-
-	// If the dest is a directory that already exists, we will never delete it and replace it with the file.
-	// However, if allowParentDirPath is set, we will write the file underneath that existing directory.
-	// But if allowParentDirPath is not set, which is the default setting in our API right now, we will return
-	// an error when path is a pre-existing directory.
-	allowParentDirPath := opts.AllowParentDirPath
-
-	// File exports specifically (as opposed to container tar exports) have an original filename that we will
-	// use in the case where dest is a directory and allowParentDirPath is set, in which case we need to know
-	// what to name the file underneath the pre-existing directory.
-	fileOriginalName := opts.FileOriginalName
-
-	var destParentDir string
-	var finalDestPath string
-	stat, err := os.Lstat(opts.Path)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		// we are writing the file to a new path
-		destParentDir = filepath.Dir(opts.Path)
-		finalDestPath = opts.Path
-	case err != nil:
-		// something went unrecoverably wrong if stat failed and it wasn't just because the path didn't exist
-		return fmt.Errorf("failed to stat synctarget dest %s: %w", opts.Path, err)
-	case !stat.IsDir():
-		// we are overwriting an existing file
-		destParentDir = filepath.Dir(opts.Path)
-		finalDestPath = opts.Path
-	case !allowParentDirPath:
-		// we are writing to an existing directory, but allowParentDirPath is not set, so fail
-		return fmt.Errorf("destination %q is a directory; must be a file path unless allowParentDirPath is set", opts.Path)
-	default:
-		// we are writing to an existing directory, and allowParentDirPath is set,
-		// so write the file under the directory using the same file name as the source file
-		if fileOriginalName == "" {
-			// NOTE: we could instead just default to some name like container.tar or something if desired
-			return fmt.Errorf("cannot export container tar to existing directory %q", opts.Path)
-		}
-		destParentDir = opts.Path
-		finalDestPath = filepath.Join(destParentDir, fileOriginalName)
-	}
-
-	if err := os.MkdirAll(destParentDir, 0o700); err != nil {
-		return fmt.Errorf("failed to create synctarget dest dir %s: %w", destParentDir, err)
-	}
-
-	if opts.FileMode == 0 {
-		opts.FileMode = 0o600
-	}
-	destF, err := os.OpenFile(finalDestPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, opts.FileMode)
-	if err != nil {
-		return fmt.Errorf("failed to create synctarget dest file %s: %w", finalDestPath, err)
-	}
-	defer destF.Close()
-	for {
-		msg := filesync.BytesMessage{}
-		if err := stream.RecvMsg(&msg); err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-		if _, err := destF.Write(msg.Data); err != nil {
-			return err
-		}
-	}
-}
-
-type progRockAttachable struct {
-	writer progrock.Writer
-}
-
-func (a progRockAttachable) Register(srv *grpc.Server) {
-	progrock.RegisterProgressServiceServer(srv, progrock.NewRPCReceiver(a.writer))
 }
 
 const (
@@ -909,25 +1089,108 @@ func allCacheConfigsFromEnv() (cacheImportConfigs []*controlapi.CacheOptionsEntr
 	return cacheImportConfigs, cacheExportConfigs, nil
 }
 
-type doerWithHeaders struct {
-	inner   graphql.Doer
-	headers http.Header
+func (c *Client) clientMetadata() engine.ClientMetadata {
+	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	// expand ~ into absolute path for consistent behavior with CLI
+	// ⚠️ When updating clientMetadata's logic, please also update setupNestedClient
+	// for consistent behavior of CLI inside nested execution
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		expandedPath, err := ExpandHomeDir(homeDir, sshAuthSock)
+		if err == nil {
+			sshAuthSock = expandedPath
+		}
+	}
+
+	clientVersion := c.Version
+	if clientVersion == "" {
+		clientVersion = engine.Version
+	}
+
+	return engine.ClientMetadata{
+		ClientID:                  c.ID,
+		ClientVersion:             clientVersion,
+		SessionID:                 c.SessionID,
+		ClientSecretToken:         c.SecretToken,
+		ClientHostname:            c.hostname,
+		ClientStableID:            c.stableClientID,
+		UpstreamCacheImportConfig: c.upstreamCacheImportOptions,
+		UpstreamCacheExportConfig: c.upstreamCacheExportOptions,
+		Labels:                    c.labels,
+		CloudToken:                os.Getenv("DAGGER_CLOUD_TOKEN"),
+		DoNotTrack:                analytics.DoNotTrack(),
+		Interactive:               c.Interactive,
+		InteractiveCommand:        c.InteractiveCommand,
+		SSHAuthSocketPath:         sshAuthSock,
+	}
 }
 
-func (d doerWithHeaders) Do(req *http.Request) (*http.Response, error) {
-	for k, v := range d.headers {
+func (c *Client) AppendHTTPRequestHeaders(headers http.Header) http.Header {
+	return c.clientMetadata().AppendToHTTPHeaders(headers)
+}
+
+func (c *Client) newHTTPClient() *httpClient {
+	return &httpClient{
+		inner: &http.Client{
+			Transport: &http2.Transport{
+				AllowHTTP: true,
+				DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+					return c.DialContext(ctx, network, addr)
+				},
+			},
+		},
+		headers:     c.AppendHTTPRequestHeaders(http.Header{}),
+		secretToken: c.SecretToken,
+	}
+}
+
+func (c *Client) newTelemetryHTTPClient() *httpClient {
+	return &httpClient{
+		inner: &http.Client{
+			Transport: &http2.Transport{
+				AllowHTTP: true,
+				DialTLSContext: func(ctx context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
+					return c.dialContextNoClientClose(ctx)
+				},
+			},
+		},
+		headers:     c.AppendHTTPRequestHeaders(http.Header{}),
+		secretToken: c.SecretToken,
+	}
+}
+
+type httpClient struct {
+	inner       *http.Client
+	headers     http.Header
+	secretToken string
+}
+
+func (c *httpClient) Do(req *http.Request) (*http.Response, error) {
+	for k, v := range c.headers {
+		if req.Header == nil {
+			req.Header = http.Header{}
+		}
 		req.Header[k] = v
 	}
-	return d.inner.Do(req)
+	telemetry.Propagator.Inject(req.Context(), propagation.HeaderCarrier(req.Header))
+	req.SetBasicAuth(c.secretToken, "")
+
+	// We're making a request to the engine HTTP/2 server, but these headers are not
+	// allowed in HTTP 2+, so unset them in case they came from an HTTP/1 client that
+	// we are proxying a request for.
+	req.Header.Del("Connection")
+	req.Header.Del("Keep-Alive")
+
+	return c.inner.Do(req)
+}
+
+func (c *httpClient) Close() error {
+	c.inner.CloseIdleConnections()
+	return nil
 }
 
 func EngineConn(engineClient *Client) DirectConn {
-	return func(req *http.Request) (*http.Response, error) {
-		req.SetBasicAuth(engineClient.SecretToken, "")
-		resp := httptest.NewRecorder()
-		engineClient.ServeHTTP(resp, req)
-		return resp.Result(), nil
-	}
+	return engineClient.httpClient.Do
 }
 
 type DirectConn func(*http.Request) (*http.Response, error)
@@ -937,7 +1200,7 @@ func (f DirectConn) Do(r *http.Request) (*http.Response, error) {
 }
 
 func (f DirectConn) Host() string {
-	return ":mem:"
+	return "dagger"
 }
 
 func (f DirectConn) Close() error {

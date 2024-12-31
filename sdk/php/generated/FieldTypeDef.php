@@ -15,6 +15,9 @@ namespace Dagger;
  */
 class FieldTypeDef extends Client\AbstractObject implements Client\IdAble
 {
+    /**
+     * A doc string for the field, if any.
+     */
     public function description(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('description');
@@ -30,12 +33,27 @@ class FieldTypeDef extends Client\AbstractObject implements Client\IdAble
         return new \Dagger\FieldTypeDefId((string)$this->queryLeaf($leafQueryBuilder, 'id'));
     }
 
+    /**
+     * The name of the field in lowerCamelCase format.
+     */
     public function name(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('name');
         return (string)$this->queryLeaf($leafQueryBuilder, 'name');
     }
 
+    /**
+     * The location of this field declaration.
+     */
+    public function sourceMap(): SourceMap
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('sourceMap');
+        return new \Dagger\SourceMap($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * The type of the field.
+     */
     public function typeDef(): TypeDef
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('typeDef');

@@ -1,5 +1,3 @@
-pub const DAGGER_ENGINE_VERSION: &'static str = "0.9.8";
-
 pub mod cli_session;
 pub mod config;
 pub mod connect_params;
@@ -12,10 +10,6 @@ pub mod logger;
 pub mod schema;
 pub mod session;
 
-pub struct Scalar(String);
+mod version;
 
-pub struct Boolean(bool);
-
-pub struct Int(isize);
-
-pub trait Input {}
+pub const DAGGER_ENGINE_VERSION: &'static str = version::DAGGER_ENGINE_VERSION;

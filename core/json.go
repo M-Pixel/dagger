@@ -4,12 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
+	"github.com/iancoleman/strcase"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 )
 
 type JSON json.RawMessage
+
+func init() {
+	strcase.ConfigureAcronym("JSON", "JSON")
+}
 
 func (p JSON) Bytes() []byte {
 	return p
@@ -38,20 +44,29 @@ func (p JSON) Decoder() dagql.InputDecoder {
 	return p
 }
 
-func (p JSON) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_String_{
-			String_: string(p),
-		},
-	}
+func (p JSON) ToLiteral() call.Literal {
+	return call.NewLiteralString(string(p))
 }
 
 func (p JSON) MarshalJSON() ([]byte, error) {
 	if p == nil {
 		return []byte("null"), nil
 	}
-	// TODO this feels weird but it's hard to articulate. maybe this is overused.
+	// The SDKs expect a string, not direct JSON, so marshal to that
 	return json.Marshal(string(p))
+}
+
+func (p *JSON) UnmarshalJSON(bs []byte) error {
+	if p == nil {
+		return fmt.Errorf("cannot unmarshal into nil JSON")
+	}
+	// mirroring MarshalJSON, unmarshal to a *string*
+	var s string
+	if err := json.Unmarshal(bs, &s); err != nil {
+		return err
+	}
+	*p = JSON(s)
+	return nil
 }
 
 var _ dagql.ScalarType = JSON{}

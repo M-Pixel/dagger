@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/opencontainers/go-digest"
-	"github.com/vito/progrock"
 
 	"dagger.io/dagger"
 	"github.com/dagger/dagger/cmd/codegen/generator"
@@ -17,37 +15,37 @@ import (
 	"github.com/dagger/dagger/cmd/codegen/introspection"
 )
 
-func Generate(ctx context.Context, cfg generator.Config, dag *dagger.Client) (err error) {
-	rec := progrock.FromContext(ctx)
+func Generate(ctx context.Context, cfg generator.Config) (err error) {
+	logsW := os.Stdout
 
-	var vtxName string
 	if cfg.ModuleName != "" {
-		vtxName = fmt.Sprintf("generating %s module: %s", cfg.Lang, cfg.ModuleName)
+		fmt.Fprintf(logsW, "generating %s module: %s\n", cfg.Lang, cfg.ModuleName)
 	} else {
-		vtxName = fmt.Sprintf("generating %s SDK client", cfg.Lang)
+		fmt.Fprintf(logsW, "generating %s SDK client\n", cfg.Lang)
 	}
 
-	vtx := rec.Vertex(digest.FromString(time.Now().String()), vtxName)
-	defer func() { vtx.Done(err) }()
-
-	logsW := vtx.Stdout()
-
 	var introspectionSchema *introspection.Schema
+	var introspectionSchemaVersion string
 	if cfg.IntrospectionJSON != "" {
 		var resp introspection.Response
 		if err := json.Unmarshal([]byte(cfg.IntrospectionJSON), &resp); err != nil {
 			return fmt.Errorf("unmarshal introspection json: %w", err)
 		}
 		introspectionSchema = resp.Schema
+		introspectionSchemaVersion = resp.SchemaVersion
 	} else {
-		introspectionSchema, err = generator.Introspect(ctx, dag)
+		dag, err := dagger.Connect(ctx)
+		if err != nil {
+			return err
+		}
+		introspectionSchema, introspectionSchemaVersion, err = generator.Introspect(ctx, dag)
 		if err != nil {
 			return err
 		}
 	}
 
 	for ctx.Err() == nil {
-		generated, err := generate(ctx, introspectionSchema, cfg)
+		generated, err := generate(ctx, introspectionSchema, introspectionSchemaVersion, cfg)
 		if err != nil {
 			return err
 		}
@@ -58,9 +56,17 @@ func Generate(ctx context.Context, cfg generator.Config, dag *dagger.Client) (er
 
 		for _, cmd := range generated.PostCommands {
 			cmd.Dir = cfg.OutputDir
-			cmd.Stdout = vtx.Stdout()
-			cmd.Stderr = vtx.Stderr()
-			vtx.Task(strings.Join(cmd.Args, " ")).Done(cmd.Run())
+			if cfg.ModuleName != "" {
+				cmd.Dir = filepath.Join(cfg.OutputDir, cfg.ModuleContextPath)
+			}
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			fmt.Fprintln(logsW, "running post-command:", strings.Join(cmd.Args, " "))
+			err := cmd.Run()
+			if err != nil {
+				fmt.Fprintln(logsW, "post-command failed:", err)
+				return err
+			}
 		}
 
 		if !generated.NeedRegenerate {
@@ -74,7 +80,7 @@ func Generate(ctx context.Context, cfg generator.Config, dag *dagger.Client) (er
 	return ctx.Err()
 }
 
-func generate(ctx context.Context, introspectionSchema *introspection.Schema, cfg generator.Config) (*generator.GeneratedState, error) {
+func generate(ctx context.Context, introspectionSchema *introspection.Schema, introspectionSchemaVersion string, cfg generator.Config) (*generator.GeneratedState, error) {
 	generator.SetSchemaParents(introspectionSchema)
 
 	var gen generator.Generator
@@ -96,5 +102,5 @@ func generate(ctx context.Context, introspectionSchema *introspection.Schema, cf
 		return nil, fmt.Errorf("use target SDK language: %s: %w", sdks, generator.ErrUnknownSDKLang)
 	}
 
-	return gen.Generate(ctx, introspectionSchema)
+	return gen.Generate(ctx, introspectionSchema, introspectionSchemaVersion)
 }

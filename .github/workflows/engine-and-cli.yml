@@ -16,64 +16,166 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    uses: ./.github/workflows/_hack_make.yml
-    secrets: inherit
-    with:
-      mage-targets: engine:lint
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c' || 'ubuntu-latest' }}"
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: "engine lint"
+        uses: ./.github/actions/call
+        with:
+          function: "engine lint"
+      - name: "scripts lint"
+        uses: ./.github/actions/call
+        with:
+          function: "scripts lint"
 
-  test:
-    uses: ./.github/workflows/_hack_make.yml
-    secrets: inherit
-    with:
-      mage-targets: engine:testrace
-      size: dagger-runner-16c-64g
+  test-publish:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c' || 'ubuntu-latest' }}"
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: "test publish cli"
+        uses: ./.github/actions/call
+        with:
+          function: "cli test-publish"
+      - name: "test publish engine"
+        uses: ./.github/actions/call
+        with:
+          function: "engine publish --image=dagger-engine.dev --tag=main --dry-run"
+
+  scan-engine:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-8c' || 'ubuntu-latest' }}"
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: "scan"
+        uses: ./.github/actions/call
+        with:
+          function: "engine scan"
+
+  # TEMPORARILY DISABLED. Context: https://github.com/dagger/dagger/pull/8998#issuecomment-2491426455
+  # test:
+  #   runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c-st' || 'ubuntu-latest' }}"
+  #   timeout-minutes: 30
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: "test"
+  #       uses: ./.github/actions/call
+  #       with:
+  #         function: "test all --race=true --parallel=16"
+  #         upload-logs: true
+  test-modules:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "test"
+        uses: ./.github/actions/call
+        with:
+          function: "test specific --run=TestModule --race=true --parallel=16"
+          upload-logs: true
+
+  test-module-runtimes:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "test"
+        uses: ./.github/actions/call
+        with:
+          function: "test specific --run='TestGo|TestPython|TestTypescript|TestElixir|TestPHP' --race=true --parallel=16"
+          upload-logs: true
+
+  test-cli-engine:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "test"
+        uses: ./.github/actions/call
+        with:
+          function: "test specific --run='TestCLI|TestEngine' --race=true --parallel=16"
+          upload-logs: true
+
+  test-provision:
+    # HACK: this is split out, since these tests require cgroupsv2
+    # runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c-st' || 'ubuntu-latest' }}"
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "test"
+        uses: ./.github/actions/call
+        with:
+          function: "test specific --run='TestProvision' --race=true --parallel=1"
+          upload-logs: true
+
+  test-everything-else:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-16c-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "test"
+        uses: ./.github/actions/call
+        with:
+          function: "test specific --skip='TestModule|TestGo|TestPython|TestTypescript|TestElixir|TestPHP|TestCLI|TestEngine|TestProvision' --race=true --parallel=16"
+          upload-logs: true
 
   # Run Engine tests in dev Engine so that we can spot integration failures early
   # Only run a subset of important test cases since we just need to verify basic
   # functionality rather than repeat every test already run in the other targets.
-  testdev:
-    uses: ./.github/workflows/_hack_make.yml
-    secrets: inherit
-    with:
-      mage-targets: engine:testimportant
-      size: dagger-runner-16c-64g
-      dev-engine: true
+  #
+  # TEMPORARILY DISABLED. Context: https://github.com/dagger/dagger/pull/8998#issuecomment-2491426455
+  # testdev:
+  #   runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-32c-dind-st' || 'ubuntu-latest' }}"
+  #   timeout-minutes: 30
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: "testdev"
+  #       uses: ./.github/actions/call
+  #       with:
+  #         function: "test specific --run='TestModule|TestGo|TestPython|TestTypescript|TestElixir|TestPHP|TestContainer' --skip='TestDev' --race=true --parallel=16"
+  #         dev-engine: true
+  #         upload-logs: true
 
-
-  test-publish-cli:
-    uses: ./.github/workflows/_hack_make.yml
-    secrets: inherit
-    with:
-      mage-targets: cli:testpublish
-
-  test-publish-engine:
-    uses: ./.github/workflows/_hack_make.yml
-    secrets: inherit
-    with:
-      mage-targets: engine:testpublish
-
-  scan-engine:
-    if: ${{ github.repository == 'dagger/dagger' }}
-    # Use our own Dagger runner when running in the dagger/dagger repo (including PRs)
-    runs-on: dagger-runner-2c-8g
+  testdev-modules:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-32c-dind-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
+      - name: "testdev"
+        uses: ./.github/actions/call
         with:
-          go-version: "1.21"
-          cache-dependency-path: "internal/mage/go.sum"
-      - name: "Build Dev Engine"
-        run: |
-          ./hack/dev
-        env:
-          _EXPERIMENTAL_DAGGER_RUNNER_HOST: "unix:///var/run/buildkit/buildkitd.sock"
-          DAGGER_CLOUD_TOKEN: "${{ secrets.DAGGER_CLOUD_TOKEN }}"
-      - name: "Scan Dev Engine for Vulnerabilities"
-        uses: aquasecurity/trivy-action@0.11.2
+          function: "test specific --run='TestModule' --skip='TestDev' --race=true --parallel=16"
+          dev-engine: true
+          upload-logs: true
+
+  testdev-module-runtimes:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-32c-dind-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "testdev"
+        uses: ./.github/actions/call
         with:
-          input: ./bin/engine.tar
-          format: "json"
-          exit-code: "1"
-          severity: "CRITICAL,HIGH"
+          function: "test specific --run='TestGo|TestPython|TestTypescript|TestElixir|TestPHP' --skip='TestDev' --race=true --parallel=16"
+          dev-engine: true
+          upload-logs: true
+
+  testdev-container:
+    runs-on: "${{ github.repository == 'dagger/dagger' && 'dagger-g2-v0-15-0-32c-dind-st' || 'ubuntu-latest' }}"
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: "testdev"
+        uses: ./.github/actions/call
+        with:
+          function: "test specific --run='TestContainer' --skip='TestDev' --race=true --parallel=16"
+          dev-engine: true
+          upload-logs: true

@@ -8,21 +8,18 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 
+	"dagger.io/dagger/telemetry"
 	"github.com/containerd/containerd/content"
 	"github.com/containerd/containerd/images"
 	"github.com/containerd/containerd/pkg/transfer/archive"
-	"github.com/containerd/containerd/platforms"
-	"github.com/vektah/gqlparser/v2/ast"
-
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
-	"github.com/docker/distribution/reference"
+	"github.com/containerd/platforms"
+	"github.com/distribution/reference"
 	"github.com/moby/buildkit/client/llb"
+	"github.com/moby/buildkit/client/llb/sourceresolver"
 	"github.com/moby/buildkit/exporter/containerimage/exptypes"
 	"github.com/moby/buildkit/frontend/dockerui"
 	bkgw "github.com/moby/buildkit/frontend/gateway/client"
@@ -32,13 +29,30 @@ import (
 	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"github.com/vito/progrock"
+	"github.com/vektah/gqlparser/v2/ast"
+	"go.opentelemetry.io/otel/propagation"
 
-	"github.com/dagger/dagger/core/pipeline"
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 	"github.com/dagger/dagger/engine/buildkit"
 )
 
-var ErrContainerNoExec = errors.New("no command has been executed")
+type DefaultTerminalCmdOpts struct {
+	Args []string
+
+	// Provide dagger access to the executed command
+	// Do not use this option unless you trust the command being executed.
+	// The command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM
+	ExperimentalPrivilegedNesting dagql.Optional[dagql.Boolean] `default:"false"`
+
+	// Grant the process all root capabilities
+	InsecureRootCapabilities dagql.Optional[dagql.Boolean] `default:"false"`
+}
+
+type ContainerAnnotation struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
 
 // Container is a content-addressed container.
 type Container struct {
@@ -62,6 +76,9 @@ type Container struct {
 	// The platform of the container's rootfs.
 	Platform Platform `json:"platform,omitempty"`
 
+	// OCI annotations
+	Annotations []ContainerAnnotation `json:"annotations,omitempty"`
+
 	// Secrets to expose to the container.
 	Secrets []ContainerSecret `json:"secret_env,omitempty"`
 
@@ -77,12 +94,12 @@ type Container struct {
 	// Services to start before running the container.
 	Services ServiceBindings `json:"services,omitempty"`
 
-	// Focused indicates whether subsequent operations will be
-	// focused, i.e. shown more prominently in the UI.
-	Focused bool `json:"focused"`
+	// The args to invoke when using the terminal api on this container.
+	DefaultTerminalCmd DefaultTerminalCmdOpts `json:"defaultTerminalCmd,omitempty"`
 
-	// The args to invoke when using the "shell" api on this container.
-	DefaultShell []string `json:"defaultShell,omitempty"`
+	// (Internal-only for now) Environment variables from the engine container, prefixed
+	// with a special value, that will be inherited by this container if set.
+	SystemEnvNames []string `json:"system_envs,omitempty"`
 }
 
 func (*Container) Type() *ast.Type {
@@ -147,14 +164,8 @@ func (container *Container) Clone() *Container {
 	cp.Sockets = cloneSlice(cp.Sockets)
 	cp.Ports = cloneSlice(cp.Ports)
 	cp.Services = cloneSlice(cp.Services)
+	cp.SystemEnvNames = cloneSlice(cp.SystemEnvNames)
 	return &cp
-}
-
-var _ pipeline.Pipelineable = (*Container)(nil)
-
-// PipelinePath returns the container's pipeline path.
-func (container *Container) PipelinePath() pipeline.Path {
-	return container.Query.Pipeline
 }
 
 // Ownership contains a UID/GID pair resolved from a user/group name or ID pair
@@ -232,6 +243,9 @@ type ContainerMount struct {
 	// Configure the mount as a tmpfs.
 	Tmpfs bool `json:"tmpfs,omitempty"`
 
+	// Configure the size of the mounted tmpfs in bytes
+	Size int `json:"size,omitempty"`
+
 	// Configure the mount as read-only.
 	Readonly bool `json:"readonly,omitempty"`
 }
@@ -267,35 +281,72 @@ func (mnts ContainerMounts) With(newMnt ContainerMount) ContainerMounts {
 	return mntsCp
 }
 
-func (container *Container) From(ctx context.Context, addr string) (*Container, error) {
-	bk := container.Query.Buildkit
-
-	container = container.Clone()
+func (container *Container) FromRefString(ctx context.Context, addr string) (*Container, error) {
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	platform := container.Platform
 
-	// `From` creates 2 vertices: fetching the image config and actually pulling the image.
-	// We create a sub-pipeline to encapsulate both.
-	ctx, subRecorder := progrock.WithGroup(ctx, fmt.Sprintf("from %s", addr), progrock.Weak())
-
 	refName, err := reference.ParseNormalizedNamed(addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse image address %s: %w", addr, err)
+	}
+	// add a default :latest if no tag or digest, otherwise this is a no-op
+	refName = reference.TagNameOnly(refName)
+
+	if refName, isCanonical := refName.(reference.Canonical); isCanonical {
+		return container.FromCanonicalRef(ctx, refName, nil)
 	}
 
-	ref := reference.TagNameOnly(refName).String()
-
-	_, digest, cfgBytes, err := bk.ResolveImageConfig(ctx, ref, llb.ResolveImageConfigOpt{
-		Platform:    ptr(platform.Spec()),
-		ResolveMode: llb.ResolveModeDefault.String(),
+	_, digest, cfgBytes, err := bk.ResolveImageConfig(ctx, refName.String(), sourceresolver.Opt{
+		Platform: ptr(platform.Spec()),
+		ImageOpt: &sourceresolver.ResolveImageOpt{
+			ResolveMode: llb.ResolveModeDefault.String(),
+		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to resolve image %q (platform: %q): %w", refName.String(), platform.Format(), err)
+	}
+	canonRefName, err := reference.WithDigest(refName, digest)
+	if err != nil {
+		return nil, fmt.Errorf("failed to set digest on image %s: %w", refName.String(), err)
 	}
 
-	digested, err := reference.WithDigest(refName, digest)
+	return container.FromCanonicalRef(ctx, canonRefName, cfgBytes)
+}
+
+func (container *Container) FromCanonicalRef(
+	ctx context.Context,
+	refName reference.Canonical,
+	// cfgBytes is optional, will be retrieved if not provided
+	cfgBytes []byte,
+) (*Container, error) {
+	container = container.Clone()
+
+	bk, err := container.Query.Buildkit(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+
+	platform := container.Platform
+
+	refStr := refName.String()
+
+	// since this is an image ref w/ a digest, always check the local cache for the image
+	// first before making any network requests
+	resolveMode := llb.ResolveModePreferLocal
+	if cfgBytes == nil {
+		_, _, cfgBytes, err = bk.ResolveImageConfig(ctx, refStr, sourceresolver.Opt{
+			Platform: ptr(platform.Spec()),
+			ImageOpt: &sourceresolver.ResolveImageOpt{
+				ResolveMode: resolveMode.String(),
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve image %q (platform: %q): %w", refStr, platform.Format(), err)
+		}
 	}
 
 	var imgSpec specs.Image
@@ -304,8 +355,11 @@ func (container *Container) From(ctx context.Context, addr string) (*Container, 
 	}
 
 	fsSt := llb.Image(
-		digested.String(),
-		llb.WithCustomNamef("pull %s", ref),
+		refStr,
+		llb.WithCustomNamef("pull %s", refStr),
+		resolveMode,
+		buildkit.WithTracePropagation(ctx),
+		buildkit.WithPassthrough(),
 	)
 
 	def, err := fsSt.Marshal(ctx, llb.Platform(platform.Spec()))
@@ -315,11 +369,9 @@ func (container *Container) From(ctx context.Context, addr string) (*Container, 
 
 	container.FS = def.ToPB()
 
-	// associate vertexes to the 'from' sub-pipeline
-	buildkit.RecordVertexes(subRecorder, container.FS)
-
 	container.Config = mergeImageConfig(container.Config, imgSpec.Config)
-	container.ImageRef = digested.String()
+	container.ImageRef = refStr
+	container.Platform = Platform(platforms.Normalize(imgSpec.Platform))
 
 	return container, nil
 }
@@ -333,26 +385,36 @@ func (container *Container) Build(
 	buildArgs []BuildArg,
 	target string,
 	secrets []*Secret,
+	secretStore *SecretStore,
 ) (*Container, error) {
 	container = container.Clone()
 
 	container.Services.Merge(contextDir.Services)
 
+	secretNameToLLBID := make(map[string]string)
 	for _, secret := range secrets {
+		secretName, ok := secretStore.GetSecretName(secret.IDDigest)
+		if !ok {
+			return nil, fmt.Errorf("secret not found: %s", secret.IDDigest)
+		}
 		container.Secrets = append(container.Secrets, ContainerSecret{
 			Secret:    secret,
-			MountPath: fmt.Sprintf("/run/secrets/%s", secret.Name),
+			MountPath: fmt.Sprintf("/run/secrets/%s", secretName),
 		})
+		secretNameToLLBID[secretName] = secret.IDDigest.String()
 	}
 
 	// set image ref to empty string
 	container.ImageRef = ""
 
-	svcs := container.Query.Services
-	bk := container.Query.Buildkit
-
-	// add a weak group for the docker build vertices
-	ctx, subRecorder := progrock.WithGroup(ctx, "docker build", progrock.Weak())
+	svcs, err := container.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	detach, _, err := svcs.StartBindings(ctx, container.Services)
 	if err != nil {
@@ -386,7 +448,17 @@ func (container *Container) Build(
 		dockerui.DefaultLocalNameDockerfile: contextDir.LLB,
 	}
 
-	res, err := bk.Solve(ctx, bkgw.SolveRequest{
+	// FIXME: ew, this is a terrible way to pass this around
+	//nolint:staticcheck
+	solveCtx := context.WithValue(ctx, "secret-translator", func(name string) (string, error) {
+		llbID, ok := secretNameToLLBID[name]
+		if !ok {
+			return "", fmt.Errorf("secret not found: %s", name)
+		}
+		return llbID, nil
+	})
+
+	res, err := bk.Solve(solveCtx, bkgw.SolveRequest{
 		Frontend:       "dockerfile.v0",
 		FrontendOpt:    opts,
 		FrontendInputs: inputs,
@@ -415,10 +487,31 @@ func (container *Container) Build(
 		return nil, err
 	}
 
-	// associate vertexes to the 'docker build' sub-pipeline
-	buildkit.RecordVertexes(subRecorder, def.ToPB())
-
-	container.FS = def.ToPB()
+	dag, err := buildkit.DefToDAG(def.ToPB())
+	if err != nil {
+		return nil, err
+	}
+	if err := dag.Walk(func(dag *buildkit.OpDAG) error {
+		// forcibly inject our trace context into each op, since st.Marshal
+		// isn't strong enough to do so
+		desc := dag.Metadata.Description
+		if desc == nil {
+			desc = map[string]string{}
+		}
+		if desc["traceparent"] == "" {
+			telemetry.Propagator.Inject(ctx,
+				propagation.MapCarrier(desc))
+		}
+		dag.Metadata.Description = desc
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("walk DAG: %w", err)
+	}
+	newDef, err := dag.Marshal()
+	if err != nil {
+		return nil, err
+	}
+	container.FS = newDef
 	container.FS.Source = nil
 
 	cfgBytes, found := res.Metadata[exptypes.ExporterImageConfigKey]
@@ -490,6 +583,34 @@ func (container *Container) WithFile(ctx context.Context, destPath string, src *
 		}
 
 		return dir.WithFile(ctx, path.Base(destPath), src, permissions, ownership)
+	})
+}
+
+func (container *Container) WithoutPaths(ctx context.Context, destPaths ...string) (*Container, error) {
+	container = container.Clone()
+
+	for _, destPath := range destPaths {
+		var err error
+		container, err = container.writeToPath(ctx, path.Dir(destPath), func(dir *Directory) (*Directory, error) {
+			return dir.Without(ctx, path.Base(destPath))
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return container, nil
+}
+
+func (container *Container) WithFiles(ctx context.Context, destDir string, src []*File, permissions *int, owner string) (*Container, error) {
+	container = container.Clone()
+
+	return container.writeToPath(ctx, path.Dir(destDir), func(dir *Directory) (*Directory, error) {
+		ownership, err := container.ownership(ctx, owner)
+		if err != nil {
+			return nil, err
+		}
+
+		return dir.WithFiles(ctx, path.Base(destDir), src, permissions, ownership)
 	})
 }
 
@@ -565,7 +686,7 @@ func (container *Container) WithMountedCache(ctx context.Context, target string,
 	return container, nil
 }
 
-func (container *Container) WithMountedTemp(ctx context.Context, target string) (*Container, error) {
+func (container *Container) WithMountedTemp(ctx context.Context, target string, size int) (*Container, error) {
 	container = container.Clone()
 
 	target = absPath(container.Config.WorkingDir, target)
@@ -573,6 +694,7 @@ func (container *Container) WithMountedTemp(ctx context.Context, target string) 
 	container.Mounts = container.Mounts.With(ContainerMount{
 		Target: target,
 		Tmpfs:  true,
+		Size:   size,
 	})
 
 	// set image ref to empty string
@@ -705,14 +827,36 @@ func (container *Container) WithSecretVariable(ctx context.Context, name string,
 	return container, nil
 }
 
+func (container *Container) WithoutSecretVariable(ctx context.Context, name string) (*Container, error) {
+	container = container.Clone()
+
+	for i, secret := range container.Secrets {
+		if secret.EnvName == name {
+			container.Secrets = append(container.Secrets[:i], container.Secrets[i+1:]...)
+			break
+		}
+	}
+
+	// set image ref to empty string
+	container.ImageRef = ""
+
+	return container, nil
+}
+
 func (container *Container) Directory(ctx context.Context, dirPath string) (*Directory, error) {
-	dir, _, err := locatePath(ctx, container, dirPath, NewDirectory)
+	dir, _, err := locatePath(container, dirPath, NewDirectory)
 	if err != nil {
 		return nil, err
 	}
 
-	svcs := container.Query.Services
-	bk := container.Query.Buildkit
+	svcs, err := container.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	// check that the directory actually exists so the user gets an error earlier
 	// rather than when the dir is used
@@ -729,7 +873,7 @@ func (container *Container) Directory(ctx context.Context, dirPath string) (*Dir
 }
 
 func (container *Container) File(ctx context.Context, filePath string) (*File, error) {
-	file, _, err := locatePath(ctx, container, filePath, NewFile)
+	file, _, err := locatePath(container, filePath, NewFile)
 	if err != nil {
 		return nil, err
 	}
@@ -749,7 +893,6 @@ func (container *Container) File(ctx context.Context, filePath string) (*File, e
 }
 
 func locatePath[T *File | *Directory](
-	ctx context.Context,
 	container *Container,
 	containerPath string,
 	init func(*Query, *pb.Definition, string, Platform, ServiceBindings) T,
@@ -867,7 +1010,11 @@ func (container *Container) chown(
 			return nil, "", err
 		}
 
-		ref, err := bkRef(ctx, container.Query.Buildkit, def.ToPB())
+		bk, err := container.Query.Buildkit(ctx)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to get buildkit client: %w", err)
+		}
+		ref, err := bkRef(ctx, bk, def.ToPB())
 		if err != nil {
 			return nil, "", err
 		}
@@ -911,7 +1058,7 @@ func (container *Container) chown(
 }
 
 func (container *Container) writeToPath(ctx context.Context, subdir string, fn func(dir *Directory) (*Directory, error)) (*Container, error) {
-	dir, mount, err := locatePath(ctx, container, subdir, NewDirectory)
+	dir, mount, err := locatePath(container, subdir, NewDirectory)
 	if err != nil {
 		return nil, err
 	}
@@ -944,9 +1091,9 @@ func (container *Container) UpdateImageConfig(ctx context.Context, updateFn func
 	return container, nil
 }
 
-func (container *Container) WithPipeline(ctx context.Context, name, description string, labels []pipeline.Label) (*Container, error) {
+func (container *Container) WithPipeline(ctx context.Context, name, description string) (*Container, error) {
 	container = container.Clone()
-	container.Query = container.Query.WithPipeline(name, description, labels)
+	container.Query = container.Query.WithPipeline(name, description)
 	return container, nil
 }
 
@@ -960,263 +1107,16 @@ func (container *Container) WithGPU(ctx context.Context, gpuOpts ContainerGPUOpt
 	return container, nil
 }
 
-func (container *Container) WithExec(ctx context.Context, opts ContainerExecOpts) (*Container, error) { //nolint:gocyclo
-	container = container.Clone()
-
-	cfg := container.Config
-	mounts := container.Mounts
-	platform := container.Platform
-	if platform.OS == "" {
-		platform = container.Query.Platform
-	}
-
-	args, err := container.command(opts)
-	if err != nil {
-		return nil, err
-	}
-
-	var namef string
-	if container.Focused {
-		namef = buildkit.FocusPrefix + "exec %s"
-	} else {
-		namef = "exec %s"
-	}
-
-	runOpts := []llb.RunOption{
-		llb.Args(args),
-		llb.WithCustomNamef(namef, strings.Join(args, " ")),
-	}
-
-	// this allows executed containers to communicate back to this API
-	if opts.ExperimentalPrivilegedNesting {
-		runOpts = append(runOpts, llb.AddEnv("_DAGGER_ENABLE_NESTING", ""))
-	}
-
-	if opts.ModuleCallerDigest != "" {
-		runOpts = append(runOpts, llb.AddEnv("_DAGGER_MODULE_CALLER_DIGEST", opts.ModuleCallerDigest.String()))
-	}
-
-	if opts.NestedInSameSession {
-		runOpts = append(runOpts, llb.AddEnv("_DAGGER_ENABLE_NESTING_IN_SAME_SESSION", ""))
-	}
-
-	metaSt, metaSourcePath := metaMount(opts.Stdin)
-
-	// create /dagger mount point for the shim to write to
-	runOpts = append(runOpts,
-		llb.AddMount(buildkit.MetaMountDestPath, metaSt, llb.SourcePath(metaSourcePath)))
-
-	if opts.RedirectStdout != "" {
-		runOpts = append(runOpts, llb.AddEnv("_DAGGER_REDIRECT_STDOUT", opts.RedirectStdout))
-	}
-
-	if opts.RedirectStderr != "" {
-		runOpts = append(runOpts, llb.AddEnv("_DAGGER_REDIRECT_STDERR", opts.RedirectStderr))
-	}
-
-	for _, bnd := range container.Services {
-		for _, alias := range bnd.Aliases {
-			runOpts = append(runOpts,
-				llb.AddEnv("_DAGGER_HOSTNAME_ALIAS_"+alias, bnd.Hostname))
-		}
-	}
-
-	if cfg.User != "" {
-		runOpts = append(runOpts, llb.User(cfg.User))
-	}
-
-	if cfg.WorkingDir != "" {
-		runOpts = append(runOpts, llb.Dir(cfg.WorkingDir))
-	}
-
-	for _, env := range cfg.Env {
-		name, val, ok := strings.Cut(env, "=")
-		if !ok {
-			// it's OK to not be OK
-			// we'll just set an empty env
-			_ = ok
-		}
-
-		// don't pass these through to the container when manually set, they are internal only
-		if name == "_DAGGER_ENABLE_NESTING" && !opts.ExperimentalPrivilegedNesting {
-			continue
-		}
-		if name == "_DAGGER_MODULE_CALLER_DIGEST" && opts.ModuleCallerDigest == "" {
-			continue
-		}
-		if name == "_DAGGER_ENABLE_NESTING_IN_SAME_SESSION" && !opts.NestedInSameSession {
-			continue
-		}
-
-		runOpts = append(runOpts, llb.AddEnv(name, val))
-	}
-
-	// if GPU parameters are set for this container pass them over:
-	if len(container.EnabledGPUs) > 0 {
-		if gpuSupportEnabled := os.Getenv("_EXPERIMENTAL_DAGGER_GPU_SUPPORT"); gpuSupportEnabled == "" {
-			return nil, fmt.Errorf("GPU support is not enabled, set _EXPERIMENTAL_DAGGER_GPU_SUPPORT")
-		}
-		runOpts = append(runOpts, llb.AddEnv("_EXPERIMENTAL_DAGGER_GPU_PARAMS", strings.Join(container.EnabledGPUs, ",")))
-	}
-
-	secretsToScrub := SecretToScrubInfo{}
-	for i, secret := range container.Secrets {
-		secretOpts := []llb.SecretOption{llb.SecretID(secret.Secret.Name)}
-
-		var secretDest string
-		switch {
-		case secret.EnvName != "":
-			secretDest = secret.EnvName
-			secretOpts = append(secretOpts, llb.SecretAsEnv(true))
-			secretsToScrub.Envs = append(secretsToScrub.Envs, secret.EnvName)
-		case secret.MountPath != "":
-			secretDest = secret.MountPath
-			secretsToScrub.Files = append(secretsToScrub.Files, secret.MountPath)
-			if secret.Owner != nil {
-				secretOpts = append(secretOpts, llb.SecretFileOpt(
-					secret.Owner.UID,
-					secret.Owner.GID,
-					int(secret.Mode),
-				))
-			}
-		default:
-			return nil, fmt.Errorf("malformed secret config at index %d", i)
-		}
-
-		runOpts = append(runOpts, llb.AddSecret(secretDest, secretOpts...))
-	}
-
-	if len(secretsToScrub.Envs) != 0 || len(secretsToScrub.Files) != 0 {
-		// we sort to avoid non-deterministic order that would break caching
-		sort.Strings(secretsToScrub.Envs)
-		sort.Strings(secretsToScrub.Files)
-
-		secretsToScrubJSON, err := json.Marshal(secretsToScrub)
-		if err != nil {
-			return nil, fmt.Errorf("scrub secrets json: %w", err)
-		}
-		runOpts = append(runOpts, llb.AddEnv("_DAGGER_SCRUB_SECRETS", string(secretsToScrubJSON)))
-	}
-
-	for _, ctrSocket := range container.Sockets {
-		if ctrSocket.ContainerPath == "" {
-			return nil, fmt.Errorf("unsupported socket: only unix paths are implemented")
-		}
-
-		socketOpts := []llb.SSHOption{
-			llb.SSHID(ctrSocket.Source.SSHID()),
-			llb.SSHSocketTarget(ctrSocket.ContainerPath),
-		}
-
-		if ctrSocket.Owner != nil {
-			socketOpts = append(socketOpts,
-				llb.SSHSocketOpt(
-					ctrSocket.ContainerPath,
-					ctrSocket.Owner.UID,
-					ctrSocket.Owner.GID,
-					0o600, // preserve default
-				))
-		}
-
-		runOpts = append(runOpts, llb.AddSSHSocket(socketOpts...))
-	}
-
-	for _, mnt := range mounts {
-		srcSt, err := mnt.SourceState()
-		if err != nil {
-			return nil, fmt.Errorf("mount %s: %w", mnt.Target, err)
-		}
-
-		mountOpts := []llb.MountOption{}
-
-		if mnt.SourcePath != "" {
-			mountOpts = append(mountOpts, llb.SourcePath(mnt.SourcePath))
-		}
-
-		if mnt.CacheVolumeID != "" {
-			var sharingMode llb.CacheMountSharingMode
-			switch mnt.CacheSharingMode {
-			case CacheSharingModeShared:
-				sharingMode = llb.CacheMountShared
-			case CacheSharingModePrivate:
-				sharingMode = llb.CacheMountPrivate
-			case CacheSharingModeLocked:
-				sharingMode = llb.CacheMountLocked
-			default:
-				return nil, errors.Errorf("invalid cache mount sharing mode %q", mnt.CacheSharingMode)
-			}
-
-			mountOpts = append(mountOpts, llb.AsPersistentCacheDir(mnt.CacheVolumeID, sharingMode))
-		}
-
-		if mnt.Tmpfs {
-			mountOpts = append(mountOpts, llb.Tmpfs())
-		}
-
-		if mnt.Readonly {
-			mountOpts = append(mountOpts, llb.Readonly)
-		}
-
-		runOpts = append(runOpts, llb.AddMount(mnt.Target, srcSt, mountOpts...))
-	}
-
-	if opts.InsecureRootCapabilities {
-		runOpts = append(runOpts, llb.Security(llb.SecurityModeInsecure))
-	}
-
-	fsSt, err := container.FSState()
-	if err != nil {
-		return nil, fmt.Errorf("fs state: %w", err)
-	}
-
-	execSt := fsSt.Run(runOpts...)
-
-	execDef, err := execSt.Root().Marshal(ctx, llb.Platform(platform.Spec()))
-	if err != nil {
-		return nil, fmt.Errorf("marshal root: %w", err)
-	}
-
-	container.FS = execDef.ToPB()
-
-	metaDef, err := execSt.GetMount(buildkit.MetaMountDestPath).Marshal(ctx, llb.Platform(platform.Spec()))
-	if err != nil {
-		return nil, fmt.Errorf("get meta mount: %w", err)
-	}
-
-	container.Meta = metaDef.ToPB()
-
-	for i, mnt := range mounts {
-		if mnt.Tmpfs || mnt.CacheVolumeID != "" {
-			continue
-		}
-
-		mountSt := execSt.GetMount(mnt.Target)
-
-		// propagate any changes to regular mounts to subsequent containers
-		execMountDef, err := mountSt.Marshal(ctx, llb.Platform(platform.Spec()))
-		if err != nil {
-			return nil, fmt.Errorf("propagate %s: %w", mnt.Target, err)
-		}
-
-		mounts[i].Source = execMountDef.ToPB()
-	}
-
-	container.Mounts = mounts
-
-	// set image ref to empty string
-	container.ImageRef = ""
-
-	return container, nil
-}
-
 func (container Container) Evaluate(ctx context.Context) (*buildkit.Result, error) {
 	if container.FS == nil {
 		return nil, nil
 	}
 
-	root := container.Query
-
-	detach, _, err := root.Services.StartBindings(ctx, container.Services)
+	svcs, err := container.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	detach, _, err := svcs.StartBindings(ctx, container.Services)
 	if err != nil {
 		return nil, err
 	}
@@ -1232,35 +1132,44 @@ func (container Container) Evaluate(ctx context.Context) (*buildkit.Result, erro
 		return nil, err
 	}
 
-	return root.Buildkit.Solve(ctx, bkgw.SolveRequest{
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+	return bk.Solve(ctx, bkgw.SolveRequest{
 		Evaluate:   true,
 		Definition: def.ToPB(),
 	})
 }
 
-func (container *Container) MetaFileContents(ctx context.Context, filePath string) (string, error) {
-	if container.Meta == nil {
-		ctr, err := container.WithExec(ctx, ContainerExecOpts{})
-		if err != nil {
-			return "", err
+func (container *Container) WithAnnotation(ctx context.Context, key, value string) (*Container, error) {
+	container = container.Clone()
+
+	container.Annotations = append(container.Annotations, ContainerAnnotation{
+		Key:   key,
+		Value: value,
+	})
+
+	// set image ref to empty string
+	container.ImageRef = ""
+
+	return container, nil
+}
+
+func (container *Container) WithoutAnnotation(ctx context.Context, name string) (*Container, error) {
+	container = container.Clone()
+
+	for i, annotation := range container.Annotations {
+		if annotation.Key == name {
+			container.Annotations = append(container.Annotations[:i], container.Annotations[i+1:]...)
+			break
 		}
-		return ctr.MetaFileContents(ctx, filePath)
 	}
 
-	file := NewFile(
-		container.Query,
-		container.Meta,
-		path.Join(buildkit.MetaSourcePath, filePath),
-		container.Platform,
-		container.Services,
-	)
+	// set image ref to empty string
+	container.ImageRef = ""
 
-	content, err := file.Contents(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	return string(content), nil
+	return container, nil
 }
 
 func (container *Container) Publish(
@@ -1278,9 +1187,21 @@ func (container *Container) Publish(
 		mediaTypes = OCIMediaTypes
 	}
 
+	opts := map[string]string{
+		string(exptypes.OptKeyName):     ref,
+		string(exptypes.OptKeyPush):     strconv.FormatBool(true),
+		string(exptypes.OptKeyOCITypes): strconv.FormatBool(mediaTypes == OCIMediaTypes),
+	}
+	if forcedCompression != "" {
+		opts[string(exptypes.OptKeyLayerCompression)] = strings.ToLower(string(forcedCompression))
+		opts[string(exptypes.OptKeyForceCompression)] = strconv.FormatBool(true)
+	}
+
 	inputByPlatform := map[string]buildkit.ContainerExport{}
 	services := ServiceBindings{}
-	for _, variant := range append([]*Container{container}, platformVariants...) {
+
+	variants := append([]*Container{container}, platformVariants...)
+	for _, variant := range variants {
 		if variant.FS == nil {
 			continue
 		}
@@ -1288,7 +1209,8 @@ func (container *Container) Publish(
 		if err != nil {
 			return "", err
 		}
-		def, err := st.Marshal(ctx, llb.Platform(variant.Platform.Spec()))
+		platformSpec := variant.Platform.Spec()
+		def, err := st.Marshal(ctx, llb.Platform(platformSpec))
 		if err != nil {
 			return "", err
 		}
@@ -1301,6 +1223,21 @@ func (container *Container) Publish(
 			Definition: def.ToPB(),
 			Config:     variant.Config,
 		}
+
+		if len(variants) == 1 {
+			// single platform case
+			for _, annotation := range variant.Annotations {
+				opts[exptypes.AnnotationManifestKey(nil, annotation.Key)] = annotation.Value
+				opts[exptypes.AnnotationManifestDescriptorKey(nil, annotation.Key)] = annotation.Value
+			}
+		} else {
+			// multi platform case
+			for _, annotation := range variant.Annotations {
+				opts[exptypes.AnnotationManifestKey(&platformSpec, annotation.Key)] = annotation.Value
+				opts[exptypes.AnnotationManifestDescriptorKey(&platformSpec, annotation.Key)] = annotation.Value
+			}
+		}
+
 		services.Merge(variant.Services)
 	}
 	if len(inputByPlatform) == 0 {
@@ -1308,18 +1245,14 @@ func (container *Container) Publish(
 		return "", errors.New("no containers to export")
 	}
 
-	opts := map[string]string{
-		string(exptypes.OptKeyName):     ref,
-		string(exptypes.OptKeyPush):     strconv.FormatBool(true),
-		string(exptypes.OptKeyOCITypes): strconv.FormatBool(mediaTypes == OCIMediaTypes),
+	svcs, err := container.Query.Services(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get services: %w", err)
 	}
-	if forcedCompression != "" {
-		opts[string(exptypes.OptKeyLayerCompression)] = strings.ToLower(string(forcedCompression))
-		opts[string(exptypes.OptKeyForceCompression)] = strconv.FormatBool(true)
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get buildkit client: %w", err)
 	}
-
-	svcs := container.Query.Services
-	bk := container.Query.Buildkit
 
 	detach, _, err := svcs.StartBindings(ctx, services)
 	if err != nil {
@@ -1362,8 +1295,14 @@ func (container *Container) Export(
 	forcedCompression ImageLayerCompression,
 	mediaTypes ImageMediaTypes,
 ) error {
-	svcs := container.Query.Services
-	bk := container.Query.Buildkit
+	svcs, err := container.Query.Services(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get services: %w", err)
+	}
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get buildkit client: %w", err)
+	}
 
 	if mediaTypes == "" {
 		// Modern registry implementations support oci types and docker daemons
@@ -1373,9 +1312,20 @@ func (container *Container) Export(
 		mediaTypes = OCIMediaTypes
 	}
 
+	opts := map[string]string{
+		"tar":                           strconv.FormatBool(true),
+		string(exptypes.OptKeyOCITypes): strconv.FormatBool(mediaTypes == OCIMediaTypes),
+	}
+	if forcedCompression != "" {
+		opts[string(exptypes.OptKeyLayerCompression)] = strings.ToLower(string(forcedCompression))
+		opts[string(exptypes.OptKeyForceCompression)] = strconv.FormatBool(true)
+	}
+
 	inputByPlatform := map[string]buildkit.ContainerExport{}
 	services := ServiceBindings{}
-	for _, variant := range append([]*Container{container}, platformVariants...) {
+
+	variants := append([]*Container{container}, platformVariants...)
+	for _, variant := range variants {
 		if variant.FS == nil {
 			continue
 		}
@@ -1384,7 +1334,8 @@ func (container *Container) Export(
 			return err
 		}
 
-		def, err := st.Marshal(ctx, llb.Platform(variant.Platform.Spec()))
+		platformSpec := variant.Platform.Spec()
+		def, err := st.Marshal(ctx, llb.Platform(platformSpec))
 		if err != nil {
 			return err
 		}
@@ -1397,20 +1348,26 @@ func (container *Container) Export(
 			Definition: def.ToPB(),
 			Config:     variant.Config,
 		}
+
+		if len(variants) == 1 {
+			// single platform case
+			for _, annotation := range variant.Annotations {
+				opts[exptypes.AnnotationManifestKey(nil, annotation.Key)] = annotation.Value
+				opts[exptypes.AnnotationManifestDescriptorKey(nil, annotation.Key)] = annotation.Value
+			}
+		} else {
+			// multi platform case
+			for _, annotation := range variant.Annotations {
+				opts[exptypes.AnnotationManifestKey(&platformSpec, annotation.Key)] = annotation.Value
+				opts[exptypes.AnnotationManifestDescriptorKey(&platformSpec, annotation.Key)] = annotation.Value
+			}
+		}
+
 		services.Merge(variant.Services)
 	}
 	if len(inputByPlatform) == 0 {
 		// Could also just ignore and do nothing, airing on side of error until proven otherwise.
 		return errors.New("no containers to export")
-	}
-
-	opts := map[string]string{
-		"tar":                           strconv.FormatBool(true),
-		string(exptypes.OptKeyOCITypes): strconv.FormatBool(mediaTypes == OCIMediaTypes),
-	}
-	if forcedCompression != "" {
-		opts[string(exptypes.OptKeyLayerCompression)] = strings.ToLower(string(forcedCompression))
-		opts[string(exptypes.OptKeyForceCompression)] = strconv.FormatBool(true)
 	}
 
 	detach, _, err := svcs.StartBindings(ctx, services)
@@ -1425,21 +1382,39 @@ func (container *Container) Export(
 
 func (container *Container) AsTarball(
 	ctx context.Context,
+	srv *dagql.Server,
 	platformVariants []*Container,
 	forcedCompression ImageLayerCompression,
 	mediaTypes ImageMediaTypes,
 ) (*File, error) {
-	bk := container.Query.Buildkit
-	svcs := container.Query.Services
-	engineHostPlatform := container.Query.Platform
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+	svcs, err := container.Query.Services(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get services: %w", err)
+	}
+	engineHostPlatform := container.Query.Platform()
 
 	if mediaTypes == "" {
 		mediaTypes = OCIMediaTypes
 	}
 
+	opts := map[string]string{
+		"tar":                           strconv.FormatBool(true),
+		string(exptypes.OptKeyOCITypes): strconv.FormatBool(mediaTypes == OCIMediaTypes),
+	}
+	if forcedCompression != "" {
+		opts[string(exptypes.OptKeyLayerCompression)] = strings.ToLower(string(forcedCompression))
+		opts[string(exptypes.OptKeyForceCompression)] = strconv.FormatBool(true)
+	}
+
 	inputByPlatform := map[string]buildkit.ContainerExport{}
 	services := ServiceBindings{}
-	for _, variant := range append([]*Container{container}, platformVariants...) {
+
+	variants := append([]*Container{container}, platformVariants...)
+	for _, variant := range variants {
 		if variant.FS == nil {
 			continue
 		}
@@ -1448,7 +1423,8 @@ func (container *Container) AsTarball(
 			return nil, err
 		}
 
-		def, err := st.Marshal(ctx, llb.Platform(variant.Platform.Spec()))
+		platformSpec := variant.Platform.Spec()
+		def, err := st.Marshal(ctx, llb.Platform(platformSpec))
 		if err != nil {
 			return nil, err
 		}
@@ -1461,19 +1437,25 @@ func (container *Container) AsTarball(
 			Definition: def.ToPB(),
 			Config:     variant.Config,
 		}
+
+		if len(variants) == 1 {
+			// single platform case
+			for _, annotation := range variant.Annotations {
+				opts[exptypes.AnnotationManifestKey(nil, annotation.Key)] = annotation.Value
+				opts[exptypes.AnnotationManifestDescriptorKey(nil, annotation.Key)] = annotation.Value
+			}
+		} else {
+			// multi platform case
+			for _, annotation := range variant.Annotations {
+				opts[exptypes.AnnotationManifestKey(&platformSpec, annotation.Key)] = annotation.Value
+				opts[exptypes.AnnotationManifestDescriptorKey(&platformSpec, annotation.Key)] = annotation.Value
+			}
+		}
+
 		services.Merge(variant.Services)
 	}
 	if len(inputByPlatform) == 0 {
 		return nil, errors.New("no containers to export")
-	}
-
-	opts := map[string]string{
-		"tar":                           strconv.FormatBool(true),
-		string(exptypes.OptKeyOCITypes): strconv.FormatBool(mediaTypes == OCIMediaTypes),
-	}
-	if forcedCompression != "" {
-		opts[string(exptypes.OptKeyLayerCompression)] = strings.ToLower(string(forcedCompression))
-		opts[string(exptypes.OptKeyForceCompression)] = strconv.FormatBool(true)
 	}
 
 	detach, _, err := svcs.StartBindings(ctx, services)
@@ -1483,11 +1465,29 @@ func (container *Container) AsTarball(
 	defer detach()
 
 	fileName := identity.NewID() + ".tar"
-	pbDef, err := bk.ContainerImageToTarball(ctx, engineHostPlatform.Spec(), fileName, inputByPlatform, opts)
+
+	dgst, err := bk.ContainerImageToTarball(ctx, engineHostPlatform.Spec(), fileName, inputByPlatform, opts)
 	if err != nil {
 		return nil, fmt.Errorf("container image to tarball file conversion failed: %w", err)
 	}
-	return NewFile(container.Query, pbDef, fileName, engineHostPlatform, nil), nil
+	dirInst, err := LoadBlob(ctx, srv, dgst)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tarball file blob: %w", err)
+	}
+
+	var fileInst dagql.Instance[*File]
+	if err := srv.Select(ctx, dirInst, &fileInst,
+		dagql.Selector{
+			Field: "file",
+			Args: []dagql.NamedInput{
+				{Name: "path", Value: dagql.String(fileName)},
+			},
+		},
+	); err != nil {
+		return nil, fmt.Errorf("failed to select tarball file: %w", err)
+	}
+
+	return fileInst.Self, nil
 }
 
 func (container *Container) Import(
@@ -1495,9 +1495,12 @@ func (container *Container) Import(
 	source *File,
 	tag string,
 ) (*Container, error) {
-	bk := container.Query.Buildkit
-	store := container.Query.OCIStore
-	lm := container.Query.LeaseManager
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+	store := container.Query.OCIStore()
+	lm := container.Query.LeaseManager()
 
 	container = container.Clone()
 
@@ -1539,6 +1542,7 @@ func (container *Container) Import(
 		fmt.Sprintf("%s@%s", dummyRepo, manifestDesc.Digest),
 		llb.OCIStore("", buildkit.OCIStoreName),
 		llb.Platform(container.Platform.Spec()),
+		buildkit.WithTracePropagation(ctx),
 	)
 
 	execDef, err := st.Marshal(ctx, llb.Platform(container.Platform.Spec()))
@@ -1637,7 +1641,7 @@ func (container *Container) WithoutExposedPort(port int, protocol NetworkProtoco
 	return container, nil
 }
 
-func (container *Container) WithServiceBinding(ctx context.Context, id *idproto.ID, svc *Service, alias string) (*Container, error) {
+func (container *Container) WithServiceBinding(ctx context.Context, id *call.ID, svc *Service, alias string) (*Container, error) {
 	container = container.Clone()
 
 	host, err := svc.Hostname(ctx, id)
@@ -1671,15 +1675,59 @@ func (container *Container) ImageRefOrErr(ctx context.Context) (string, error) {
 	return "", errors.Errorf("Image reference can only be retrieved immediately after the 'Container.From' call. Error in fetching imageRef as the container image is changed")
 }
 
-func (container *Container) Service(ctx context.Context) (*Service, error) {
+type ContainerAsServiceArgs struct {
+	// Command to run instead of the container's default command
+	Args []string `default:"[]"`
+
+	// If the container has an entrypoint, prepend it to this exec's args
+	UseEntrypoint bool `default:"false"`
+
+	// Provide the executed command access back to the Dagger API
+	ExperimentalPrivilegedNesting bool `default:"false"`
+
+	// Grant the process all root capabilities
+	InsecureRootCapabilities bool `default:"false"`
+
+	// Expand the environment variables in args
+	Expand bool `default:"false"`
+
+	// Skip the init process injected into containers by default so that the
+	// user's process is PID 1
+	NoInit bool `default:"false"`
+}
+
+func (container *Container) AsServiceLegacy(ctx context.Context) (*Service, error) {
 	if container.Meta == nil {
 		var err error
-		container, err = container.WithExec(ctx, ContainerExecOpts{})
+		container, err = container.WithExec(ctx, ContainerExecOpts{
+			UseEntrypoint: true,
+		})
 		if err != nil {
 			return nil, err
 		}
 	}
-	return container.Query.NewContainerService(container), nil
+	return container.Query.NewContainerService(ctx, container), nil
+}
+
+func (container *Container) AsService(ctx context.Context, args ContainerAsServiceArgs) (*Service, error) {
+	var cmdargs = container.Config.Cmd
+	if len(args.Args) > 0 {
+		cmdargs = args.Args
+	}
+
+	container, err := container.WithExec(ctx, ContainerExecOpts{
+		Args:                          cmdargs,
+		UseEntrypoint:                 args.UseEntrypoint,
+		ExperimentalPrivilegedNesting: args.ExperimentalPrivilegedNesting,
+		InsecureRootCapabilities:      args.InsecureRootCapabilities,
+		Expand:                        args.Expand,
+		NoInit:                        args.NoInit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return container.Query.NewContainerService(ctx, container), nil
 }
 
 func (container *Container) ownership(ctx context.Context, owner string) (*Ownership, error) {
@@ -1693,7 +1741,11 @@ func (container *Container) ownership(ctx context.Context, owner string) (*Owner
 		return nil, err
 	}
 
-	return resolveUIDGID(ctx, fsSt, container.Query.Buildkit, container.Platform, owner)
+	bk, err := container.Query.Buildkit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get buildkit client: %w", err)
+	}
+	return resolveUIDGID(ctx, fsSt, bk, container.Platform, owner)
 }
 
 func (container *Container) command(opts ContainerExecOpts) ([]string, error) {
@@ -1705,67 +1757,15 @@ func (container *Container) command(opts ContainerExecOpts) ([]string, error) {
 		args = cfg.Cmd
 	}
 
-	if len(cfg.Entrypoint) > 0 && !opts.SkipEntrypoint {
+	if len(cfg.Entrypoint) > 0 && opts.UseEntrypoint {
 		args = append(cfg.Entrypoint, args...)
 	}
 
 	if len(args) == 0 {
-		return nil, errors.New("no command has been set")
+		return nil, ErrNoCommand
 	}
 
 	return args, nil
-}
-
-func metaMount(stdin string) (llb.State, string) {
-	// because the shim might run as non-root, we need to make a world-writable
-	// directory first and then make it the base of the /dagger mount point.
-	//
-	// TODO(vito): have the shim exec as the other user instead?
-	meta := llb.Mkdir(buildkit.MetaSourcePath, 0o777)
-	if stdin != "" {
-		meta = meta.Mkfile(path.Join(buildkit.MetaSourcePath, "stdin"), 0o666, []byte(stdin))
-	}
-
-	return llb.Scratch().File(
-			meta,
-			llb.WithCustomName(buildkit.InternalPrefix+"creating dagger metadata"),
-		),
-		buildkit.MetaSourcePath
-}
-
-type ContainerExecOpts struct {
-	// Command to run instead of the container's default command
-	Args []string
-
-	// If the container has an entrypoint, ignore it for this exec rather than
-	// calling it with args.
-	SkipEntrypoint bool `default:"false"`
-
-	// Content to write to the command's standard input before closing
-	Stdin string `default:""`
-
-	// Redirect the command's standard output to a file in the container
-	RedirectStdout string `default:""`
-
-	// Redirect the command's standard error to a file in the container
-	RedirectStderr string `default:""`
-
-	// Provide dagger access to the executed command
-	// Do not use this option unless you trust the command being executed.
-	// The command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM
-	ExperimentalPrivilegedNesting bool `default:"false"`
-
-	// Grant the process all root capabilities
-	InsecureRootCapabilities bool `default:"false"`
-
-	// (Internal-only) If this exec is for a module function, this digest will be set in the
-	// grpc context metadata for any api requests back to the engine. It's used by the API
-	// server to determine which schema to serve and other module context metadata.
-	ModuleCallerDigest digest.Digest `name:"-"`
-
-	// (Internal-only) Used for module function execs to trigger the nested api client to
-	// be connected back to the same session.
-	NestedInSameSession bool `name:"-"`
 }
 
 type BuildArg struct {
@@ -1843,6 +1843,7 @@ type ImageLayerCompression string
 var ImageLayerCompressions = dagql.NewEnum[ImageLayerCompression]()
 
 var (
+	// FIXME: should be canonicalized as GZIP, ZSTD, ESTARGZ, UNCOMPRESSED
 	CompressionGzip         = ImageLayerCompressions.Register("Gzip")
 	CompressionZstd         = ImageLayerCompressions.Register("Zstd")
 	CompressionEStarGZ      = ImageLayerCompressions.Register("EStarGZ")
@@ -1864,7 +1865,7 @@ func (proto ImageLayerCompression) Decoder() dagql.InputDecoder {
 	return ImageLayerCompressions
 }
 
-func (proto ImageLayerCompression) ToLiteral() *idproto.Literal {
+func (proto ImageLayerCompression) ToLiteral() call.Literal {
 	return ImageLayerCompressions.Literal(proto)
 }
 
@@ -1873,6 +1874,7 @@ type ImageMediaTypes string
 var ImageMediaTypesEnum = dagql.NewEnum[ImageMediaTypes]()
 
 var (
+	// FIXME: should be canonicalized as OCI_MEDIA_TYPES, DOCKER_MEDIA_TYPES
 	OCIMediaTypes    = ImageMediaTypesEnum.Register("OCIMediaTypes")
 	DockerMediaTypes = ImageMediaTypesEnum.Register("DockerMediaTypes")
 )
@@ -1892,6 +1894,66 @@ func (proto ImageMediaTypes) Decoder() dagql.InputDecoder {
 	return ImageMediaTypesEnum
 }
 
-func (proto ImageMediaTypes) ToLiteral() *idproto.Literal {
+func (proto ImageMediaTypes) ToLiteral() call.Literal {
 	return ImageMediaTypesEnum.Literal(proto)
+}
+
+type ReturnTypes string
+
+var ReturnTypesEnum = dagql.NewEnum[ReturnTypes]()
+
+var (
+	ReturnSuccess = ReturnTypesEnum.Register("SUCCESS",
+		`A successful execution (exit code 0)`,
+	)
+	ReturnFailure = ReturnTypesEnum.Register("FAILURE",
+		`A failed execution (exit codes 1-127)`,
+	)
+	ReturnAny = ReturnTypesEnum.Register("ANY",
+		`Any execution (exit codes 0-127)`,
+	)
+)
+
+func (expect ReturnTypes) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "ReturnType",
+		NonNull:   true,
+	}
+}
+
+func (expect ReturnTypes) TypeDescription() string {
+	return "Expected return type of an execution"
+}
+
+func (expect ReturnTypes) Decoder() dagql.InputDecoder {
+	return ReturnTypesEnum
+}
+
+func (expect ReturnTypes) ToLiteral() call.Literal {
+	return ReturnTypesEnum.Literal(expect)
+}
+
+// ReturnCodes gets the valid exit codes allowed for a specific return status
+//
+// NOTE: exit status codes above 128 are likely from exiting via a signal - we
+// shouldn't try and handle these.
+func (expect ReturnTypes) ReturnCodes() []int {
+	switch expect {
+	case ReturnSuccess:
+		return []int{0}
+	case ReturnFailure:
+		codes := make([]int, 0, 128)
+		for i := 1; i <= 128; i++ {
+			codes = append(codes, i)
+		}
+		return codes
+	case ReturnAny:
+		codes := make([]int, 0, 129)
+		for i := 0; i <= 128; i++ {
+			codes = append(codes, i)
+		}
+		return codes
+	default:
+		return nil
+	}
 }

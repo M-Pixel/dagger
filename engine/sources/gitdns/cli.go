@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/dagger/dagger/engine"
 	"github.com/moby/buildkit/executor/oci"
 	"github.com/moby/buildkit/util/progress/logs"
 	"github.com/pkg/errors"
@@ -79,18 +80,21 @@ func (cli *gitCLI) run(ctx context.Context, args ...string) (_ *bytes.Buffer, er
 				flush()
 			}
 		}()
-		if len(cli.auth) > 0 {
-			args = append(cli.auth, args...)
-		}
+
+		cmd := exec.Command("git")
+		// Block sneaky repositories from using repos from the filesystem as submodules.
+		cmd.Args = append(cmd.Args, "-c", "protocol.file.allow=user")
 		if cli.gitDir != "" {
-			args = append([]string{"--git-dir", cli.gitDir}, args...)
+			cmd.Args = append(cmd.Args, "--git-dir", cli.gitDir)
 		}
 		if cli.workTree != "" {
-			args = append([]string{"--work-tree", cli.workTree}, args...)
+			cmd.Args = append(cmd.Args, "--work-tree", cli.workTree)
 		}
-		// Block sneaky repositories from using repos from the filesystem as submodules.
-		args = append([]string{"-c", "protocol.file.allow=user"}, args...)
-		cmd := exec.Command("git", args...)
+		if len(cli.auth) > 0 {
+			cmd.Args = append(cmd.Args, cli.auth...)
+		}
+		cmd.Args = append(cmd.Args, args...)
+
 		cmd.Dir = cli.workTree // some commands like submodule require this
 		buf := bytes.NewBuffer(nil)
 		errbuf := bytes.NewBuffer(nil)
@@ -100,12 +104,22 @@ func (cli *gitCLI) run(ctx context.Context, args ...string) (_ *bytes.Buffer, er
 		cmd.Env = []string{
 			"PATH=" + os.Getenv("PATH"),
 			"GIT_TERMINAL_PROMPT=0",
-			"GIT_SSH_COMMAND=" + getGitSSHCommand(cli.knownHosts),
+			"GIT_SSH_COMMAND=" + GetGitSSHCommand(cli.knownHosts),
 			//	"GIT_TRACE=1",
+			"GIT_ASKPASS=echo",      // ensure git does not ask for a password (avoids cryptic error message)
 			"GIT_CONFIG_NOSYSTEM=1", // Disable reading from system gitconfig.
 			"HOME=/dev/null",        // Disable reading from user gitconfig.
 			"LC_ALL=C",              // Ensure consistent output.
 		}
+
+		// propagate proxy settings from the engine container to the git command if
+		// they are set
+		for _, proxyEnvName := range engine.ProxyEnvNames {
+			if proxyVal, ok := os.LookupEnv(proxyEnvName); ok {
+				cmd.Env = append(cmd.Env, proxyEnvName+"="+proxyVal)
+			}
+		}
+
 		if cli.sshAuthSock != "" {
 			cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+cli.sshAuthSock)
 		}
@@ -119,13 +133,21 @@ func (cli *gitCLI) run(ctx context.Context, args ...string) (_ *bytes.Buffer, er
 					continue
 				}
 			}
+			if strings.Contains(errbuf.String(), "not our ref") || strings.Contains(errbuf.String(), "unadvertised object") {
+				// server-side error: https://github.com/git/git/blob/34b6ce9b30747131b6e781ff718a45328aa887d0/upload-pack.c#L811-L812
+				// client-side error: https://github.com/git/git/blob/34b6ce9b30747131b6e781ff718a45328aa887d0/fetch-pack.c#L2250-L2253
+				if newArgs := argsNoCommitRefspec(args); len(args) > len(newArgs) {
+					args = newArgs
+					continue
+				}
+			}
 			return buf, errors.Errorf("git error: %s\nstderr:\n%s", err, errbuf.String())
 		}
 		return buf, nil
 	}
 }
 
-func getGitSSHCommand(knownHosts string) string {
+func GetGitSSHCommand(knownHosts string) string {
 	gitSSHCommand := "ssh -F /dev/null"
 	if knownHosts != "" {
 		gitSSHCommand += " -o UserKnownHostsFile=" + knownHosts
@@ -143,4 +165,20 @@ func argsNoDepth(args []string) []string {
 		}
 	}
 	return out
+}
+
+func argsNoCommitRefspec(args []string) []string {
+	if len(args) <= 2 {
+		return args
+	}
+	if args[0] != "fetch" {
+		return args
+	}
+
+	// assume the refspec is the last arg
+	if isCommitSHA(args[len(args)-1]) {
+		return args[:len(args)-1]
+	}
+
+	return args
 }

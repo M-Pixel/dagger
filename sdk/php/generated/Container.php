@@ -18,9 +18,33 @@ class Container extends Client\AbstractObject implements Client\IdAble
      *
      * Be sure to set any exposed ports before this conversion.
      */
-    public function asService(): Service
-    {
+    public function asService(
+        ?array $args = null,
+        ?bool $useEntrypoint = false,
+        ?bool $experimentalPrivilegedNesting = false,
+        ?bool $insecureRootCapabilities = false,
+        ?bool $expand = false,
+        ?bool $noInit = false,
+    ): Service {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asService');
+        if (null !== $args) {
+        $innerQueryBuilder->setArgument('args', $args);
+        }
+        if (null !== $useEntrypoint) {
+        $innerQueryBuilder->setArgument('useEntrypoint', $useEntrypoint);
+        }
+        if (null !== $experimentalPrivilegedNesting) {
+        $innerQueryBuilder->setArgument('experimentalPrivilegedNesting', $experimentalPrivilegedNesting);
+        }
+        if (null !== $insecureRootCapabilities) {
+        $innerQueryBuilder->setArgument('insecureRootCapabilities', $insecureRootCapabilities);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
+        if (null !== $noInit) {
+        $innerQueryBuilder->setArgument('noInit', $noInit);
+        }
         return new \Dagger\Service($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -31,8 +55,7 @@ class Container extends Client\AbstractObject implements Client\IdAble
         ?array $platformVariants = null,
         ?ImageLayerCompression $forcedCompression = null,
         ?ImageMediaTypes $mediaTypes = null,
-    ): File
-    {
+    ): File {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('asTarball');
         if (null !== $platformVariants) {
         $innerQueryBuilder->setArgument('platformVariants', $platformVariants);
@@ -55,8 +78,7 @@ class Container extends Client\AbstractObject implements Client\IdAble
         ?string $target = '',
         ?array $buildArgs = null,
         ?array $secrets = null,
-    ): Container
-    {
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('build');
         $innerQueryBuilder->setArgument('context', $context);
         if (null !== $dockerfile) {
@@ -88,10 +110,13 @@ class Container extends Client\AbstractObject implements Client\IdAble
      *
      * Mounts are included.
      */
-    public function directory(string $path): Directory
+    public function directory(string $path, ?bool $expand = false): Directory
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('directory');
         $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Directory($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -124,6 +149,17 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * The exit code of the last executed command.
+     *
+     * Returns an error if no command was set.
+     */
+    public function exitCode(): int
+    {
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('exitCode');
+        return (int)$this->queryLeaf($leafQueryBuilder, 'exitCode');
+    }
+
+    /**
      * EXPERIMENTAL API! Subject to change/removal at any time.
      *
      * Configures all available GPUs on the host to be accessible to this container.
@@ -139,7 +175,7 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * EXPERIMENTAL API! Subject to change/removal at any time.
      *
-     * Configures the provided list of devices to be accesible to this container.
+     * Configures the provided list of devices to be accessible to this container.
      *
      * This currently works for Nvidia devices only.
      */
@@ -153,8 +189,6 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * Writes the container as an OCI tarball to the destination file path on the host.
      *
-     * Return true on success.
-     *
      * It can also export platform variants.
      */
     public function export(
@@ -162,8 +196,8 @@ class Container extends Client\AbstractObject implements Client\IdAble
         ?array $platformVariants = null,
         ?ImageLayerCompression $forcedCompression = null,
         ?ImageMediaTypes $mediaTypes = null,
-    ): bool
-    {
+        ?bool $expand = false,
+    ): string {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('export');
         $leafQueryBuilder->setArgument('path', $path);
         if (null !== $platformVariants) {
@@ -175,7 +209,10 @@ class Container extends Client\AbstractObject implements Client\IdAble
         if (null !== $mediaTypes) {
         $leafQueryBuilder->setArgument('mediaTypes', $mediaTypes);
         }
-        return (bool)$this->queryLeaf($leafQueryBuilder, 'export');
+        if (null !== $expand) {
+        $leafQueryBuilder->setArgument('expand', $expand);
+        }
+        return (string)$this->queryLeaf($leafQueryBuilder, 'export');
     }
 
     /**
@@ -194,10 +231,13 @@ class Container extends Client\AbstractObject implements Client\IdAble
      *
      * Mounts are included.
      */
-    public function file(string $path): File
+    public function file(string $path, ?bool $expand = false): File
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('file');
         $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\File($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -271,22 +311,6 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * Creates a named sub-pipeline.
-     */
-    public function pipeline(string $name, ?string $description = '', ?array $labels = null): Container
-    {
-        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('pipeline');
-        $innerQueryBuilder->setArgument('name', $name);
-        if (null !== $description) {
-        $innerQueryBuilder->setArgument('description', $description);
-        }
-        if (null !== $labels) {
-        $innerQueryBuilder->setArgument('labels', $labels);
-        }
-        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
-    }
-
-    /**
      * The platform this container executes and publishes as.
      */
     public function platform(): Platform
@@ -307,8 +331,7 @@ class Container extends Client\AbstractObject implements Client\IdAble
         ?array $platformVariants = null,
         ?ImageLayerCompression $forcedCompression = null,
         ?ImageMediaTypes $mediaTypes = null,
-    ): string
-    {
+    ): string {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('publish');
         $leafQueryBuilder->setArgument('address', $address);
         if (null !== $platformVariants) {
@@ -333,21 +356,9 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * Return an interactive terminal for this container using its configured shell if not overridden by args (or sh as a fallback default).
-     */
-    public function shell(?array $args = null): Terminal
-    {
-        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('shell');
-        if (null !== $args) {
-        $innerQueryBuilder->setArgument('args', $args);
-        }
-        return new \Dagger\Terminal($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
-    }
-
-    /**
      * The error stream of the last executed command.
      *
-     * Will execute default command if none is set, or error if there's no default.
+     * Returns an error if no command was set.
      */
     public function stderr(): string
     {
@@ -358,7 +369,7 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * The output stream of the last executed command.
      *
-     * Will execute default command if none is set, or error if there's no default.
+     * Returns an error if no command was set.
      */
     public function stdout(): string
     {
@@ -378,12 +389,61 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * Opens an interactive terminal for this container using its configured default terminal command if not overridden by args (or sh as a fallback default).
+     */
+    public function terminal(
+        ?array $cmd = null,
+        ?bool $experimentalPrivilegedNesting = false,
+        ?bool $insecureRootCapabilities = false,
+    ): Container {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('terminal');
+        if (null !== $cmd) {
+        $innerQueryBuilder->setArgument('cmd', $cmd);
+        }
+        if (null !== $experimentalPrivilegedNesting) {
+        $innerQueryBuilder->setArgument('experimentalPrivilegedNesting', $experimentalPrivilegedNesting);
+        }
+        if (null !== $insecureRootCapabilities) {
+        $innerQueryBuilder->setArgument('insecureRootCapabilities', $insecureRootCapabilities);
+        }
+        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Starts a Service and creates a tunnel that forwards traffic from the caller's network to that service.
+     *
+     * Be sure to set any exposed ports before calling this api.
+     */
+    public function up(?array $ports = null, ?bool $random = false): void
+    {
+        $leafQueryBuilder = new \Dagger\Client\QueryBuilder('up');
+        if (null !== $ports) {
+        $leafQueryBuilder->setArgument('ports', $ports);
+        }
+        if (null !== $random) {
+        $leafQueryBuilder->setArgument('random', $random);
+        }
+        $this->queryLeaf($leafQueryBuilder, 'up');
+    }
+
+    /**
      * Retrieves the user to be set for all commands.
      */
     public function user(): string
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('user');
         return (string)$this->queryLeaf($leafQueryBuilder, 'user');
+    }
+
+    /**
+     * Retrieves this container plus the given OCI anotation.
+     */
+    public function withAnnotation(string $name, string $value): Container
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withAnnotation');
+        $innerQueryBuilder->setArgument('name', $name);
+        $innerQueryBuilder->setArgument('value', $value);
+        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
@@ -397,12 +457,21 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * Set the default command to invoke for the "shell" API.
+     * Set the default command to invoke for the container's terminal API.
      */
-    public function withDefaultShell(array $args): Container
-    {
-        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withDefaultShell');
+    public function withDefaultTerminalCmd(
+        array $args,
+        ?bool $experimentalPrivilegedNesting = false,
+        ?bool $insecureRootCapabilities = false,
+    ): Container {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withDefaultTerminalCmd');
         $innerQueryBuilder->setArgument('args', $args);
+        if (null !== $experimentalPrivilegedNesting) {
+        $innerQueryBuilder->setArgument('experimentalPrivilegedNesting', $experimentalPrivilegedNesting);
+        }
+        if (null !== $insecureRootCapabilities) {
+        $innerQueryBuilder->setArgument('insecureRootCapabilities', $insecureRootCapabilities);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -415,8 +484,8 @@ class Container extends Client\AbstractObject implements Client\IdAble
         ?array $exclude = null,
         ?array $include = null,
         ?string $owner = '',
-    ): Container
-    {
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withDirectory');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('directory', $directory);
@@ -428,6 +497,9 @@ class Container extends Client\AbstractObject implements Client\IdAble
         }
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
         }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -464,18 +536,20 @@ class Container extends Client\AbstractObject implements Client\IdAble
      */
     public function withExec(
         array $args,
-        ?bool $skipEntrypoint = false,
+        ?bool $useEntrypoint = false,
         ?string $stdin = '',
         ?string $redirectStdout = '',
         ?string $redirectStderr = '',
+        ?ReturnType $expect = null,
         ?bool $experimentalPrivilegedNesting = false,
         ?bool $insecureRootCapabilities = false,
-    ): Container
-    {
+        ?bool $expand = false,
+        ?bool $noInit = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withExec');
         $innerQueryBuilder->setArgument('args', $args);
-        if (null !== $skipEntrypoint) {
-        $innerQueryBuilder->setArgument('skipEntrypoint', $skipEntrypoint);
+        if (null !== $useEntrypoint) {
+        $innerQueryBuilder->setArgument('useEntrypoint', $useEntrypoint);
         }
         if (null !== $stdin) {
         $innerQueryBuilder->setArgument('stdin', $stdin);
@@ -486,11 +560,20 @@ class Container extends Client\AbstractObject implements Client\IdAble
         if (null !== $redirectStderr) {
         $innerQueryBuilder->setArgument('redirectStderr', $redirectStderr);
         }
+        if (null !== $expect) {
+        $innerQueryBuilder->setArgument('expect', $expect);
+        }
         if (null !== $experimentalPrivilegedNesting) {
         $innerQueryBuilder->setArgument('experimentalPrivilegedNesting', $experimentalPrivilegedNesting);
         }
         if (null !== $insecureRootCapabilities) {
         $innerQueryBuilder->setArgument('insecureRootCapabilities', $insecureRootCapabilities);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
+        if (null !== $noInit) {
+        $innerQueryBuilder->setArgument('noInit', $noInit);
         }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -509,8 +592,7 @@ class Container extends Client\AbstractObject implements Client\IdAble
         ?NetworkProtocol $protocol = null,
         ?string $description = null,
         ?bool $experimentalSkipHealthcheck = false,
-    ): Container
-    {
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withExposedPort');
         $innerQueryBuilder->setArgument('port', $port);
         if (null !== $protocol) {
@@ -533,8 +615,8 @@ class Container extends Client\AbstractObject implements Client\IdAble
         FileId|File $source,
         ?int $permissions = null,
         ?string $owner = '',
-    ): Container
-    {
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withFile');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('source', $source);
@@ -544,15 +626,34 @@ class Container extends Client\AbstractObject implements Client\IdAble
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
         }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
-     * Indicate that subsequent operations should be featured more prominently in the UI.
+     * Retrieves this container plus the contents of the given files copied to the given path.
      */
-    public function withFocus(): Container
-    {
-        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withFocus');
+    public function withFiles(
+        string $path,
+        array $sources,
+        ?int $permissions = null,
+        ?string $owner = '',
+        ?bool $expand = false,
+    ): Container {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withFiles');
+        $innerQueryBuilder->setArgument('path', $path);
+        $innerQueryBuilder->setArgument('sources', $sources);
+        if (null !== $permissions) {
+        $innerQueryBuilder->setArgument('permissions', $permissions);
+        }
+        if (null !== $owner) {
+        $innerQueryBuilder->setArgument('owner', $owner);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -576,8 +677,8 @@ class Container extends Client\AbstractObject implements Client\IdAble
         DirectoryId|Directory|null $source = null,
         ?CacheSharingMode $sharing = null,
         ?string $owner = '',
-    ): Container
-    {
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withMountedCache');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('cache', $cache);
@@ -590,19 +691,29 @@ class Container extends Client\AbstractObject implements Client\IdAble
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
         }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
      * Retrieves this container plus a directory mounted at the given path.
      */
-    public function withMountedDirectory(string $path, DirectoryId|Directory $source, ?string $owner = ''): Container
-    {
+    public function withMountedDirectory(
+        string $path,
+        DirectoryId|Directory $source,
+        ?string $owner = '',
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withMountedDirectory');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('source', $source);
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
         }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -610,13 +721,20 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * Retrieves this container plus a file mounted at the given path.
      */
-    public function withMountedFile(string $path, FileId|File $source, ?string $owner = ''): Container
-    {
+    public function withMountedFile(
+        string $path,
+        FileId|File $source,
+        ?string $owner = '',
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withMountedFile');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('source', $source);
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
         }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -629,8 +747,8 @@ class Container extends Client\AbstractObject implements Client\IdAble
         SecretId|Secret $source,
         ?string $owner = '',
         ?int $mode = 256,
-    ): Container
-    {
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withMountedSecret');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('source', $source);
@@ -640,16 +758,25 @@ class Container extends Client\AbstractObject implements Client\IdAble
         if (null !== $mode) {
         $innerQueryBuilder->setArgument('mode', $mode);
         }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
     /**
-     * Retrieves this container plus a temporary directory mounted at the given path.
+     * Retrieves this container plus a temporary directory mounted at the given path. Any writes will be ephemeral to a single withExec call; they will not be persisted to subsequent withExecs.
      */
-    public function withMountedTemp(string $path): Container
+    public function withMountedTemp(string $path, ?int $size = null, ?bool $expand = false): Container
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withMountedTemp');
         $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $size) {
+        $innerQueryBuilder->setArgument('size', $size);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -658,21 +785,22 @@ class Container extends Client\AbstractObject implements Client\IdAble
      */
     public function withNewFile(
         string $path,
-        ?string $contents = '',
+        string $contents,
         ?int $permissions = 420,
         ?string $owner = '',
-    ): Container
-    {
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withNewFile');
         $innerQueryBuilder->setArgument('path', $path);
-        if (null !== $contents) {
         $innerQueryBuilder->setArgument('contents', $contents);
-        }
         if (null !== $permissions) {
         $innerQueryBuilder->setArgument('permissions', $permissions);
         }
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
         }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -730,13 +858,20 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * Retrieves this container plus a socket forwarded to the given Unix socket path.
      */
-    public function withUnixSocket(string $path, SocketId|Socket $source, ?string $owner = ''): Container
-    {
+    public function withUnixSocket(
+        string $path,
+        SocketId|Socket $source,
+        ?string $owner = '',
+        ?bool $expand = false,
+    ): Container {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withUnixSocket');
         $innerQueryBuilder->setArgument('path', $path);
         $innerQueryBuilder->setArgument('source', $source);
         if (null !== $owner) {
         $innerQueryBuilder->setArgument('owner', $owner);
+        }
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
         }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
@@ -754,10 +889,23 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * Retrieves this container with a different working directory.
      */
-    public function withWorkdir(string $path): Container
+    public function withWorkdir(string $path, ?bool $expand = false): Container
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withWorkdir');
         $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
+        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieves this container minus the given OCI annotation.
+     */
+    public function withoutAnnotation(string $name): Container
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutAnnotation');
+        $innerQueryBuilder->setArgument('name', $name);
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -767,6 +915,19 @@ class Container extends Client\AbstractObject implements Client\IdAble
     public function withoutDefaultArgs(): Container
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutDefaultArgs');
+        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieves this container with the directory at the given path removed.
+     */
+    public function withoutDirectory(string $path, ?bool $expand = false): Container
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutDirectory');
+        $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -806,13 +967,28 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
-     * Indicate that subsequent operations should not be featured more prominently in the UI.
-     *
-     * This is the initial state of all containers.
+     * Retrieves this container with the file at the given path removed.
      */
-    public function withoutFocus(): Container
+    public function withoutFile(string $path, ?bool $expand = false): Container
     {
-        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutFocus');
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutFile');
+        $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
+        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
+     * Retrieves this container with the files at the given paths removed.
+     */
+    public function withoutFiles(array $paths, ?bool $expand = false): Container
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutFiles');
+        $innerQueryBuilder->setArgument('paths', $paths);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -829,10 +1005,13 @@ class Container extends Client\AbstractObject implements Client\IdAble
     /**
      * Retrieves this container after unmounting everything at the given path.
      */
-    public function withoutMount(string $path): Container
+    public function withoutMount(string $path, ?bool $expand = false): Container
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutMount');
         $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 
@@ -847,12 +1026,25 @@ class Container extends Client\AbstractObject implements Client\IdAble
     }
 
     /**
+     * Retrieves this container minus the given environment variable containing the secret.
+     */
+    public function withoutSecretVariable(string $name): Container
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutSecretVariable');
+        $innerQueryBuilder->setArgument('name', $name);
+        return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
+    }
+
+    /**
      * Retrieves this container with a previously added Unix socket removed.
      */
-    public function withoutUnixSocket(string $path): Container
+    public function withoutUnixSocket(string $path, ?bool $expand = false): Container
     {
         $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withoutUnixSocket');
         $innerQueryBuilder->setArgument('path', $path);
+        if (null !== $expand) {
+        $innerQueryBuilder->setArgument('expand', $expand);
+        }
         return new \Dagger\Container($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 

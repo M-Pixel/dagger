@@ -178,23 +178,21 @@ class ExecError(QueryError):
         self.stderr = ext["stderr"]
 
     def __str__(self):
-        """Prints the error message with stdout and stderr."""
-        # As a default when just printing the error, include the stdout
-        # and stderr for visibility
-        return f"{self.message}\nStdout:\n{self.stdout}\nStderr:\n{self.stderr}"
+        """Prints the original error message."""
+        return self.message
 
 
 __all__ = [
-    "VersionMismatch",
-    "DaggerError",
-    "ProvisionError",
-    "DownloadError",
-    "SessionError",
-    "ClientError",
     "ClientConnectionError",
-    "TransportError",
+    "ClientError",
+    "DaggerError",
+    "DownloadError",
+    "ExecError",
     "ExecuteTimeoutError",
     "InvalidQueryError",
+    "ProvisionError",
     "QueryError",
-    "ExecError",
+    "SessionError",
+    "TransportError",
+    "VersionMismatch",
 ]

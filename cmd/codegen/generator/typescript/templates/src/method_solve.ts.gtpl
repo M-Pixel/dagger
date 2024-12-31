@@ -27,12 +27,16 @@
 	{{- end }}
 
 	{{- /* Write return type */ -}}
-	{{- "" }}): Promise<{{ . | FormatReturnType }}> => {
+	{{- "" }}): Promise<{{ if .TypeRef.IsVoid }}void{{ else }}{{ . | FormatReturnType }}{{ end }}> => {
 
     {{- /* If it's a scalar, make possible to return its already filled value */ -}}
     {{- if and (.TypeRef.IsScalar) (ne .ParentObject.Name "Query") (not $convertID) }}
     if (this._{{ .Name }}) {
+        {{- if .TypeRef.IsVoid }}
+      return
+        {{- else }}
       return this._{{ .Name }}
+        {{- end }}
     }
 {{ "" }}
     {{- end }}
@@ -52,7 +56,7 @@
 
 	{{- $enums := GetEnumValues .Args }}
 	{{- if gt (len $enums) 0 }}
-	const metadata: Metadata = {
+	const metadata = {
 	    {{- range $v := $enums }}
 	    {{ $v.Name | FormatName -}}: { is_enum: true },
 	    {{- end }}
@@ -62,51 +66,50 @@
 	{{- end }}
 
 	{{- if .TypeRef }}
-    {{ if not $convertID }}const response: Awaited<{{ $promiseRetType }}> = {{ end }}await computeQuery(
-      [
-        ...this._queryTree,
-        {
-          operation: "{{ .Name }}",
-
-		{{- /* Insert arguments. */ -}}
+    const ctx = this._ctx.select(
+      "{{ .Name }}",
+      {{- /* Insert arguments. */ -}}
 		{{- if or $required $optionals }}
-          args: { {{""}}
+      { {{""}}
       		{{- with $required }}
 				{{- template "call_args" $required }}
 			{{- end }}
 
       		{{- with $optionals }}
       			{{- if $required }}, {{ end }}
-				{{- "" }}...opts{{- if gt (len $enums) 0 -}}, __metadata: metadata{{- end -}}
+				{{- "" }}...opts
 			{{- end }}
-{{- "" }} },
+      {{- if gt (len $enums) 0 -}}, __metadata: metadata{{- end -}}
+{{- "" }}},
 		{{- end }}
-        },
-        {{- /* Add subfields */ -}}
-        {{- if and .TypeRef.IsList (IsListOfObject .TypeRef) }}
-        {
-          operation: "{{- range $i, $v := . | GetArrayField }}{{if $i }} {{ end }}{{ $v.Name | ToLowerCase }}{{- end }}"
-        },
-        {{- end }}
-      ],
-      await this._ctx.connection()
-    )
+    ){{- /* Add subfields */ -}}
+      {{- if and .TypeRef.IsList (IsListOfObject .TypeRef) }}.select("{{- range $i, $v := . | GetArrayField }}{{if $i }} {{ end }}{{ $v.Name | ToLowerCase }}{{- end }}")
+      {{- end }}
+
+    {{ if not .TypeRef.IsVoid }}const response: Awaited<{{ if $convertID }}{{ .TypeRef | FormatOutputType }}{{ else }}{{ $promiseRetType }}{{ end }}> = {{ end }}await ctx.execute()
 
     {{ if $convertID -}}
-    return this
-    {{- else -}}
+    return new {{ $promiseRetType }}(new Context(
+      [
+        {
+          operation: "load{{ $promiseRetType }}FromID",
+          args: { id: response },
+        },
+      ],
+      this._ctx.getConnection(),
+    ))
+    {{- else if not .TypeRef.IsVoid -}}
         {{- if and .TypeRef.IsList (IsListOfObject .TypeRef) }}
     return response.map(
-      (r) => new {{ . | FormatReturnType | ToSingleType }}(
-      {
-        queryTree: [
+      (r) => new {{ . | FormatReturnType | ToSingleType }}(new Context(
+        [
           {
             operation: "load{{. | FormatReturnType | ToSingleType}}FromID",
             args: { id: r.id }
           }
         ],
-        ctx: this._ctx
-      },
+        this._ctx.getConnection()
+      ),
         {{- range $v := . | GetArrayField }}
         r.{{ $v.Name | ToLowerCase }},
         {{- end }}

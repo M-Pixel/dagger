@@ -83,7 +83,7 @@ uname_arch() {
     armv6*) arch="armv6" ;;
     armv7*) arch="armv7" ;;
   esac
-  echo ${arch}
+  echo "${arch}"
 }
 uname_os_check() {
   os=$(uname_os)
@@ -235,58 +235,79 @@ End of functions from https://github.com/client9/shlib
 ------------------------------------------------------------------------
 EOF
 
-uname_os() {
-  os=$(uname -s | tr '[:upper:]' '[:lower:]')
-  case "$os" in
-    cygwin_nt*) os="windows" ;;
-    mingw*) os="windows" ;;
-    msys_nt*) os="windows" ;;
-  esac
-  echo "$os"
-}
+help() {
+  cat <<EOF
+Usage: $0
 
-uname_arch() {
-  arch=$(uname -m)
-  case $arch in
-    x86_64) arch="amd64" ;;
-    x86) arch="386" ;;
-    i686) arch="386" ;;
-    i386) arch="386" ;;
-    aarch64) arch="arm64" ;;
-    armv5*) arch="armv5" ;;
-    armv6*) arch="armv6" ;;
-    armv7*) arch="armv7" ;;
-  esac
-  echo "$arch"
+Install:
+  $0
+
+Install to <path/to/dir>:
+  BIN_DIR=<path/to/dir> $0
+
+Install specified version <vX.Y.Z>:
+  DAGGER_VERSION=<vX.Y.Z> $0
+
+Install latest dev build:
+  DAGGER_COMMIT=head $0
+Install specified dev build <commit sha>:
+  DAGGER_COMMIT=<commit sha> $0
+EOF
 }
 
 latest_version() {
-    curl -sfL "${base}/${name}/latest_version"
+  curl -sfL "${base}/${name}/latest_version"
 }
 
 base_url() {
-    os="$(uname_os)"
-    arch="$(uname_arch)"
-    version="${DAGGER_VERSION:-$(latest_version)}"
-    url="${base}/${name}/releases/${version}"
-    echo "$url"
+  os="$(uname_os)"
+  arch="$(uname_arch)"
+  if [ -n "$DAGGER_COMMIT" ]; then
+    path="main/${DAGGER_COMMIT}"
+  elif [ -n "$DAGGER_VERSION" ] && [ "$DAGGER_VERSION" != "latest" ]; then
+    path="releases/${DAGGER_VERSION}"
+  else
+    path="releases/$(latest_version)"
+  fi
+  url="${base}/${name}/${path}"
+  echo "$url"
 }
 
 tarball() {
-    os="$(uname_os)"
-    arch="$(uname_arch)"
-    version="${DAGGER_VERSION:-$(latest_version)}"
-    name="${name}_v${version}_${os}_${arch}"
-    if [ "$os" = "windows" ]; then
-        name="${name}.zip"
-    else
-        name="${name}.tar.gz"
-    fi
-    echo "$name"
+  os="$(uname_os)"
+  arch="$(uname_arch)"
+  if [ -n "$DAGGER_COMMIT" ]; then
+    version="${DAGGER_COMMIT}"
+  elif [ -n "$DAGGER_VERSION" ] && [ "$DAGGER_VERSION" != "latest" ]; then
+    version="v${DAGGER_VERSION}"
+  else
+    version="v$(latest_version)"
+  fi
+  name="${name}_${version}_${os}_${arch}"
+  if [ "$os" = "windows" ]; then
+    name="${name}.zip"
+  else
+    name="${name}.tar.gz"
+  fi
+  echo "$name"
 }
 
 install_shell_completion() {
-    echo "
+  # don't prompt shell completion installations in CI
+  if [ -n "$CI" ]; then
+    # GitHub Actions, Travis CI, CircleCI, Cirrus CI, GitLab CI, AppVeyor, CodeShip, dsari
+    return 0
+  fi
+  if [ -n "$BUILD_NUMBER" ]; then
+    # Jenkins, TeamCity
+    return 0
+  fi
+  if [ -n "$RUN_ID" ]; then
+    # TaskCluster, dsari
+    return 0
+  fi
+
+  echo "
 ${binexe} has built-in shell completion. This is how you can install it for:
 
   BASH:
@@ -295,8 +316,8 @@ ${binexe} has built-in shell completion. This is how you can install it for:
 
     2. Add dagger completion to your personal bash completions dir
 
-      mkdir -p $XDG_DATA_HOME/bash-completion/completions
-      ${binexe} completion bash > $XDG_DATA_HOME/bash-completion/completions/dagger
+      mkdir -p ${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions
+      ${binexe} completion bash > ${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/dagger
 
   ZSH:
 
@@ -316,31 +337,41 @@ ${binexe} has built-in shell completion. This is how you can install it for:
     1. Generate a dagger.fish completion script and write it to a file within fish completions, e.g.:
 
       ${binexe} completion fish > ~/.config/fish/completions/dagger.fish
-    "
+  "
+}
+
+clean_install_version() {
+  DAGGER_VERSION=$(echo "$DAGGER_VERSION" | sed -E 's/^v+//g')
 }
 
 execute() {
-    base_url="$(base_url)"
-    tarball="$(tarball)"
-    tarball_url="${base_url}/${tarball}"
-    checksum="checksums.txt"
-    checksum_url="${base_url}/${checksum}"
-    bin_dir="${BIN_DIR:-./bin}"
-    binexe="dagger"
+  clean_install_version
+  base_url="$(base_url)"
+  tarball="$(tarball)"
+  tarball_url="${base_url}/${tarball}"
+  checksum="checksums.txt"
+  checksum_url="${base_url}/${checksum}"
+  bin_dir="${BIN_DIR:-./bin}"
+  binexe="dagger"
 
-    tmpdir=$(mktemp -d)
-    log_debug "downloading files into ${tmpdir}"
-    http_download "${tmpdir}/${tarball}" "${tarball_url}"
-    http_download "${tmpdir}/${checksum}" "${checksum_url}"
-    hash_sha256_verify "${tmpdir}/${tarball}" "${tmpdir}/${checksum}"
-    srcdir="${tmpdir}"
-    (cd "${tmpdir}" && untar "${tarball}")
-    test ! -d "${bin_dir}" && install -d "${bin_dir}"
-    install "${srcdir}/${binexe}" "${bin_dir}"
-    log_debug "display shell completion instructions"
-    install_shell_completion
-    log_info "installed ${bin_dir}/${binexe}"
-    rm -rf "${tmpdir}"
+  tmpdir=$(mktemp -d)
+  log_debug "downloading files into ${tmpdir}"
+  http_download "${tmpdir}/${tarball}" "${tarball_url}"
+  http_download "${tmpdir}/${checksum}" "${checksum_url}"
+  hash_sha256_verify "${tmpdir}/${tarball}" "${tmpdir}/${checksum}"
+  srcdir="${tmpdir}"
+  (cd "${tmpdir}" && untar "${tarball}")
+  test ! -d "${bin_dir}" && install -d "${bin_dir}"
+  install "${srcdir}/${binexe}" "${bin_dir}"
+  log_debug "display shell completion instructions"
+  install_shell_completion
+  log_info "installed ${bin_dir}/${binexe}"
+  rm -rf "${tmpdir}"
 }
 
-execute
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+  help
+else
+  execute
+fi
+

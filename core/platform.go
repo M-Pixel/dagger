@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/containerd/containerd/platforms"
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
+	"github.com/containerd/platforms"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
 )
 
 type Platform specs.Platform
@@ -46,12 +47,8 @@ func (p Platform) Decoder() dagql.InputDecoder {
 	return p
 }
 
-func (p Platform) ToLiteral() *idproto.Literal {
-	return &idproto.Literal{
-		Value: &idproto.Literal_String_{
-			String_: platforms.Format(specs.Platform(p)),
-		},
-	}
+func (p Platform) ToLiteral() call.Literal {
+	return call.NewLiteralString(platforms.Format(specs.Platform(p)))
 }
 
 var _ dagql.ScalarType = Platform{}

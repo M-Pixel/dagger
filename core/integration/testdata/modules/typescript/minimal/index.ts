@@ -1,53 +1,73 @@
-import { dag, object, func } from "@dagger.io/dagger"
+import { object, func } from "@dagger.io/dagger";
 
-@object
-class Minimal {
-	@func
-	hello(): string {
-		return "hello"
-	}
+/**
+ * This is the Minimal object
+ */
+@object()
+export class Minimal {
+  /**
+   * This is a field
+   */
+  @func()
+  foo: string = "bar";
 
-	@func
-	echo(msg: string): string {
-		return this.echoOpts(msg, "...", 3)
-	}
+  @func()
+  hello(): string {
+    return "hello";
+  }
 
-	@func
-	echoOpts(msg: string, suffix: string = "", times: number = 1): string {
-		msg = msg += suffix
+  @func()
+  echo(msg: string): string {
+    return this.echoOpts(msg, "...", 3);
+  }
 
-		return msg.repeat(times)
-	}
+  /**
+   * EchoOpts does some opts things
+   *
+   * @param msg the message to echo
+   * @param suffix String to append to the echoed message
+   * @param times number of times to repeat the message
+   */
+  @func()
+  echoOpts(msg: string, suffix: string = "", times: number = 1): string {
+    msg = msg += suffix;
 
-	@func
-	echoMaybe(msg: string, isQuestion = false): string {
-		if (isQuestion) {
-			return this.echo(msg + "?")
-		}
+    return msg.repeat(times);
+  }
 
-		return this.echo(msg)
-	}
+  /**
+   * @param msg the message to echo
+   * @param isQuestion set to true to add a question mark.
+   */
+  @func()
+  echoMaybe(msg: string, isQuestion = false): string {
+    if (isQuestion) {
+      return this.echo(msg + "?");
+    }
 
-	@func
-	echoOptional(msg = "default"): string {
-		return this.echo(msg)
-	}
+    return this.echo(msg);
+  }
 
-	@func
-	echoOptionalSlice(msg = ["foobar"]): string {
-		return this.echo(msg.join("+"))
-	}
+  @func()
+  echoOptional(msg: string = "default"): string {
+    return this.echo(msg);
+  }
 
-	@func
-	echoes(msgs: string[]): string[] {
-		return [this.echo(msgs.join(" "))]
-	}
+  @func()
+  echoOptionalSlice(msg: string[] = ["foobar"]): string {
+    return this.echo(msg.join("+"));
+  }
 
-	@func
-	echoesVariadic(...msgs: string[]): string {
-		return this.echo(msgs.join(" "))
-	}
+  @func()
+  echoes(msgs: string[]): string[] {
+    return [this.echo(msgs.join(" "))];
+  }
 
-	@func
-	helloVoid(): void {}
+  @func()
+  echoesVariadic(...msgs: string[]): string {
+    return this.echo(msgs.join(" "));
+  }
+
+  @func()
+  helloVoid(): void {}
 }

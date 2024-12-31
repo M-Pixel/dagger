@@ -10,40 +10,79 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strings"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
-	"dagger.io/dagger"
-	"github.com/dagger/dagger/core"
-	"github.com/dagger/dagger/internal/testutil"
 	"github.com/moby/buildkit/identity"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
+
+	"dagger.io/dagger"
+	"dagger.io/dagger/telemetry"
+	"github.com/dagger/dagger/core"
+	"github.com/dagger/dagger/internal/testutil"
+	"github.com/dagger/dagger/testctx"
 )
 
-func connect(t testing.TB, opts ...dagger.ClientOpt) (*dagger.Client, context.Context) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
+var testCtx = context.Background()
 
+func TestMain(m *testing.M) {
+	// Preserve original SSH_AUTH_SOCK value and
+	// Ensure SSH_AUTH_SOCK does not pollute tests state
+	origAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	os.Unsetenv("SSH_AUTH_SOCK")
+
+	testCtx = telemetry.InitEmbedded(testCtx, nil)
+	res := m.Run()
+	telemetry.Close()
+
+	if origAuthSock != "" {
+		os.Setenv("SSH_AUTH_SOCK", origAuthSock)
+	}
+	os.Exit(res)
+}
+
+const InstrumentationLibrary = "dagger.io/integration"
+
+func Tracer() trace.Tracer {
+	return otel.Tracer(InstrumentationLibrary)
+}
+
+func Logger() log.Logger {
+	return telemetry.Logger(testCtx, InstrumentationLibrary)
+}
+
+func Middleware() []testctx.Middleware {
+	return []testctx.Middleware{
+		testctx.WithParallel,
+		testctx.WithOTelLogging(Logger()),
+		testctx.WithOTelTracing(Tracer()),
+	}
+}
+
+func connect(ctx context.Context, t *testctx.T, opts ...dagger.ClientOpt) *dagger.Client {
 	opts = append([]dagger.ClientOpt{
-		dagger.WithLogOutput(newTWriter(t)),
+		dagger.WithLogOutput(testutil.NewTWriter(t.T)),
 	}, opts...)
-
 	client, err := dagger.Connect(ctx, opts...)
 	require.NoError(t, err)
 	t.Cleanup(func() { client.Close() })
-
-	return client, ctx
+	return client
 }
 
-func newCache(t testing.TB) core.CacheVolumeID {
+func newCache(t *testctx.T) core.CacheVolumeID {
 	var res struct {
 		CacheVolume struct {
 			ID core.CacheVolumeID
 		}
 	}
 
-	err := testutil.Query(`
+	err := testutil.Query(t, `
 		query CreateCache($key: String!) {
 			cacheVolume(key: $key) {
 				id
@@ -57,7 +96,7 @@ func newCache(t testing.TB) core.CacheVolumeID {
 	return res.CacheVolume.ID
 }
 
-func newDirWithFile(t testing.TB, path, contents string) core.DirectoryID {
+func newDirWithFile(t *testctx.T, path, contents string) core.DirectoryID {
 	dirRes := struct {
 		Directory struct {
 			WithNewFile struct {
@@ -66,7 +105,7 @@ func newDirWithFile(t testing.TB, path, contents string) core.DirectoryID {
 		}
 	}{}
 
-	err := testutil.Query(
+	err := testutil.Query(t,
 		`query Test($path: String!, $contents: String!) {
 			directory {
 				withNewFile(path: $path, contents: $contents) {
@@ -82,7 +121,7 @@ func newDirWithFile(t testing.TB, path, contents string) core.DirectoryID {
 	return dirRes.Directory.WithNewFile.ID
 }
 
-func newFile(t testing.TB, path, contents string) core.FileID {
+func newFile(t *testctx.T, path, contents string) core.FileID {
 	var secretRes struct {
 		Directory struct {
 			WithNewFile struct {
@@ -93,7 +132,7 @@ func newFile(t testing.TB, path, contents string) core.FileID {
 		}
 	}
 
-	err := testutil.Query(
+	err := testutil.Query(t,
 		`query Test($path: String!, $contents: String!) {
 			directory {
 				withNewFile(path: $path, contents: $contents) {
@@ -206,9 +245,31 @@ func daggerCliPath(t testing.TB) string {
 	return cliPath
 }
 
+func daggerLinuxCliPath(t testing.TB) string {
+	if runtime.GOOS == "linux" {
+		return daggerCliPath(t)
+	}
+	cliPath := os.Getenv("_TEST_DAGGER_CLI_LINUX_BIN")
+	if cliPath == "" {
+		t.Log("missing _TEST_DAGGER_CLI_LINUX_BIN")
+		t.FailNow()
+	}
+	return cliPath
+}
+
 func daggerCliFile(t testing.TB, c *dagger.Client) *dagger.File {
+	// This loads the dagger-cli binary from the host into the container, that
+	// was set up by the test caller. This is used to communicate with the dev
+	// engine.
 	t.Helper()
-	return c.Host().File(daggerCliPath(t))
+	return c.Host().File(daggerLinuxCliPath(t))
+}
+
+func daggerCliBase(t testing.TB, c *dagger.Client) *dagger.Container {
+	t.Helper()
+	return c.Container().From(golangImage).
+		WithMountedFile(testCLIBinPath, daggerCliFile(t, c)).
+		WithWorkdir("/work")
 }
 
 const testCLIBinPath = "/bin/dagger"
@@ -221,53 +282,6 @@ func goCache(c *dagger.Client) dagger.WithContainerFunc {
 			WithMountedCache("/go/build-cache", c.CacheVolume("go-build")).
 			WithEnvVariable("GOCACHE", "/go/build-cache")
 	}
-}
-
-// tWriter is a writer that writes to testing.T
-type tWriter struct {
-	t   testing.TB
-	buf bytes.Buffer
-	mu  sync.Mutex
-}
-
-// newTWriter creates a new TWriter
-func newTWriter(t testing.TB) *tWriter {
-	tw := &tWriter{t: t}
-	t.Cleanup(tw.flush)
-	return tw
-}
-
-// Write writes data to the testing.T
-func (tw *tWriter) Write(p []byte) (n int, err error) {
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
-
-	tw.t.Helper()
-
-	if n, err = tw.buf.Write(p); err != nil {
-		return n, err
-	}
-
-	for {
-		line, err := tw.buf.ReadBytes('\n')
-		if err == io.EOF {
-			// If we've reached the end of the buffer, write it back, because it doesn't have a newline
-			tw.buf.Write(line)
-			break
-		}
-		if err != nil {
-			return n, err
-		}
-
-		tw.t.Log(strings.TrimSuffix(string(line), "\n"))
-	}
-	return n, nil
-}
-
-func (tw *tWriter) flush() {
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
-	tw.t.Log(tw.buf.String())
 }
 
 type safeBuffer struct {
@@ -285,4 +299,84 @@ func (s *safeBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.bu.String()
+}
+
+func limitTicker(interval time.Duration, limit int) <-chan time.Time {
+	ch := make(chan time.Time, limit)
+	ticker := time.NewTicker(interval)
+	go func() {
+		defer ticker.Stop()
+		defer close(ch)
+		for i := 0; i < limit; i++ {
+			ch <- <-ticker.C
+		}
+	}()
+	return ch
+}
+
+// ensure the cache mount doesn't get pruned in the middle of the test by having a container
+// run throughout with the cache mounted
+func preventCacheMountPrune(ctx context.Context, t *testctx.T, c *dagger.Client, cache *dagger.CacheVolume, opts ...dagger.ContainerWithMountedCacheOpts) func() error {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(ctx)
+	cancelErr := errors.New("test done")
+	t.Cleanup(func() {
+		cancel(cancelErr)
+	})
+	defer cancel(cancelErr)
+	var eg errgroup.Group
+	eg.Go(func() error {
+		_, err := c.Container().
+			From(alpineImage).
+			WithMountedCache("/cache", cache, opts...).
+			WithExec([]string{"sh", "-c", "sleep 9999"}).
+			Sync(ctx)
+		if errors.Is(err, cancelErr) {
+			return nil
+		}
+		return err
+	})
+
+	return func() error {
+		cancel(cancelErr)
+		return eg.Wait()
+	}
+}
+
+// requireErrOut is the same as require.ErrorContains, except it also looks in
+// the Stdout/Stderr of a *dagger.ExecErr, since that's something we do a lot
+// in tests.
+//
+// TODO: A better alternative might be to record the log output and assert
+// against what the user sees there, but that's a bigger lift.
+func requireErrOut(t *testctx.T, err error, out string) {
+	var execErr *dagger.ExecError
+	if errors.As(err, &execErr) {
+		require.Contains(
+			t,
+			fmt.Sprintf("%s\nStdout: %s\nStderr: %s", err, execErr.Stdout, execErr.Stderr),
+			out,
+		)
+		return
+	}
+	require.ErrorContains(t, err, out)
+}
+
+// requireErrRegexp is the same as require.Regexp against err.Error(), except
+// it also looks in the Stdout/Stderr of a *dagger.ExecErr, since that's
+// something we do a lot in tests.
+//
+// TODO: A better alternative might be to record the log output and assert
+// against what the user sees there, but that's a bigger lift.
+func requireErrRegexp(t *testctx.T, err error, re string) {
+	var execErr *dagger.ExecError
+	if errors.As(err, &execErr) {
+		require.Regexp(
+			t,
+			re,
+			fmt.Sprintf("%s\nStdout: %s\nStderr: %s", err, execErr.Stdout, execErr.Stderr),
+		)
+		return
+	}
+	require.Regexp(t, re, err.Error())
 }

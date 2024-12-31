@@ -6,22 +6,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/99designs/gqlgen/client"
 	"github.com/99designs/gqlgen/graphql/handler"
-	"github.com/dagger/dagger/dagql"
-	"github.com/dagger/dagger/dagql/idproto"
-	"github.com/dagger/dagger/dagql/internal/pipes"
-	"github.com/dagger/dagger/dagql/internal/points"
-	"github.com/dagger/dagger/dagql/introspection"
+	"github.com/stretchr/testify/require"
 	"github.com/vektah/gqlparser/v2/ast"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 	"gotest.tools/v3/golden"
+
+	"github.com/dagger/dagger/dagql"
+	"github.com/dagger/dagger/dagql/call"
+	"github.com/dagger/dagger/dagql/internal/pipes"
+	"github.com/dagger/dagger/dagql/internal/points"
+	"github.com/dagger/dagger/dagql/introspection"
+	"github.com/dagger/dagger/engine/slog"
 )
 
 var logs = new(bytes.Buffer)
@@ -49,6 +51,12 @@ func req(t *testing.T, gql *client.Client, query string, res any) {
 	t.Helper()
 	err := gql.Post(query, res)
 	assert.NilError(t, err)
+}
+
+func reqFail(t *testing.T, gql *client.Client, query string, substring string) {
+	t.Helper()
+	err := gql.Post(query, &struct{}{})
+	assert.ErrorContains(t, err, substring)
 }
 
 func TestBasic(t *testing.T) {
@@ -92,27 +100,27 @@ func TestBasic(t *testing.T) {
 	}`, &res)
 
 	pointT := (&points.Point{}).Type()
-	expectedID := idproto.New().
-		Append(
-			pointT,
-			"point",
-			&idproto.Argument{
-				Name:  "x",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 6}},
-			},
-			&idproto.Argument{
-				Name:  "y",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 7}},
-			},
+	expectedID := call.New().
+		Append(pointT, "point", "", nil, false, 0,
+			call.NewArgument(
+				"x",
+				call.NewLiteralInt(6),
+			),
+			call.NewArgument(
+				"y",
+				call.NewLiteralInt(7),
+			),
 		).
-		Append(pointT, "shiftLeft")
+		Append(pointT, "shiftLeft", "", nil, false, 0)
 	expectedEnc, err := dagql.NewID[*points.Point](expectedID).Encode()
 	assert.NilError(t, err)
 	assert.Equal(t, 6, res.Point.X)
 	assert.Equal(t, 7, res.Point.Y)
 	assert.Equal(t, 5, res.Point.ShiftLeft.Ecks)
 	assert.Equal(t, 7, res.Point.ShiftLeft.Why)
+
 	assert.Equal(t, expectedEnc, res.Point.ShiftLeft.ID)
+
 	assert.Assert(t, cmp.Len(res.Point.ShiftLeft.Neighbors, 4))
 	assert.Equal(t, 4, res.Point.ShiftLeft.Neighbors[0].X)
 	assert.Equal(t, 7, res.Point.ShiftLeft.Neighbors[0].Y)
@@ -557,20 +565,18 @@ func TestIDsReflectQuery(t *testing.T) {
 	}`, &res)
 
 	pointT := (&points.Point{}).Type()
-	expectedID := idproto.New().
-		Append(
-			pointT,
-			"point",
-			&idproto.Argument{
-				Name:  "x",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 6}},
-			},
-			&idproto.Argument{
-				Name:  "y",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 7}},
-			},
+	expectedID := call.New().
+		Append(pointT, "point", "", nil, false, 0,
+			call.NewArgument(
+				"x",
+				call.NewLiteralInt(6),
+			),
+			call.NewArgument(
+				"y",
+				call.NewLiteralInt(7),
+			),
 		).
-		Append(pointT, "shiftLeft")
+		Append(pointT, "shiftLeft", "", nil, false, 0)
 	expectedEnc, err := dagql.NewID[*points.Point](expectedID).Encode()
 	assert.NilError(t, err)
 	eqIDs(t, res.Point.ShiftLeft.ID, expectedEnc)
@@ -657,60 +663,56 @@ func TestIDsDoNotContainSensitiveValues(t *testing.T) {
 	}`, &res)
 
 	pointT := (&points.Point{}).Type()
-	expectedID := idproto.New().
-		Append(
-			pointT,
-			"point",
-			&idproto.Argument{
-				Name:  "x",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 6}},
-			},
-			&idproto.Argument{
-				Name:  "y",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 7}},
-			},
+	expectedID := call.New().
+		Append(pointT, "point", "", nil, false, 0,
+			call.NewArgument(
+				"x",
+				call.NewLiteralInt(6),
+			),
+			call.NewArgument(
+				"y",
+				call.NewLiteralInt(7),
+			),
 		).
-		Append(pointT, "loginTag")
+		Append(pointT, "loginTag", "", nil, false, 0)
+
 	expectedEnc, err := dagql.NewID[*points.Point](expectedID).Encode()
 	assert.NilError(t, err)
-
 	eqIDs(t, res.Point.LoginTag.ID, expectedEnc)
-	expectedID = idproto.New().
-		Append(
-			pointT,
-			"point",
-			&idproto.Argument{
-				Name:  "x",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 6}},
-			},
-			&idproto.Argument{
-				Name:  "y",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 7}},
-			},
+
+	expectedID = call.New().
+		Append(pointT, "point", "", nil, false, 0,
+			call.NewArgument(
+				"x",
+				call.NewLiteralInt(6),
+			),
+			call.NewArgument(
+				"y",
+				call.NewLiteralInt(7),
+			),
 		).
-		Append(pointT, "loginChain")
+		Append(pointT, "loginChain", "", nil, false, 0)
+
 	expectedEnc, err = dagql.NewID[*points.Point](expectedID).Encode()
 	assert.NilError(t, err)
 	eqIDs(t, res.Point.LoginChain.ID, expectedEnc)
 
-	expectedID = idproto.New().
-		Append(
-			pointT,
-			"point",
-			&idproto.Argument{
-				Name:  "x",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 6}},
-			},
-			&idproto.Argument{
-				Name:  "y",
-				Value: &idproto.Literal{Value: &idproto.Literal_Int{Int: 7}},
-			},
+	expectedID = call.New().
+		Append(pointT, "point", "", nil, false, 0,
+			call.NewArgument(
+				"x",
+				call.NewLiteralInt(6),
+			),
+			call.NewArgument(
+				"y",
+				call.NewLiteralInt(7),
+			),
 		).
-		Append(pointT, "loginTagFalse",
-			&idproto.Argument{
-				Name:  "password",
-				Value: &idproto.Literal{Value: &idproto.Literal_String_{String_: "hunter2"}},
-			},
+		Append(pointT, "loginTagFalse", "", nil, false, 0,
+			call.NewArgument(
+				"password",
+				call.NewLiteralString("hunter2"),
+			),
 		)
 	expectedEnc, err = dagql.NewID[*points.Point](expectedID).Encode()
 	assert.NilError(t, err)
@@ -837,12 +839,110 @@ func TestImpureIDsReEvaluate(t *testing.T) {
 			y
 		}
 	}`, &loaded)
-
 	assert.Equal(t, loaded.LoadPointFromID.ID, res.Point.Snitch.ID)
 	assert.Equal(t, loaded.LoadPointFromID.X, 6)
 	assert.Equal(t, loaded.LoadPointFromID.Y, 7)
 
 	assert.Equal(t, called, 2)
+}
+
+func TestPurityOverride(t *testing.T) {
+	srv := dagql.NewServer(Query{})
+	points.Install[Query](srv)
+
+	calls := map[string]int{}
+	dagql.Fields[*points.Point]{
+		dagql.Func("snitch", func(ctx context.Context, self *points.Point, args struct {
+			Key string `default:""`
+		}) (*points.Point, error) {
+			calls[args.Key]++
+			return self, nil
+		}).Impure("Increments internal state on each call."),
+	}.Install(srv)
+
+	ctx := context.Background()
+
+	var point dagql.Instance[*points.Point]
+	assert.NilError(t, srv.Select(ctx, srv.Root(), &point, dagql.Selector{
+		Field: "point",
+		Args: []dagql.NamedInput{
+			{
+				Name:  "x",
+				Value: dagql.NewInt(6),
+			},
+			{
+				Name:  "y",
+				Value: dagql.NewInt(7),
+			},
+		},
+	}))
+
+	t.Run("is not cached when called normally", func(t *testing.T) {
+		var id dagql.ID[*points.Point]
+		assert.NilError(t, srv.Select(ctx, point, &id, dagql.Selector{
+			Field: "snitch",
+		}, dagql.Selector{
+			Field: "id",
+		}))
+		assert.Equal(t, true, id.ID().IsTainted())
+		assert.DeepEqual(t, map[string]int{"": 1}, calls)
+
+		assert.NilError(t, srv.Select(ctx, point, &id, dagql.Selector{
+			Field: "snitch",
+		}, dagql.Selector{
+			Field: "id",
+		}))
+		assert.Equal(t, true, id.ID().IsTainted())
+		assert.DeepEqual(t, map[string]int{"": 2}, calls)
+	})
+
+	t.Run("becomes cached with Pure: true", func(t *testing.T) {
+		var id dagql.ID[*points.Point]
+		assert.NilError(t, srv.Select(ctx, point, &id, dagql.Selector{
+			Field: "snitch",
+			Pure:  true,
+			Args: []dagql.NamedInput{
+				{
+					Name:  "key",
+					Value: dagql.NewString("a"),
+				},
+			},
+		}, dagql.Selector{
+			Field: "id",
+		}))
+		assert.Equal(t, false, id.ID().IsTainted())
+		assert.DeepEqual(t, map[string]int{"": 2, "a": 1}, calls)
+
+		assert.NilError(t, srv.Select(ctx, point, &id, dagql.Selector{
+			Field: "snitch",
+			Pure:  true,
+			Args: []dagql.NamedInput{
+				{
+					Name:  "key",
+					Value: dagql.NewString("a"),
+				},
+			},
+		}, dagql.Selector{
+			Field: "id",
+		}))
+		assert.Equal(t, false, id.ID().IsTainted())
+		assert.DeepEqual(t, map[string]int{"": 2, "a": 1}, calls)
+
+		assert.NilError(t, srv.Select(ctx, point, &id, dagql.Selector{
+			Field: "snitch",
+			Pure:  true,
+			Args: []dagql.NamedInput{
+				{
+					Name:  "key",
+					Value: dagql.NewString("b"),
+				},
+			},
+		}, dagql.Selector{
+			Field: "id",
+		}))
+		assert.Equal(t, false, id.ID().IsTainted())
+		assert.DeepEqual(t, map[string]int{"": 2, "a": 1, "b": 1}, calls)
+	})
 }
 
 func TestPassingObjectsAround(t *testing.T) {
@@ -1125,7 +1225,7 @@ func TestInputObjects(t *testing.T) {
 			}
 		}`, &idRes)
 
-		var id1, id2 idproto.ID
+		var id1, id2 call.ID
 		err := id1.Decode(idRes.MyInput.ID)
 		assert.NilError(t, err)
 		err = id2.Decode(idRes.DifferentEmbedded.ID)
@@ -1558,12 +1658,27 @@ func TestBuiltins(t *testing.T) {
 	})
 }
 
+type IntrospectTest struct {
+	Field           int `field:"true" doc:"I'm a field!"`
+	NotField        int
+	DeprecatedField int `field:"true" doc:"Don't use me." deprecated:"use something else"`
+}
+
+func (IntrospectTest) Type() *ast.Type {
+	return &ast.Type{
+		NamedType: "IntrospectTest",
+		NonNull:   true,
+	}
+}
+
 func TestIntrospection(t *testing.T) {
 	srv := dagql.NewServer(Query{})
 	introspection.Install[Query](srv)
 
 	// just a quick way to get more coverage
 	points.Install[Query](srv)
+
+	dagql.Fields[IntrospectTest]{}.Install(srv)
 
 	dagql.Fields[Query]{
 		dagql.Func("fieldDoc", func(ctx context.Context, self Query, args struct{}) (bool, error) {
@@ -1622,6 +1737,118 @@ func TestIntrospection(t *testing.T) {
 	golden.Assert(t, buf.String(), "introspection.json")
 }
 
+func TestIDFormat(t *testing.T) {
+	ctx := context.Background()
+	srv := dagql.NewServer(Query{})
+	points.Install[Query](srv)
+
+	var pointAInst dagql.Instance[*points.Point]
+	assert.NilError(t, srv.Select(ctx, srv.Root(), &pointAInst,
+		dagql.Selector{
+			Field: "point",
+			Args: []dagql.NamedInput{
+				{Name: "x", Value: dagql.Int(2)},
+				{Name: "y", Value: dagql.Int(2)},
+			},
+		},
+	))
+	pointADgst := pointAInst.ID().Digest()
+
+	var pointBInst dagql.Instance[*points.Point]
+	assert.NilError(t, srv.Select(ctx, srv.Root(), &pointBInst,
+		dagql.Selector{
+			Field: "point",
+			Args: []dagql.NamedInput{
+				{Name: "x", Value: dagql.Int(1)},
+				{Name: "y", Value: dagql.Int(1)},
+			},
+		},
+	))
+	pointBDgst := pointBInst.ID().Digest()
+
+	var lineAInst dagql.Instance[*points.Line]
+	assert.NilError(t, srv.Select(ctx, pointBInst, &lineAInst,
+		dagql.Selector{
+			Field: "line",
+			Args: []dagql.NamedInput{
+				{Name: "to", Value: dagql.NewID[*points.Point](pointAInst.ID())},
+			},
+		},
+	))
+	lineADgst := lineAInst.ID().Digest()
+
+	var pointBFromInst dagql.Instance[*points.Point]
+	assert.NilError(t, srv.Select(ctx, lineAInst, &pointBFromInst,
+		dagql.Selector{Field: "from"},
+	))
+	pointBFromDgst := pointBFromInst.ID().Digest()
+
+	var lineBInst dagql.Instance[*points.Line]
+	assert.NilError(t, srv.Select(ctx, pointAInst, &lineBInst,
+		dagql.Selector{
+			Field: "line",
+			Args: []dagql.NamedInput{
+				{Name: "to", Value: dagql.NewID[*points.Point](pointBFromInst.ID())},
+			},
+		},
+	))
+	lineBDgst := lineBInst.ID().Digest()
+
+	var pointAFromInst dagql.Instance[*points.Point]
+	assert.NilError(t, srv.Select(ctx, lineBInst, &pointAFromInst,
+		dagql.Selector{Field: "from"},
+	))
+	pointAFromDgst := pointAFromInst.ID().Digest()
+
+	pbDag, err := pointAFromInst.ID().ToProto()
+	assert.NilError(t, err)
+
+	assert.Equal(t, len(pbDag.CallsByDigest), 6)
+
+	assert.Equal(t, pbDag.RootDigest, pointAFromDgst.String())
+	pointAFromIDFields, ok := pbDag.CallsByDigest[pbDag.RootDigest]
+	assert.Check(t, ok)
+	assert.Equal(t, pointAFromIDFields.Field, "from")
+	assert.Equal(t, len(pointAFromIDFields.Args), 0)
+
+	assert.Equal(t, pointAFromIDFields.ReceiverDigest, lineBDgst.String())
+	lineBIDFields, ok := pbDag.CallsByDigest[pointAFromIDFields.ReceiverDigest]
+	assert.Check(t, ok)
+	assert.Equal(t, lineBIDFields.Field, "line")
+	assert.Equal(t, len(lineBIDFields.Args), 1)
+
+	assert.Equal(t, lineBIDFields.ReceiverDigest, pointADgst.String())
+	pointAIDFields, ok := pbDag.CallsByDigest[lineBIDFields.ReceiverDigest]
+	assert.Check(t, ok)
+	assert.Equal(t, pointAIDFields.Field, "point")
+	assert.Equal(t, len(pointAIDFields.Args), 2)
+	assert.Equal(t, pointAIDFields.ReceiverDigest, "")
+
+	lineBArg := lineBIDFields.Args[0]
+	assert.Equal(t, lineBArg.Name, "to")
+	assert.Equal(t, lineBArg.Value.GetCallDigest(), pointBFromDgst.String())
+	pointBFromIDFields, ok := pbDag.CallsByDigest[lineBArg.Value.GetCallDigest()]
+	assert.Check(t, ok)
+	assert.Equal(t, pointBFromIDFields.Field, "from")
+	assert.Equal(t, len(pointBFromIDFields.Args), 0)
+
+	assert.Equal(t, pointBFromIDFields.ReceiverDigest, lineADgst.String())
+	lineAIDFields, ok := pbDag.CallsByDigest[pointBFromIDFields.ReceiverDigest]
+	assert.Check(t, ok)
+	assert.Equal(t, lineAIDFields.Field, "line")
+	assert.Equal(t, len(lineAIDFields.Args), 1)
+
+	assert.Equal(t, lineAIDFields.ReceiverDigest, pointBDgst.String())
+	pointBIDFields, ok := pbDag.CallsByDigest[lineAIDFields.ReceiverDigest]
+	assert.Check(t, ok)
+	assert.Equal(t, pointBIDFields.Field, "point")
+	assert.Equal(t, len(pointBIDFields.Args), 2)
+
+	lineAArg := lineAIDFields.Args[0]
+	assert.Equal(t, lineAArg.Name, "to")
+	assert.Equal(t, lineAArg.Value.GetCallDigest(), pointADgst.String())
+}
+
 func eqIDs(t *testing.T, actual, expected string) {
 	debugID(t, "actual  : %s", actual)
 	debugID(t, "expected: %s", expected)
@@ -1629,8 +1856,235 @@ func eqIDs(t *testing.T, actual, expected string) {
 }
 
 func debugID(t *testing.T, msgf string, idStr string, args ...any) {
-	var id idproto.ID
+	var id call.ID
 	err := id.Decode(idStr)
 	assert.NilError(t, err)
 	t.Logf(msgf, append([]any{id.Display()}, args...)...)
+}
+
+func InstallViewer(srv *dagql.Server) {
+	getView := func(_ context.Context, _ Query, _ struct{}) (string, error) {
+		return srv.View, nil
+	}
+
+	dagql.Fields[Query]{
+		dagql.Func("global", getView).
+			View(dagql.GlobalView).
+			Doc("available on all views"),
+		dagql.Func("all", getView).
+			View(dagql.AllView{}).
+			Doc("available on all views"),
+
+		dagql.Func("shared", getView).
+			View(dagql.ExactView("firstView")).
+			Doc("available on first+second views"),
+		dagql.Func("firstExclusive", getView).
+			View(dagql.ExactView("firstView")).
+			Doc("available on first view"),
+
+		dagql.Func("shared", getView).
+			View(dagql.ExactView("secondView")).
+			Extend(),
+		dagql.Func("secondExclusive", getView).
+			View(dagql.ExactView("secondView")).
+			Doc("available on second view"),
+		dagql.Func("all", getView).
+			View(dagql.ExactView("secondView")).
+			Doc("available on second view"),
+	}.Install(srv)
+}
+
+func TestViews(t *testing.T) {
+	srv := dagql.NewServer(Query{})
+	gql := client.New(handler.NewDefaultServer(srv))
+
+	InstallViewer(srv)
+
+	t.Run("in default view", func(t *testing.T) {
+		srv.View = ""
+
+		var res struct {
+			All string
+		}
+		req(t, gql, `query {
+			all
+		}`, &res)
+		assert.Equal(t, "", res.All)
+
+		reqFail(t, gql, `query {
+			shared
+		}`, "no such field")
+	})
+
+	t.Run("in unknown view", func(t *testing.T) {
+		srv.View = "unknownView"
+
+		var res struct {
+			All string
+		}
+		req(t, gql, `query {
+			all
+		}`, &res)
+		assert.Equal(t, "unknownView", res.All)
+
+		reqFail(t, gql, `query {
+			shared
+		}`, "no such field")
+	})
+
+	t.Run("in first view", func(t *testing.T) {
+		srv.View = "firstView"
+
+		var res struct {
+			All            string
+			Shared         string
+			FirstExclusive string
+		}
+		req(t, gql, `query {
+			all
+			shared
+			firstExclusive
+		}`, &res)
+		assert.Equal(t, "firstView", res.All)
+		assert.Equal(t, "firstView", res.Shared)
+		assert.Equal(t, "firstView", res.FirstExclusive)
+
+		reqFail(t, gql, `query {
+			secondExclusive
+		}`, "no such field")
+	})
+
+	t.Run("in second view", func(t *testing.T) {
+		srv.View = "secondView"
+
+		var res struct {
+			All             string
+			Shared          string
+			SecondExclusive string
+		}
+		req(t, gql, `query {
+			all
+			shared
+			secondExclusive
+		}`, &res)
+		assert.Equal(t, "secondView", res.All)
+		assert.Equal(t, "secondView", res.Shared)
+		assert.Equal(t, "secondView", res.SecondExclusive)
+
+		reqFail(t, gql, `query {
+			firstExclusive
+		}`, "no such field")
+	})
+}
+
+func TestViewsCaching(t *testing.T) {
+	srv := dagql.NewServer(Query{})
+	gql := client.New(handler.NewDefaultServer(srv))
+
+	InstallViewer(srv)
+
+	var res struct {
+		All    string
+		Global string
+	}
+
+	srv.View = "firstView"
+	req(t, gql, `query {
+		all
+		global
+	}`, &res)
+	assert.Equal(t, "firstView", res.All)
+	assert.Equal(t, "firstView", res.Global)
+
+	srv.View = "secondView"
+	req(t, gql, `query {
+		all
+		global
+	}`, &res)
+	assert.Equal(t, "secondView", res.All)
+	assert.Equal(t, "firstView", res.Global) // this is cached from the first query!
+}
+
+func TestViewsIntrospection(t *testing.T) {
+	srv := dagql.NewServer(Query{})
+	introspection.Install[Query](srv)
+	gql := client.New(handler.NewDefaultServer(srv))
+
+	InstallViewer(srv)
+
+	t.Run("in default view", func(t *testing.T) {
+		srv.View = ""
+
+		var res introspection.Response
+		req(t, gql, introspection.Query, &res)
+		fields := make(map[string]string)
+		for _, field := range res.Schema.Types.Get("Query").Fields {
+			fields[field.Name] = field.Description
+		}
+
+		require.Contains(t, fields, "all")
+		require.Equal(t, "available on all views", fields["all"])
+		require.Contains(t, fields, "global")
+		require.Equal(t, "available on all views", fields["global"])
+		require.NotContains(t, fields, "shared")
+	})
+
+	t.Run("in unknown view", func(t *testing.T) {
+		srv.View = "unknownView"
+
+		var res introspection.Response
+		req(t, gql, introspection.Query, &res)
+		fields := make(map[string]string)
+		for _, field := range res.Schema.Types.Get("Query").Fields {
+			fields[field.Name] = field.Description
+		}
+
+		require.Contains(t, fields, "all")
+		require.Equal(t, "available on all views", fields["all"])
+		require.Contains(t, fields, "global")
+		require.Equal(t, "available on all views", fields["global"])
+		require.NotContains(t, fields, "shared")
+	})
+
+	t.Run("in first view", func(t *testing.T) {
+		srv.View = "firstView"
+
+		var res introspection.Response
+		req(t, gql, introspection.Query, &res)
+		fields := make(map[string]string)
+		for _, field := range res.Schema.Types.Get("Query").Fields {
+			fields[field.Name] = field.Description
+		}
+
+		require.Contains(t, fields, "all")
+		require.Equal(t, "available on all views", fields["all"])
+		require.Contains(t, fields, "global")
+		require.Equal(t, "available on all views", fields["global"])
+		require.Contains(t, fields, "shared")
+		require.Equal(t, "available on first+second views", fields["shared"])
+		require.Contains(t, fields, "firstExclusive")
+		require.Equal(t, "available on first view", fields["firstExclusive"])
+		require.NotContains(t, fields, "secondExclusive")
+	})
+
+	t.Run("in second view", func(t *testing.T) {
+		srv.View = "secondView"
+
+		var res introspection.Response
+		req(t, gql, introspection.Query, &res)
+		fields := make(map[string]string)
+		for _, field := range res.Schema.Types.Get("Query").Fields {
+			fields[field.Name] = field.Description
+		}
+
+		require.Contains(t, fields, "all")
+		require.Equal(t, "available on second view", fields["all"])
+		require.Contains(t, fields, "global")
+		require.Equal(t, "available on all views", fields["global"])
+		require.Contains(t, fields, "shared")
+		require.Equal(t, "available on first+second views", fields["shared"])
+		require.NotContains(t, fields, "firstExclusive")
+		require.Contains(t, fields, "secondExclusive")
+		require.Equal(t, "available on second view", fields["secondExclusive"])
+	})
 }

@@ -85,15 +85,25 @@ class Service extends Client\AbstractObject implements Client\IdAble
     /**
      * Creates a tunnel that forwards traffic from the caller's network to this service.
      */
-    public function up(?array $ports = null, ?bool $native = false): void
+    public function up(?array $ports = null, ?bool $random = false): void
     {
         $leafQueryBuilder = new \Dagger\Client\QueryBuilder('up');
         if (null !== $ports) {
         $leafQueryBuilder->setArgument('ports', $ports);
         }
-        if (null !== $native) {
-        $leafQueryBuilder->setArgument('native', $native);
+        if (null !== $random) {
+        $leafQueryBuilder->setArgument('random', $random);
         }
         $this->queryLeaf($leafQueryBuilder, 'up');
+    }
+
+    /**
+     * Configures a hostname which can be used by clients within the session to reach this container.
+     */
+    public function withHostname(string $hostname): Service
+    {
+        $innerQueryBuilder = new \Dagger\Client\QueryBuilder('withHostname');
+        $innerQueryBuilder->setArgument('hostname', $hostname);
+        return new \Dagger\Service($this->client, $this->queryBuilderChain->chain($innerQueryBuilder));
     }
 }

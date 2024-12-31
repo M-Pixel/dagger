@@ -1,12 +1,11 @@
 import * as fs from "fs"
 
-const moduleProjectDirectory = `/src/`
-const tsConfigPath = `${moduleProjectDirectory}/tsconfig.json`
+const tsConfigPath = `./tsconfig.json`
 
 const daggerPathAlias = "@dagger.io/dagger"
-const daggerPath = "./sdk"
-
-console.log(tsConfigPath)
+const daggerTelemetryPathAlias = "@dagger.io/dagger/telemetry"
+const daggerPath = "./sdk/src"
+const daggerTelemetryPath = "./sdk/src/telemetry"
 
 // If the tsconfig.json file doesn't exist, create it with default config.
 if (!fs.existsSync(tsConfigPath)) {
@@ -16,7 +15,8 @@ if (!fs.existsSync(tsConfigPath)) {
       moduleResolution: "Node",
       experimentalDecorators: true,
       paths: {
-        "@dagger.io/dagger": ["./sdk"],
+        "@dagger.io/dagger": ["./sdk/src"],
+        "@dagger.io/dagger/telemetry": ["./sdk/src/telemetry"],
       },
     },
   }
@@ -51,12 +51,19 @@ if (!tsconfig.compilerOptions.paths) {
   tsconfig.compilerOptions.paths = {}
 }
 
-// If `@dagger.io/dagger` isn't part of the tsconfig paths, update it.
+// If `@dagger.io/dagger` or `@dagger.io/dagger/telemetry` are not part of the tsconfig paths, update it
 if (
   !tsconfig.compilerOptions.paths[daggerPathAlias] ||
-  !tsconfig.compilerOptions.paths[daggerPathAlias].includes(daggerPath)
+  !tsconfig.compilerOptions.paths[daggerPathAlias].includes(daggerPath) ||
+  !tsconfig.compilerOptions.paths[daggerTelemetryPathAlias] ||
+  !tsconfig.compilerOptions.paths[daggerTelemetryPathAlias].includes(
+    daggerTelemetryPath,
+  )
 ) {
   tsconfig.compilerOptions.paths[daggerPathAlias] = [daggerPath]
+  tsconfig.compilerOptions.paths[daggerTelemetryPathAlias] = [
+    daggerTelemetryPath,
+  ]
 
   fs.writeFileSync(tsConfigPath, JSON.stringify(tsconfig, null, 2))
 }

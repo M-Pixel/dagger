@@ -19,6 +19,12 @@ var Samples = map[TypeDefKind]*TypeDef{
 	TypeDefKindBoolean: {
 		Kind: TypeDefKindBoolean,
 	},
+	TypeDefKindScalar: {
+		Kind: TypeDefKindScalar,
+		AsScalar: dagql.NonNull(&ScalarTypeDef{
+			Name: "FooScalar",
+		}),
+	},
 	TypeDefKindList: {
 		Kind: TypeDefKindList,
 		AsList: dagql.NonNull(&ListTypeDef{
@@ -37,6 +43,12 @@ var Samples = map[TypeDefKind]*TypeDef{
 		Kind: TypeDefKindInterface,
 		AsInterface: dagql.NonNull(&InterfaceTypeDef{
 			Name: "FooInterface",
+		}),
+	},
+	TypeDefKindEnum: {
+		Kind: TypeDefKindEnum,
+		AsEnum: dagql.NonNull(&EnumTypeDef{
+			Name: "FooEnum",
 		}),
 	},
 	TypeDefKindVoid: {

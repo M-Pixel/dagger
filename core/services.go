@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dagger/dagger/dagql/idproto"
-	"github.com/dagger/dagger/engine"
-	"github.com/dagger/dagger/engine/buildkit"
-	"github.com/dagger/dagger/network"
 	bkgw "github.com/moby/buildkit/frontend/gateway/client"
 	"github.com/moby/buildkit/util/bklog"
 	"github.com/opencontainers/go-digest"
 	"github.com/pkg/errors"
-	"github.com/vito/progrock"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/dagger/dagger/dagql/call"
+	"github.com/dagger/dagger/engine"
+	"github.com/dagger/dagger/engine/slog"
+	"github.com/dagger/dagger/network"
 )
 
 const (
@@ -33,7 +33,6 @@ const (
 // Services manages the lifecycle of services, ensuring the same service only
 // runs once per client.
 type Services struct {
-	bk       *buildkit.Client
 	starting map[ServiceKey]*sync.WaitGroup
 	running  map[ServiceKey]*RunningService
 	bindings map[ServiceKey]int
@@ -72,14 +71,13 @@ type RunningService struct {
 
 // ServiceKey is a unique identifier for a service.
 type ServiceKey struct {
-	Digest   digest.Digest
-	ServerID string
+	Digest    digest.Digest
+	SessionID string
 }
 
 // NewServices returns a new Services.
-func NewServices(bk *buildkit.Client) *Services {
+func NewServices() *Services {
 	return &Services{
-		bk:       bk,
 		starting: map[ServiceKey]*sync.WaitGroup{},
 		running:  map[ServiceKey]*RunningService{},
 		bindings: map[ServiceKey]int{},
@@ -90,20 +88,17 @@ func NewServices(bk *buildkit.Client) *Services {
 // starting, it waits for it and either returns the running service or an error
 // if it failed to start. If the service is not running or starting, an error
 // is returned.
-func (ss *Services) Get(ctx context.Context, id *idproto.ID) (*RunningService, error) {
+func (ss *Services) Get(ctx context.Context, id *call.ID) (*RunningService, error) {
 	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	dig, err := id.Digest()
-	if err != nil {
-		return nil, err
-	}
+	dig := id.Digest()
 
 	key := ServiceKey{
-		Digest:   dig,
-		ServerID: clientMetadata.ServerID,
+		Digest:    dig,
+		SessionID: clientMetadata.SessionID,
 	}
 
 	notRunningErr := fmt.Errorf("service %s is not running", network.HostHash(dig))
@@ -128,7 +123,7 @@ func (ss *Services) Get(ctx context.Context, id *idproto.ID) (*RunningService, e
 type Startable interface {
 	Start(
 		ctx context.Context,
-		id *idproto.ID,
+		id *call.ID,
 		interactive bool,
 		forwardStdin func(io.Writer, bkgw.ContainerProcess),
 		forwardStdout func(io.Reader),
@@ -140,20 +135,16 @@ type Startable interface {
 // service is already running, it is returned immediately. If the service is
 // already starting, it waits for it to finish and returns the running service.
 // If the service failed to start, it tries again.
-func (ss *Services) Start(ctx context.Context, id *idproto.ID, svc Startable) (*RunningService, error) {
+func (ss *Services) Start(ctx context.Context, id *call.ID, svc Startable) (*RunningService, error) {
 	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	dig, err := id.Digest()
-	if err != nil {
-		return nil, err
-	}
-
+	dig := id.Digest()
 	key := ServiceKey{
-		Digest:   dig,
-		ServerID: clientMetadata.ServerID,
+		Digest:    dig,
+		SessionID: clientMetadata.SessionID,
 	}
 
 dance:
@@ -182,15 +173,11 @@ dance:
 		}
 	}
 
-	svcCtx, stop := context.WithCancel(context.Background())
-	svcCtx = progrock.ToContext(svcCtx, progrock.FromContext(ctx))
-	if clientMetadata, err := engine.ClientMetadataFromContext(ctx); err == nil {
-		svcCtx = engine.ContextWithClientMetadata(svcCtx, clientMetadata)
-	}
+	svcCtx, stop := context.WithCancelCause(context.WithoutCancel(ctx))
 
 	running, err := svc.Start(svcCtx, id, false, nil, nil, nil)
 	if err != nil {
-		stop()
+		stop(err)
 		ss.l.Lock()
 		delete(ss.starting, key)
 		ss.l.Unlock()
@@ -211,71 +198,54 @@ dance:
 // StartBindings starts each of the bound services in parallel and returns a
 // function that will detach from all of them after 10 seconds.
 func (ss *Services) StartBindings(ctx context.Context, bindings ServiceBindings) (_ func(), _ []*RunningService, err error) {
-	running := []*RunningService{}
+	running := make([]*RunningService, len(bindings))
 	detachOnce := sync.Once{}
 	detach := func() {
 		detachOnce.Do(func() {
 			go func() {
 				<-time.After(DetachGracePeriod)
 				for _, svc := range running {
-					ss.Detach(ctx, svc)
+					if svc != nil {
+						ss.Detach(ctx, svc)
+					}
 				}
 			}()
 		})
 	}
 
-	defer func() {
-		if err != nil {
-			detach()
-		}
-	}()
-
 	// NB: don't use errgroup.WithCancel; we don't want to cancel on Wait
 	eg := new(errgroup.Group)
-
-	started := make(chan *RunningService, len(bindings))
-	for _, bnd := range bindings {
-		bnd := bnd
+	for i, bnd := range bindings {
 		eg.Go(func() error {
 			runningSvc, err := ss.Start(ctx, bnd.ID, bnd.Service)
 			if err != nil {
 				return fmt.Errorf("start %s (%s): %w", bnd.Hostname, bnd.Aliases, err)
 			}
-			started <- runningSvc
+			running[i] = runningSvc
 			return nil
 		})
 	}
 
 	startErr := eg.Wait()
-
-	close(started)
-
 	if startErr != nil {
+		detach()
 		return nil, nil, startErr
-	}
-
-	for svc := range started {
-		running = append(running, svc)
 	}
 
 	return detach, running, nil
 }
 
 // Stop stops the given service. If the service is not running, it is a no-op.
-func (ss *Services) Stop(ctx context.Context, id *idproto.ID, kill bool) error {
+func (ss *Services) Stop(ctx context.Context, id *call.ID, kill bool) error {
 	clientMetadata, err := engine.ClientMetadataFromContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	dig, err := id.Digest()
-	if err != nil {
-		return err
-	}
-
+	dig := id.Digest()
 	key := ServiceKey{
-		Digest:   dig,
-		ServerID: clientMetadata.ServerID,
+		Digest:    dig,
+		SessionID: clientMetadata.SessionID,
 	}
 
 	ss.l.Lock()
@@ -308,13 +278,13 @@ func (ss *Services) Stop(ctx context.Context, id *idproto.ID, kill bool) error {
 	}
 }
 
-// StopClientServices stops all of the services being run by the given client.
-// It is called when a client is closing.
-func (ss *Services) StopClientServices(ctx context.Context, client *engine.ClientMetadata) error {
+// StopSessionServices stops all of the services being run by the given server.
+// It is called when a server is closing.
+func (ss *Services) StopSessionServices(ctx context.Context, sessionID string) error {
 	ss.l.Lock()
 	var svcs []*RunningService
 	for _, svc := range ss.running {
-		if svc.Key.ServerID == client.ServerID {
+		if svc.Key.SessionID == sessionID {
 			svcs = append(svcs, svc)
 		}
 	}
@@ -322,7 +292,6 @@ func (ss *Services) StopClientServices(ctx context.Context, client *engine.Clien
 
 	eg := new(errgroup.Group)
 	for _, svc := range svcs {
-		svc := svc
 		eg.Go(func() error {
 			bklog.G(ctx).Debugf("shutting down service %s", svc.Host)
 			// force kill the service, users should manually shutdown services if they're
@@ -343,9 +312,12 @@ func (ss *Services) StopClientServices(ctx context.Context, client *engine.Clien
 func (ss *Services) Detach(ctx context.Context, svc *RunningService) {
 	ss.l.Lock()
 
+	slog := slog.With("service", svc.Host, "bindings", ss.bindings[svc.Key])
+
 	running, found := ss.running[svc.Key]
 	if !found {
 		ss.l.Unlock()
+		slog.Trace("detach: service not running")
 		// not even running; ignore
 		return
 	}
@@ -354,11 +326,14 @@ func (ss *Services) Detach(ctx context.Context, svc *RunningService) {
 
 	if ss.bindings[svc.Key] > 0 {
 		ss.l.Unlock()
+		slog.Debug("detach: service still has binders")
 		// detached, but other instances still active
 		return
 	}
 
 	ss.l.Unlock()
+
+	slog.Trace("detach: stopping")
 
 	// we should avoid blocking, and return immediately
 	go ss.stopGraceful(ctx, running, TerminateGracePeriod)

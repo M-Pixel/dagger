@@ -1,42 +1,41 @@
 ---
 slug: /quickstart
-hide_table_of_contents: true
+hide_table_of_contents: false
 title: "Introduction"
-displayed_sidebar: "quickstart"
 ---
 
 # Quickstart
 
-import Tabs from "@theme/Tabs";
-import TabItem from "@theme/TabItem";
+Welcome to Dagger, a programmable tool that lets you replace your software project's artisanal scripts with a modern API and cross-language scripting engine.
 
-## Introduction
+Dagger helps you create a consistent, reliable development and testing environment on your local host and ensure that everything your CI can do, your local environment can do too.
 
-Welcome to Dagger, a programmable CI/CD engine that runs your pipelines in containers.
+## Topics
 
-This tutorial introduces you to Dagger and the "Dagger way" of building portable CI pipelines.
+This quickstart introduces you to:
 
-It walks you, step by step, through the process of creating and refining a CI pipeline to test, build and publish an example application with a Dagger SDK.
+- The Dagger API, which lets you use core primitives to stitch together powerful pipelines out of containers, artifacts, network services, and secrets – all in type-safe Go, Python or TypeScript.
+- Dagger Functions, which let you encapsulate code into software components which can be loaded into any Dagger Engine, and called by other Dagger Functions.
+- The Dagger CLI, which lets you create, inspect and invoke Dagger Functions from the command line.
+- Dagger Cloud, which lets you visualize your Dagger pipelines, streamline them, and debug errors.
+- The Daggerverse, which lets you search and consume publicly available Dagger Functions.
 
-## What you will learn
+## Goal
 
-In this tutorial, you will learn how to:
+After going through this quickstart, you will have the tools and skills to test, build and release your application using Dagger Functions.
 
-- Install the Dagger CLI
-- Install the Dagger SDK for your preferred language
-- Create a Dagger client using the SDK
-- Create a simple Dagger pipeline to understand the basics of Dagger
-- Create a more complex Dagger pipeline to test and build an application
-- Improve the Dagger pipeline to containerize and publish the application to a registry
-- Optimize the Dagger pipeline with caching and multi-stage builds
-- Use your existing Dockerfiles with Dagger
+## Approach
+
+This quickstart is structured as a hands-on workshop, in which you will create and run Dagger Functions to test, build and publish an example application.
+
+- To begin, you will build a delivery pipeline for the example application using only the Dagger API. This is an important first step to learn how Dagger works and to understand key concepts and techniques.
+- Next, you will simplify the pipeline using a Dagger module from the Daggerverse. This introduces you to the Daggerverse and the reusability benefits it offers.
 
 ## Requirements
 
-You can use this tutorial in two ways:
+This quickstart will take you approximately 25 minutes to complete. You should be familiar with programming in Go, Python or TypeScript.
 
-- You can download the example application to your local development environment, and then copy and run the code snippets on your host system.
-  - This option requires [Docker](https://docs.docker.com/engine/install/) and [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git) on your host system.
-
-- You can use our embedded API Playground to run the code snippets in your browser.
-  - The API Playground has the example application and SDKs pre-installed, so this option does not require any software to be downloaded or installed on your host system.
+Before beginning, ensure that:
+- you know [what Dagger is](../index.mdx).
+- you have [Git](https://git-scm.com/downloads) and a container runtime installed on your system and running. This can be [Docker](https://docs.docker.com/engine/install/), but you can also use Podman, nerdctl, or other Docker-like systems.
+- you have a GitHub account (optional, only if configuring Dagger Cloud)

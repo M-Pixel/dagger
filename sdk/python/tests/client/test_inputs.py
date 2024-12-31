@@ -1,7 +1,6 @@
 from collections.abc import Sequence
 
 import pytest
-from pytest_lazyfixture import lazy_fixture
 
 import dagger
 from dagger.client._core import (
@@ -13,12 +12,10 @@ from dagger.client.base import Scalar, Type
 pytestmark = pytest.mark.filterwarnings("ignore:coroutine")
 
 
-class DirectoryID(Scalar):
-    ...
+class DirectoryID(Scalar): ...
 
 
-class FileID(Scalar):
-    ...
+class FileID(Scalar): ...
 
 
 class Client(Root):
@@ -59,16 +56,15 @@ class Directory(Type):
         return DirectoryID("dirhash")
 
 
-class File(Type):
-    ...
+class File(Type): ...
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(mocker):
     return Client(mocker.MagicMock())
 
 
-@pytest.fixture()
+@pytest.fixture
 def file(client: Client):
     return client.file(FileID(""))
 
@@ -112,7 +108,7 @@ def test_no_object_id(client: Client):
         client.container().with_file("a", FileID("fileid"))
 
 
-@pytest.mark.anyio()
+@pytest.mark.anyio
 async def test_await(client: Client):
     client.directory(await client.directory().id())
 
@@ -142,8 +138,7 @@ def test_is_id_type(client: Client):
     assert is_id_type(client.directory())
 
 
-class WithoutID:
-    ...
+class WithoutID: ...
 
 
 class WithID:
@@ -160,11 +155,14 @@ class WithID:
         WithID(),
         WithoutID(),
         DirectoryID("dir"),
-        lazy_fixture("file"),
     ],
 )
 def test_is_not_id_type(val):
     assert not is_id_type(val)
+
+
+def test_is_file_not_id_type(file):
+    assert not is_id_type(file)
 
 
 @pytest.mark.parametrize(
@@ -183,8 +181,11 @@ def test_is_id_type_sequence(client: Client, seq):
         "spam",
         ["x", "y", "z"],
         [WithID()],
-        [lazy_fixture("file")],
     ],
 )
 def test_is_not_id_type_sequence(val):
     assert not is_id_type_sequence(val)
+
+
+def test_file_is_not_id_type_sequence(file):
+    assert not is_id_type_sequence([file])
