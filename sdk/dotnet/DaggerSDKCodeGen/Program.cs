@@ -35,7 +35,7 @@ Schema schema = document.Schema with
 			(
 				type => type with
 				{
-					Fields =
+					Fields = type.Fields.IsDefault ? ImmutableArray<Field>.Empty :
 					[
 						..type.Fields
 							.Select(field => field with { ParentObject = type })

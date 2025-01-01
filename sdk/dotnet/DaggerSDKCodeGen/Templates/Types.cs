@@ -18,7 +18,7 @@ static class Structures
 					return GenerateCustomScalar(type);
 				if (IsEnum(type))
 					return GenerateEnum(type);
-				if (type.InputFields.Length > 0)
+				if (!type.InputFields.IsDefaultOrEmpty)
 					return GenerateInputRecord(type);
 				return null;
 			}
