@@ -54,7 +54,7 @@ func (sdk *DotnetSdk) Codegen(
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
 // +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64/*", "!DaggerSDK/DaggerSDK.csproj", "!DaggerSDK/**/*.cs", "DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64/Dagger.CodeGen", "*.pdb"]
+// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!DaggerSDK/DaggerSDK.csproj", "!DaggerSDK/**/*.cs", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "*.pdb"]
 	sdkDirectory *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	// TODO: Don't actually generate code if the context is call (as opposed to init or sync), and a generated SDK is
@@ -76,9 +76,9 @@ func (sdk *DotnetSdk) Codegen(
 
 		// Run C# generator which will place output at ./Generated.cs
 		WithMountedFile("introspection.json", introspectionJson).
-		WithMountedDirectory("CodeGenerator", sdkDirectory.Directory("DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64")).
+		WithMountedDirectory("CodeGenerator", sdkDirectory.Directory("CodeGenerator/bin/Release/net8.0/linux-x64")).
 		WithExec(
-			[]string{"dotnet", "CodeGenerator/Dagger.CodeGen.dll"},
+			[]string{"dotnet", "CodeGenerator/Dagger.CodeGenerator.dll"},
 			dagger.ContainerWithExecOpts{ExperimentalPrivilegedNesting: true}).
 		WithoutMount("CodeGenerator").
 

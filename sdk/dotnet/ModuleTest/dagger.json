@@ -1,17 +1,19 @@
 {
   "name": "ModuleTest",
   "engineVersion": "v0.15.1",
-  "sdk": "../Runtime",
+  "sdk": "../module",
   "include": [
-    "../Runtime/bin/Release/net8.0/linux-x64",
-    "../DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64",
+    "../Thunk/bin/Release/net8.0/linux-x64",
+    "../CodeGenerator/bin/Release/net8.0/linux-x64",
     "../DaggerSDK/DaggerSDK.csproj",
     "../DaggerSDK/**/*.cs"
   ],
   "exclude": [
-    "../Runtime/bin/Release/net8.0/linux-x64/Dagger.Runtime",
-    "../Runtime/bin/Release/net8.0/linux-x64/Dagger.Runtime.pdb",
-    "../DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64/Dagger.CodeGen"
+    "../Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk",
+    "../Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.pdb",
+    "../CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGenerator",
+    "../CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGenerator.pdb",
+    "obj"
   ],
   "dependencies": [
     {

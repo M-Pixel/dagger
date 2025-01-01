@@ -4,7 +4,7 @@
 
 An SDK module must itself use an SDK in order to be a module.  Only Golang is embedded in Dagger itself (all other SDKs ultimately rely on the Golang SDK), so it is conventional for SDK modules to be golang modules.
 
-This module effectively just wraps the DaggerSDKCodeGen and Thunk programs as Dagger Functions.
+This module effectively just wraps the CodeGenerator and Thunk programs as Dagger Functions.
 
 ## To-do List
 
