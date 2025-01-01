@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Dagger.Runtime;
+namespace Dagger.Thunk;
 
 readonly record struct AssemblyBuildDirectoryCandidate(string Path, bool IsDebug, int Version);
 

@@ -9,7 +9,7 @@ import (
 
 // core/schema/sdk.go defines an implicit interface for SDK modules.  This adheres to that interface.
 
-// The SDKSourceDir *Directory member of the TypeScript runtime is not relevant here; for non-builtin SDK modules, the
+// The SDKSourceDir *Directory member of the other runtimes is not relevant here; for non-builtin SDK modules, the
 // parameter is given an empty folder.  Anyhow, the dotnet SDK (in proper, idiomatic dotnet style) uses its own
 // Roslyn-based SDK generator instead of Dagger's go-template one, and has its own means of including those files
 // without needing to be handed a SDKSourceDir argument by the engine.
@@ -26,8 +26,8 @@ func (sdk *DotnetSdk) ModuleRuntime(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File, // TODO: Can I omit?
-// +defaultPath="/sdk/dotnet/Runtime/bin/Release/net8.0/linux-x64"
-	runtimeBuildDirectory *dagger.Directory,
+// +defaultPath="/sdk/dotnet/Thunk/bin/Release/net8.0/linux-x64"
+	thunkBuildDirectory *dagger.Directory,
 ) (*dagger.Container, error) {
 	subPath, err := modSource.SourceSubpath(ctx)
 	if err != nil {
@@ -39,14 +39,14 @@ func (sdk *DotnetSdk) ModuleRuntime(
 		return nil, fmt.Errorf("failed to retrieve module name for dotnet invocation: %v", err)
 	}
 	// TODO: Support compiling the module if it's not pre-compiled
-	// TODO: Can runtime program retrieve the name instead?  Runtime program requires Dagger SDK anyways for submitting introspection.
+	// TODO: Can thunk program retrieve the name instead?  Thunk program requires Dagger SDK anyways for submitting introspection.
 
 	return dag.Container().
 		From("mcr.microsoft.com/dotnet/runtime:8.0-noble-chiseled").
 		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
-		WithMountedDirectory("/mnt/dagger", runtimeBuildDirectory).
+		WithMountedDirectory("/mnt/thunk", thunkBuildDirectory).
 		WithMountedDirectory("/mnt/module", modSource.ContextDirectory()).
-		WithEntrypoint([]string{"/usr/bin/dotnet", "/mnt/dagger/Dagger.Runtime.dll", name, subPath}), nil
+		WithEntrypoint([]string{"/usr/bin/dotnet", "/mnt/thunk/Dagger.Thunk.dll", name, subPath}), nil
 }
 
 func (sdk *DotnetSdk) Codegen(

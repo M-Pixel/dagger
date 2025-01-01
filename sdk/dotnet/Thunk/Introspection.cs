@@ -4,7 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-namespace Dagger.Runtime;
+namespace Dagger.Thunk;
 
 class Introspection
 {

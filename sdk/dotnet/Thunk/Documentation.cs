@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Dagger.Runtime;
+namespace Dagger.Thunk;
 
 using System.Collections.Immutable;
 using System.Xml;

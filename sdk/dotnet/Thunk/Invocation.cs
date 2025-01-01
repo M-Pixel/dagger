@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using System.Reflection;
 using System.Text.Json;
 
-namespace Dagger.Runtime;
+namespace Dagger.Thunk;
 
 class Invocation
 {

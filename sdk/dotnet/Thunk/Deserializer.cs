@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
-namespace Dagger.Runtime;
+namespace Dagger.Thunk;
 
 // TODO: Instead of doing all of this reflection at runtime, when building a C# Dagger module, code-gen function for each object + method that directly deserialize
 public class Deserializer

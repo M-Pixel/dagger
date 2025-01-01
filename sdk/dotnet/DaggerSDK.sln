@@ -13,7 +13,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DaggerSDKCodeGen", "DaggerS
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pipelines", "Pipelines\Pipelines.csproj", "{F5F3276F-78AC-4016-934A-88204DD07661}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Runtime", "Runtime\Runtime.csproj", "{130FCE43-6F35-45CD-A9D6-DAB0DD775077}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thunk", "Thunk\Thunk.csproj", "{130FCE43-6F35-45CD-A9D6-DAB0DD775077}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ModuleTest", "ModuleTest\ModuleTest.csproj", "{F87EF24D-9A48-41B3-9504-2358DBBC356F}"
 EndProject

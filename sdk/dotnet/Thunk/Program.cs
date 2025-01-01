@@ -1,11 +1,7 @@
-﻿using System.Collections.Immutable;
-using System.Reflection;
-using System.Runtime.CompilerServices;
+﻿using System.Reflection;
 using System.Runtime.Loader;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Dagger;
-using Dagger.Runtime;
+using Dagger.Thunk;
 using Module = Dagger.Module;
 
 // Kick off Dagger query first without awaiting it, so that assembly loading (which doesn't have async methods) can
