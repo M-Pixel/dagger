@@ -7,17 +7,8 @@
     <LangVersion>12</LangVersion>
     <AssemblyName>Dagger.SDK</AssemblyName>
     <RootNamespace>Dagger</RootNamespace>
-    <PackageId>MaxPixel.Dagger.SDK</PackageId>
-    <Version>0.0.4</Version>
-    <Title>Dagger SDK</Title>
-    <Authors>Max Pixel, Andrea Luzzardi, Gerhard Lazu, Nabeel Sulieman, Helder Correia, Justin Chadwell, Erik Sipsma, Tom Chauveau, Alex Suraci, Vikram Vaswani, Guillaume de Rouville, Jffarge, Michael Tyson, Benjamin Strasser, David Flanagan</Authors>
-    <Description>Alpha preview of a C# Dagger SDK</Description>
-    <PackageProjectUrl>https://dagger.io</PackageProjectUrl>
-    <PackageLicenseUrl>https://github.com/M-Pixel/dagger/blob/main/LICENSE</PackageLicenseUrl>
-    <RepositoryUrl>https://github.com/M-Pixel/dagger</RepositoryUrl>
-    <RepositoryType>Git</RepositoryType>
-    <PackageIcon>dagger-icon.png</PackageIcon>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,10 +16,7 @@
     <PackageReference Include="GraphQL.Client" Version="6.0.2" />
     <PackageReference Include="GraphQL.Client.Serializer.SystemTextJson" Version="6.0.2" />
     <PackageReference Include="MicroKnights.IO.SplitStream" Version="1.0.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="dagger-icon.png" Pack="true" PackagePath="" />
+    <Compile Include="../Generated.cs" />
   </ItemGroup>
 
 </Project>

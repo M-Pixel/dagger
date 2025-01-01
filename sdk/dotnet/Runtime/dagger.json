@@ -1,0 +1,12 @@
+{
+  "name": "DotnetSdk",
+  "engineVersion": "v0.15.1",
+  "sdk": "go",
+  "source": ".",
+  "exclude": [
+    "*.cs",
+    "bin",
+    "obj",
+    "Runtime.csproj"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "ModuleTest",
+  "engineVersion": "v0.15.1",
+  "sdk": "../Runtime",
+  "include": [
+    "../Runtime/bin/Release/net8.0/linux-x64",
+    "../DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64",
+    "../DaggerSDK/DaggerSDK.csproj",
+    "../DaggerSDK/**/*.cs"
+  ],
+  "exclude": [
+    "../Runtime/bin/Release/net8.0/linux-x64/Dagger.Runtime",
+    "../Runtime/bin/Release/net8.0/linux-x64/Dagger.Runtime.pdb",
+    "../DaggerSDKCodeGen/bin/Debug/net8.0/linux-x64/Dagger.CodeGen"
+  ],
+  "dependencies": [
+    {
+      "name": "hello",
+      "source": "github.com/shykes/daggerverse/hello@5c47fda7b11300c4a18a4f5e874441006b66c300",
+      "pin": "5c47fda7b11300c4a18a4f5e874441006b66c300"
+    }
+  ],
+  "source": "."
+}
