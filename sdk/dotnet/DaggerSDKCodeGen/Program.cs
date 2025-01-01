@@ -1,45 +1,46 @@
 ﻿using System.Collections.Immutable;
-using System.Diagnostics;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Dagger;
 using Dagger.Generator;
 using Dagger.Introspection;
-using GraphQL;
-using GraphQL.Client.Abstractions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using static System.Environment;
+using static System.IO.File;
 
-if (GetCommandLineArgs().Contains("debug"))
-	while (Debugger.IsAttached == false)
-		await Task.Delay(100);
-
-Console.WriteLine("Connecting to Dagger...");
-using var context = Context.Default;
-Task<IGraphQLClient> clientTask = context.Connection();
-
-// Read query from stdin in parallel
-string introspectionQuery;
+Console.WriteLine("Parsing schema...");
+SchemaDocument document;
+FileStream fileStream = new("introspection.json", FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 {
-	await using Stream stdin = Console.OpenStandardInput();
-	using StreamReader queryReader = new(stdin);
-	introspectionQuery = await queryReader.ReadToEndAsync();
+	JsonSerializerOptions serializerOptions = new()
+	{
+		Converters = { new ImmutableArrayConverterFactory(), new JsonStringEnumConverter() },
+		PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+	};
+	document = await JsonSerializer.DeserializeAsync<SchemaDocument>(fileStream, serializerOptions)
+		?? throw new Exception
+			(
+				"Deserializing introspection.json unexpectedly produced null result instead of crashing or succeeding"
+			);
 }
-IGraphQLClient client = await clientTask;
+ValueTask disposeTask = fileStream.DisposeAsync();
 
-Console.WriteLine("Obtaining schema...");
-GraphQLResponse<Response> introspectionResponse = await client.SendQueryAsync<Response>(introspectionQuery);
-Schema schema = introspectionResponse.Data.Schema
-	.SetParents();
-schema = schema with
+Console.WriteLine("Post-processing schema...");
+Schema schema = document.Schema with
 {
 	Types =
 	[
-		..schema.Types
+		..document.Schema.Types
 			.Select
 			(
 				type => type with
 				{
-					Fields = [..type.Fields.OrderBy(queryField => queryField.Name, FieldSorter.instance)]
+					Fields =
+					[
+						..type.Fields
+							.Select(field => field with { ParentObject = type })
+							.OrderBy(queryField => queryField.Name, FieldSorter.instance)
+					]
 				}
 			)
 			.OrderBy(queryType => queryType.Name)
@@ -49,6 +50,9 @@ schema = schema with
 Console.WriteLine("Generating C# SDK structure...");
 CompilationUnitSyntax generatedSyntax = API.Generate(schema);
 
-await using StreamWriter writer = System.IO.File.CreateText("../DaggerSDK/Generated.cs");
+Console.WriteLine("Writing C# SDK source code...");
+StreamWriter writer = CreateText("Generated.cs");
 generatedSyntax.NormalizeWhitespace("\t", "\n").WriteTo(writer);
+await writer.DisposeAsync();
 
+await disposeTask;

@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace Dagger.Introspection;
 
-record Response
+record SchemaDocument
 (
 	[property: JsonPropertyName("__schema")]
 	Schema Schema

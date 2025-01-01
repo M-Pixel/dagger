@@ -9,11 +9,15 @@
     <AssemblyName>Dagger.CodeGen</AssemblyName>
     <RootNamespace>Dagger</RootNamespace>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MaxPixel.Dagger.SDK" Version="0.0.4" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.9.0-2.final" />
+    <!-- This little bit of JSON deserialization code is used by both projects.  It's not really substantial enough to
+     justify putting it in its own shared project.  It's the kind of thing you would choose to implement as a
+     header-only library in C++. -->
+    <Compile Include="../DaggerSDK/Json.cs" />
   </ItemGroup>
 
 </Project>
