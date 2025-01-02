@@ -54,7 +54,7 @@ func (sdk *DotnetSdk) Codegen(
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
 // +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!DaggerSDK/DaggerSDK.csproj", "!DaggerSDK/**/*.cs", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "*.pdb"]
+// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!Client/Client.csproj", "!Client/**/*.cs", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "*.pdb"]
 	sdkDirectory *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	// TODO: Don't actually generate code if the context is call (as opposed to init or sync), and a generated SDK is
@@ -83,12 +83,12 @@ func (sdk *DotnetSdk) Codegen(
 		WithoutMount("CodeGenerator").
 
 		// Compile SDK which references ../Generated.cs
-		WithMountedDirectory("DaggerSDK", sdkDirectory.Directory("DaggerSDK")).
+		WithMountedDirectory("Client", sdkDirectory.Directory("Client")).
 		WithMountedCache(
-			"DaggerSDK/obj",
+			"Client/obj",
 			dag.CacheVolume("dotnet-sdk-obj"),
 			dagger.ContainerWithMountedCacheOpts{Owner: "app"}).
-		WithWorkdir("DaggerSDK").
+		WithWorkdir("Client").
 		WithExec([]string{"dotnet", "build", "--configuration=Release", "--os=linux", "--output=../out"}).
 		Directory("../out")
 

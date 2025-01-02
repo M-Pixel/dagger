@@ -6,8 +6,8 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
     <ItemGroup>
-        <Reference Include="Dagger.SDK">
-            <HintPath>Libraries/Dagger.SDK.dll</HintPath>
+        <Reference Include="Dagger.Client">
+            <HintPath>Libraries/Dagger.Client.dll</HintPath>
         </Reference>
     </ItemGroup>
 

@@ -23,7 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\DaggerSDK\DaggerSDK.csproj" />
+    <ProjectReference Include="..\..\Client\Client.csproj" />
   </ItemGroup>
 
 </Project>

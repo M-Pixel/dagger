@@ -71,7 +71,7 @@ static class Structures
 					.AddModifiers(SyntaxKind.InternalKeyword)
 					.WithBody
 					(
-						OperationArgumentConversionStatements(type.InputFields, FormatName, isForRootClient: false)
+						OperationArgumentConversionStatements(type.InputFields, FormatName, isForRootQueryObject: false)
 							.Append(ReturnStatement(IdentifierName("_arguments_")))
 					)
 			);

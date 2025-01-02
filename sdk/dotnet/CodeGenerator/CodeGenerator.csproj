@@ -18,7 +18,9 @@
     <!-- This little bit of JSON deserialization code is used by both projects.  It's not really substantial enough to
      justify putting it in its own shared project.  It's the kind of thing you would choose to implement as a
      header-only library in C++. -->
-    <Compile Include="../DaggerSDK/Json.cs" />
+    <Compile Include="..\Client\Json.cs">
+      <Link>Json.cs</Link>
+    </Compile>
   </ItemGroup>
 
 </Project>

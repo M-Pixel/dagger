@@ -64,12 +64,12 @@ static class Method
 	public static IEnumerable<StatementSyntax> AppendQueryTree(Field field)
 	{
 		// Insert arguments
-		bool isForRootClient = field.ParentObject?.Name == "Query";
+		bool isForRootQueryObject = field.ParentObject?.Name == "Query";
 		foreach
 		(
 			StatementSyntax statement
 			in
-			OperationArgumentConversionStatements(field.Arguments, FormatParameterName, isForRootClient)
+			OperationArgumentConversionStatements(field.Arguments, FormatParameterName, isForRootQueryObject)
 		)
 			yield return statement;
 
@@ -98,8 +98,8 @@ static class Method
 								(
 									new(string, ExpressionSyntax)[]
 									{
-										("QueryTree", IdentifierName("_newQueryTree_")),
-										("Context", IdentifierName("Context"))
+										("Session", IdentifierName("Session")),
+										("QueryTree", IdentifierName("_newQueryTree_"))
 									}
 								)
 						)

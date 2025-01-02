@@ -157,14 +157,14 @@ static class EnumOperationArgumentValue
 		value ? TrueOperationArgumentValue.instance : FalseOperationArgumentValue.instance;
 }
 
-/// <summary>Value is a <see cref="Client"/> object that needs to be substituted with an ID string.</summary>
+/// <summary>Value is a <see cref="ObjectClient"/> object that needs to be substituted with an ID string.</summary>
 class ReferenceOperationArgumentValue : OperationArgumentValue
 {
-	private BaseClient? _value;
+	private ObjectClient? _value;
 	private Task<string>? _valueTask;
 
 
-	internal ReferenceOperationArgumentValue(BaseClient value)
+	internal ReferenceOperationArgumentValue(ObjectClient value)
 	{
 		_value = value;
 	}
@@ -273,21 +273,4 @@ static class QueryTreeExtensions
 		OperationArgument? firstArgument = null
 	)
 		=> queryTree.Add(new Operation(operationName, firstArgument));
-}
-
-public abstract class BaseClient
-{
-	internal ImmutableList<Operation> QueryTree { get; init; } = ImmutableList<Operation>.Empty;
-	internal Context Context { get; init; } = new();
-
-
-	internal async Task<string> Compute()
-	{
-		var jsonResult = await APIUtils.ComputeQuery
-		(
-			QueryTree.Add("id"),
-			await Context.Connection()
-		);
-		return jsonResult.Deserialize<string>()!;
-	}
 }

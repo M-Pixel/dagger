@@ -6,7 +6,7 @@ namespace Dagger;
 
 class ImmutableArrayConverter<T> : JsonConverter<ImmutableArray<T>>
 {
-	private readonly object _criticalSection = new();
+	private readonly object _Mutex = new();
 	private JsonSerializerOptions? _nonrecursiveOptions;
 
 	public override ImmutableArray<T> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -23,7 +23,7 @@ class ImmutableArrayConverter<T> : JsonConverter<ImmutableArray<T>>
 
 	JsonSerializerOptions UnRecurseOptions(JsonSerializerOptions baseOptions)
 	{
-		lock (_criticalSection)
+		lock (_Mutex)
 		{
 			if (_nonrecursiveOptions == null)
 			{

@@ -20,7 +20,7 @@ static class Classes
 		ClassDeclarationSyntax result = ClassDeclaration(formattedName)
 			.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.SealedKeyword)
 			.AddDocumentationComments(type)
-			.AddBaseListTypes("BaseClient")
+			.AddBaseListTypes("ObjectClient")
 			.WithMembers
 			(
 				type.Fields
@@ -56,7 +56,7 @@ static class Classes
 				return result
 					.AddMembers
 					(
-						PropertyDeclaration("Client", "Default")
+						PropertyDeclaration("Query", "FromDefaultSession")
 							.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.StaticKeyword)
 							.AddAccessorListAccessors
 							(
@@ -67,7 +67,7 @@ static class Classes
 								ImplicitObjectCreationExpression()
 									.WithInitializer
 									(
-										AssignmentExpression("Context", MemberAccessExpression("Context", "Default"))
+										AssignmentExpression("Session", ImplicitObjectCreationExpression())
 									)
 							)
 					);

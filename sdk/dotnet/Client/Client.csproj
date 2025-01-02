@@ -5,17 +5,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>12</LangVersion>
-    <AssemblyName>Dagger.SDK</AssemblyName>
+    <AssemblyName>Dagger.Client</AssemblyName>
     <RootNamespace>Dagger</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Downloader" Version="3.1.0-beta" />
     <PackageReference Include="GraphQL.Client" Version="6.0.2" />
     <PackageReference Include="GraphQL.Client.Serializer.SystemTextJson" Version="6.0.2" />
-    <PackageReference Include="MicroKnights.IO.SplitStream" Version="1.0.0" />
     <Compile Include="../Generated.cs" />
   </ItemGroup>
 

@@ -8,7 +8,7 @@ namespace Dagger.Thunk;
 
 class Introspection
 {
-	private Module _module = Client.Default.GetModule();
+	private Module _module = Query.FromDefaultSession.GetModule();
 	private readonly IEnumerable<Type> _exportedTypes;
 	private readonly NullabilityInfoContext _nullabilityContext = new();
 	private TypeDef _moduleStatic;
@@ -19,7 +19,7 @@ class Introspection
 	public Introspection(Assembly moduleAssembly, string moduleName)
 	{
 		_exportedTypes = moduleAssembly.ExportedTypes;
-		_moduleStatic = Client.Default.GetTypeDef().WithObject(moduleName);
+		_moduleStatic = Query.FromDefaultSession.GetTypeDef().WithObject(moduleName);
 		_moduleStaticOriginal = _moduleStatic;
 		_moduleName = moduleName;
 	}
@@ -40,7 +40,7 @@ class Introspection
 				ElementDocumentation interfaceDocumentation = new();
 				assemblyDocumentation.Members?.TryGetValue(exportedType.FullName!, out interfaceDocumentation);
 
-				TypeDef typeDefinition = Client.Default.GetTypeDef()
+				TypeDef typeDefinition = Query.FromDefaultSession.GetTypeDef()
 					.WithInterface(exportedType.Name, interfaceDocumentation.Summary);
 
 				AddMembers(ref typeDefinition!, exportedType, assemblyDocumentation.Members);
@@ -55,13 +55,13 @@ class Introspection
 				ElementDocumentation objectDocumentation = new();
 				assemblyDocumentation.Members?.TryGetValue(exportedType.FullName!, out objectDocumentation);
 
-				TypeDef typeDefinition = Client.Default.GetTypeDef()
+				TypeDef typeDefinition = Query.FromDefaultSession.GetTypeDef()
 					.WithObject(exportedType.Name, objectDocumentation.Summary);
 
 				AddMembers(ref typeDefinition!, exportedType, assemblyDocumentation.Members);
 				_module = _module.WithObject(typeDefinition);
 			}
-			else
+			else if (exportedType.IsSealed)
 			{
 				TypeDef? nullTypeDef = null;
 				AddMembers(ref nullTypeDef, exportedType, assemblyDocumentation.Members);
@@ -95,6 +95,7 @@ class Introspection
 		IImmutableDictionary<string, ElementDocumentation>? objectDocumentation
 	)
 	{
+		var dag = Query.FromDefaultSession;
 		TypeDef? bareTypeDefinition = typeDefinition;
 		bool hasConstructor = false;
 
@@ -103,7 +104,6 @@ class Introspection
 			: BindingFlags.Public | BindingFlags.Static;
 		foreach (var memberInfo in type.GetMembers(bindingFlags))
 		{
-			var dag = Client.Default;
 			Console.WriteLine($"\t{memberInfo.Name}");
 			if (memberInfo.MemberType is MemberTypes.TypeInfo or MemberTypes.Custom or MemberTypes.NestedType)
 				continue;
@@ -258,7 +258,7 @@ class Introspection
 		if (type.IsByRef)
 			throw new NotSupportedException("ref/in/out parameters are fundamentally incompatible with Dagger.");
 
-		var dag = Client.Default;
+		var dag = Query.FromDefaultSession;
 		if (type.Name == "String")
 			return dag.GetTypeDef().WithKind(TypeDefKind.STRING_KIND);
 		if (type.IsValueType)

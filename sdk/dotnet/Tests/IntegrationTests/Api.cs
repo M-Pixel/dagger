@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
+using NUnit.Framework;
 using static Dagger.APIUtils;
 using static Dagger.IntegrationTests.TestHelpers;
 
@@ -11,7 +12,7 @@ class CSharpApi
 	[Test]
 	public async Task BuildCorrectlyAQueryAithOneArgument()
 	{
-		Container tree = new Client().Container().From("alpine:3.16.2");
+		Container tree = new Query().Container().From("alpine:3.16.2");
 
 		StringBuilder queryBuilder = new();
 		await BuildQuery(queryBuilder, tree.QueryTree);
@@ -21,7 +22,7 @@ class CSharpApi
 	[Test]
 	public async Task BuildCorrectlyAQueryWithDifferentArgsType()
 	{
-		GitRepository tree2 = new Client().Git("fake_url", keepGitDir: true);
+		GitRepository tree2 = new Query().Git("fake_url", keepGitDir: true);
 
 		StringBuilder queryBuilder = new();
 		await BuildQuery(queryBuilder, tree2.QueryTree);
@@ -72,7 +73,7 @@ class CSharpApi
 	[Test]
 	public async Task BuildOneQueryWithMultipleArguments()
 	{
-		Container tree = new Client()
+		Container tree = new Query()
 			.Container()
 			.From("alpine:3.16.2")
 			.WithExec(["apk", "add", "curl"]);
@@ -89,7 +90,7 @@ class CSharpApi
 	[Test]
 	public async Task BuildAQueryBySplittingIt()
 	{
-		Container image = new Client().Container().From("alpine:3.16.2");
+		Container image = new Query().Container().From("alpine:3.16.2");
 		Container pkg = image.WithExec(["echo", "foo bar"]);
 
 		StringBuilder queryBuilder = new();
@@ -113,7 +114,7 @@ class CSharpApi
 					.Id();
 
 				string image = await client
-					.Container(id: containerId)
+					.LoadContainerFromID(containerId)
 					.WithMountedCache("/root/.cache", client.CacheVolume("cache_key"))
 					.WithExec(["echo", "foo bar"])
 					.Stdout();
@@ -148,7 +149,7 @@ class CSharpApi
 	[Test]
 	public async Task BuildAQueryWithPositionnalAndOptionalsArguments()
 	{
-		Container image = new Client()
+		Container image = new Query()
 			.Container()
 			.From("alpine:3.16.2");
 		Container pkg = image
@@ -164,7 +165,7 @@ class CSharpApi
 	[Test]
 	public async Task TestFieldImmutability()
 	{
-		Container image = new Client()
+		Container image = new Query()
 			.Container()
 			.From("alpine:3.16.2");
 
@@ -219,7 +220,7 @@ class CSharpApi
 		(
 			async client =>
 			{
-				Directory image = client.Directory().WithNewFile
+				Directory image = client.GetDirectory().WithNewFile
 				(
 					"Dockerfile",
 					"FROM alpine"
@@ -311,7 +312,7 @@ class CSharpApi
 					.WithDirectory(
 						"/",
 						client
-							.Directory()
+							.GetDirectory()
 							.WithNewFile("testout", stdout)
 							.WithNewFile("testerr", stderr))
 					.WithExec(args);
@@ -431,13 +432,11 @@ class CSharpApi
 
 				string exportId = $"./export-{Guid.NewGuid()}";
 
-				bool isSuccess = await client
+				string _ = await client
 					.Container()
 					.Export(exportId, platformVariants: seededPlatformVariants);
 
 				System.IO.File.Delete(exportId);
-
-				Assert.That(isSuccess, Is.True);
 			}
 		);
 	}
@@ -507,6 +506,6 @@ static class TestExtensionMethods
 {
 	public static Container WithEnv(this Container container) => container.WithEnvVariable("FOO", "bar");
 
-	public static Container WithSecret(this Container container, string token, Client client)
+	public static Container WithSecret(this Container container, string token, Query client)
 		=> container.WithSecretVariable("TOKEN", client.SetSecret("TOKEN", token));
 }

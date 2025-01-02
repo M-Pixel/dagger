@@ -6,7 +6,7 @@ using Module = Dagger.Module;
 
 // Kick off Dagger query first without awaiting it, so that assembly loading (which doesn't have async methods) can
 // happen in parallel.
-Client dag = Client.Default;
+Query dag = Query.FromDefaultSession;
 FunctionCall functionCall = dag.CurrentFunctionCall();
 Task<string> parentNameTask = functionCall.ParentName();
 

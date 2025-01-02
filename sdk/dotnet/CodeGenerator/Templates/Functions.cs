@@ -166,8 +166,8 @@ static class Functions
 	/// <summary>
 	/// Formats a GraphQL name (e.g. object, field, arg) into a C# equivalent, avoiding collisions with reserved words.
 	/// </summary>
-	public static string FormatName(string name)
-		=> name == "Query" ? "Client" : PascalCase(name);
+	public static string FormatName(string name) => PascalCase(name);
+	// Note: This is where any conventional renames would be implemented.
 
 	public static string FormatParameterName(string name)
 		=> IsKeyword(name)
@@ -198,7 +198,7 @@ static class Functions
 	(
 		IEnumerable<InputValue> inputs,
 		Func<string, string> nameFormatter,
-		bool isForRootClient
+		bool isForRootQueryObject
 	)
 	{
 		yield return LocalDeclarationAssignmentStatement
@@ -211,7 +211,7 @@ static class Functions
 		foreach (InputValue argument in inputs)
 		{
 			bool referenceTakesRawID =
-				argument.Name == "id" && isForRootClient
+				argument.Name == "id" && isForRootQueryObject
 				|| argument.Type.ResolveName().EndsWith("ID") == false;
 
 			IdentifierNameSyntax valueIdentifier = IdentifierName(nameFormatter(argument.Name));

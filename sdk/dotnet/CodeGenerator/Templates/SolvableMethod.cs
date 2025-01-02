@@ -71,7 +71,7 @@ static class SolvableMethod
 				.AddArgumentListArguments
 				(
 					IdentifierName("_newQueryTree_"),
-					AwaitExpression(InvocationExpression(MemberAccessExpression("Context", "Connection")))
+					InvocationExpression(MemberAccessExpression("Session", "AcquireGraphQLClient"))
 				)
 		);
 
@@ -141,7 +141,7 @@ static class SolvableMethod
 													)
 											)
 										),
-										("Context", IdentifierName("Context"))
+										("Session", IdentifierName("Session"))
 									}
 									.Concat
 									(
