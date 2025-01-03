@@ -28,7 +28,7 @@ static class Structures
 	static RecordDeclarationSyntax GenerateCustomScalar(Introspection.Type type)
 		=> RecordDeclaration(FormatName(type.Name))
 			.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.SealedKeyword)
-			.AddParameterListParameters(Parameter(Identifier("Value")).WithType(IdentifierName("string")))
+			.AddParameterListParameters(Parameter(Identifier("Value")).WithType(IdentifierName("String")))
 			.AddDocumentationComments(type);
 
 	static EnumDeclarationSyntax GenerateEnum(Introspection.Type type)

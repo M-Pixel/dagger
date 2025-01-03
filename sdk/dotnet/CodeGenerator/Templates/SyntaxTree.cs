@@ -81,7 +81,7 @@ static class SyntaxTree
 		=> self.WithMembers(List(self.Members.Concat(members)));
 
 	public static CompilationUnitSyntax AddUsings(this CompilationUnitSyntax self, params string[] usings)
-		=> self.AddUsings(usings.Select(fullName => UsingDirective(IdentifierName(fullName))).ToArray());
+		=> self.AddUsings(usings.Select(fullName => UsingDirective(QualifiedName(fullName))).ToArray());
 
 	public static CompilationUnitSyntax AddUsingStatic(this CompilationUnitSyntax self, params string[] classPath)
 		=> self.AddUsings
@@ -90,12 +90,15 @@ static class SyntaxTree
 				.WithStaticKeyword(Token(SyntaxKind.StaticKeyword))
 		);
 
-	public static CompilationUnitSyntax WithFileScopedNamespaceDeclaration
+	public static NamespaceDeclarationSyntax NamespaceDeclaration(string qualifiedNamespace)
+		=> SyntaxFactory.NamespaceDeclaration(QualifiedName(qualifiedNamespace));
+
+	public static NamespaceDeclarationSyntax AddMembers
 	(
-		this CompilationUnitSyntax self,
-		string @namespace
+		this NamespaceDeclarationSyntax self,
+		IEnumerable<MemberDeclarationSyntax> members
 	)
-		=> self.AddMembers(FileScopedNamespaceDeclaration(IdentifierName(@namespace)));
+		=> self.WithMembers(List(self.Members.Concat(members)));
 
 	public static ConditionalAccessExpressionSyntax ConditionalAccessExpression
 	(
@@ -157,6 +160,18 @@ static class SyntaxTree
 			Identifier(identifier),
 			TypeArgumentList(SeparatedList<TypeSyntax>(typeArguments.Select(IdentifierName)))
 		);
+
+	public static NameSyntax QualifiedName(ReadOnlySpan<char> classPath)
+	{
+		int separatorIndex = classPath.LastIndexOf('.');
+		return separatorIndex == -1
+			? IdentifierName(classPath.ToString())
+			: SyntaxFactory.QualifiedName
+			(
+				QualifiedName(classPath[..separatorIndex]),
+				IdentifierName(classPath[(separatorIndex + 1)..].ToString())
+			);
+	}
 
 	public static IEnumerable<XmlNodeSyntax> XmlParagraphs(string documentation)
 	{
