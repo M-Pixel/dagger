@@ -98,5 +98,6 @@ func (sdk *DotnetSdk) Codegen(
 	}
 	// TODO: Configurable whether documentation & PDB are included
 	// TODO: Pass-through (or create) .csproj file, making sure that it contains a ref to the generated SDK
-	return dag.GeneratedCode(dag.Directory().WithDirectory(path.Join(subPath, "Libraries"), buildDirectory)), nil
+	return dag.GeneratedCode(dag.Directory().WithDirectory(path.Join(subPath, "Libraries"), buildDirectory)).
+		WithVCSIgnoredPaths([]string{"Libraries", "bin", "obj"}), nil
 }
