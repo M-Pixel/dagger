@@ -4,13 +4,20 @@ using System.Text.Json.Serialization;
 using Dagger;
 using Dagger.Generator;
 using Dagger.Introspection;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using static System.IO.File;
+
+string? moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name");
+bool isHost = moduleName == null;
+if (isHost)
+	moduleName = "Host";
+string assemblyName = $"Dagger.Generated.{moduleName}";
 
 Console.WriteLine("Parsing schema...");
 SchemaDocument document;
-FileStream fileStream = new("introspection.json", FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+FileStream fileStream = new
+(
+	isHost ? "introspection.json" : "/mnt/introspection.json",
+	FileMode.Open, FileAccess.Read, FileShare.ReadWrite
+);
 {
 	JsonSerializerOptions serializerOptions = new()
 	{
@@ -47,12 +54,7 @@ Schema schema = document.Schema with
 	]
 };
 
-Console.WriteLine("Generating C# SDK structure...");
-CompilationUnitSyntax generatedSyntax = API.Generate(schema);
-
-Console.WriteLine("Writing C# SDK source code...");
-StreamWriter writer = CreateText("Generated.cs");
-generatedSyntax.NormalizeWhitespace("\t", "\n").WriteTo(writer);
-await writer.DisposeAsync();
+Console.WriteLine("Generating client library...");
+ClientCompiler.Compile(API.Generate(schema, assemblyName));
 
 await disposeTask;
