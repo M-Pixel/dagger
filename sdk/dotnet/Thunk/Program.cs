@@ -1,6 +1,11 @@
-﻿using System.Reflection;
+﻿using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.Loader;
-using Dagger;
+using System.Threading;
+using System.Threading.Tasks;
+using Dagger.Generated.ModuleTest;
 using Dagger.Thunk;
 using Module = Dagger.Module;
 

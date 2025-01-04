@@ -1,7 +1,11 @@
-using System.Collections.Frozen;
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading.Tasks;
+using Dagger.Generated.ModuleTest;
 
 namespace Dagger.Thunk;
 

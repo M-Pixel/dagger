@@ -1,8 +1,14 @@
+using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Tasks;
+using Dagger.Generated.ModuleTest;
+using Module = Dagger.Generated.ModuleTest.Module;
 
 namespace Dagger.Thunk;
 
