@@ -69,6 +69,7 @@ class Introspection
 			}
 			else if (exportedType.IsSealed)
 			{
+				Console.WriteLine("\tIs static.");
 				TypeDef? nullTypeDef = null;
 				AddMembers(ref nullTypeDef, exportedType, assemblyDocumentation.Members);
 				continue;
@@ -90,8 +91,22 @@ class Introspection
 
 	private static bool IsIneligible(Type exportedType)
 	{
-		return !exportedType.IsPublic || exportedType.FullName == null || exportedType.IsGenericType ||
-		       exportedType.IsAssignableTo(typeof(Attribute));
+		if (!exportedType.IsPublic)
+		{
+			Console.WriteLine("\tIneligible because not public.");
+			return true;
+		}
+		if (exportedType.IsGenericType)
+		{
+			Console.WriteLine("\tIneligible because generic.");
+			return true;
+		}
+		if (exportedType.IsAssignableTo(typeof(Attribute)))
+		{
+			Console.WriteLine("\tIneligible because attribute.");
+			return true;
+		}
+		return false;
 	}
 
 	void AddMembers
@@ -106,118 +121,137 @@ class Introspection
 		bool hasConstructor = false;
 
 		BindingFlags bindingFlags = typeDefinition == null
-			? BindingFlags.Public
-			: BindingFlags.Public | BindingFlags.Static;
-		foreach (var memberInfo in type.GetMembers(bindingFlags))
-		{
-			Console.WriteLine($"\t{memberInfo.Name}");
-			if (memberInfo.MemberType is MemberTypes.TypeInfo or MemberTypes.Custom or MemberTypes.NestedType)
-				continue;
-			if (memberInfo.Name is "GetType" or ".ctor")
-				continue;
-
-			ElementDocumentation memberDocumentation = new();
-			objectDocumentation?.TryGetValue(memberInfo.Name, out memberDocumentation);
-			switch (memberInfo)
+			? BindingFlags.Public | BindingFlags.Static
+			: BindingFlags.Public | BindingFlags.Instance;
+		if (typeDefinition != null)
+			foreach (ConstructorInfo constructorInfo in type.GetConstructors(bindingFlags))
 			{
-				case ConstructorInfo constructorInfo:
-					ParameterInfo[] parameters = constructorInfo.GetParameters();
-					if (parameters.Length == 0)
-						continue;
-					if (hasConstructor)
-						throw new Exception("Dagger does not support overloaded constructors.");
-					hasConstructor = true;
-					// bareTypeDefinition and typeDefinition assumed to be non-null because constructorInfo won't be
-					// encountered with BindingFlags.Static.
-					Function constructor = dag.Function("", bareTypeDefinition!);
-					if (memberDocumentation.Summary != null)
-						constructor = constructor.WithDescription(memberDocumentation.Summary);
-					constructor = AddParameters(constructor, parameters, memberDocumentation.Members);
-					typeDefinition = typeDefinition!.WithConstructor(constructor);
-					break;
+				Console.WriteLine("\tconstructor");
+				ElementDocumentation memberDocumentation = new();
+				objectDocumentation?.TryGetValue(constructorInfo.Name, out memberDocumentation);
 
-				case EventInfo:
-					// TODO
-					break;
+				ParameterInfo[] parameters = constructorInfo.GetParameters();
+				if (parameters.Length == 0)
+					continue;
+				if (hasConstructor)
+					throw new Exception("Dagger does not support overloaded constructors.");
+				hasConstructor = true;
+				// bareTypeDefinition and typeDefinition assumed to be non-null because constructorInfo won't be
+				// encountered with BindingFlags.Static.
+				Function constructor = dag.Function("", bareTypeDefinition!);
+				if (memberDocumentation.Summary != null)
+					constructor = constructor.WithDescription(memberDocumentation.Summary);
+				constructor = AddParameters(constructor, parameters, memberDocumentation.Members);
+				typeDefinition = typeDefinition.WithConstructor(constructor);
+			}
 
-				case FieldInfo fieldInfo:
+		// TODO: Events
+
+		foreach (FieldInfo fieldInfo in type.GetFields(bindingFlags))
+		{
+			Console.WriteLine($"\tfield {fieldInfo.Name}");
+			ElementDocumentation memberDocumentation = new();
+			objectDocumentation?.TryGetValue(fieldInfo.Name, out memberDocumentation);
+
+			TypeDef targetDefinition = fieldInfo.IsStatic ? _moduleStatic : typeDefinition!;
+
+			targetDefinition = targetDefinition.WithField
+			(
+				fieldInfo.Name,
+				TypeReferenceWithNullability(_nullabilityContext.Create(fieldInfo), false),
+				memberDocumentation.Summary
+			);
+
+			if (fieldInfo is { IsInitOnly: false, IsStatic: false })
+				try
 				{
-					TypeDef targetDefinition = fieldInfo.IsStatic ? _moduleStatic : typeDefinition!;
-
-					targetDefinition = targetDefinition.WithField
-					(
-						fieldInfo.Name,
-						TypeReferenceWithNullability(_nullabilityContext.Create(fieldInfo), false),
-						memberDocumentation.Summary
-					);
-
-					if (fieldInfo is { IsInitOnly: false, IsStatic: false })
-						try
-						{
-							Function setter = dag.Function($"With{fieldInfo.Name}", bareTypeDefinition!)
-								.WithArg("value", TypeReference(fieldInfo.FieldType, true));
-							if (memberDocumentation.Summary != null)
-								setter = setter.WithDescription(memberDocumentation.Summary);
-							targetDefinition = targetDefinition.WithFunction(setter);
-						} catch (Exception) { /* If I can't create setter, just omit it. */ }
-
-					if (fieldInfo.IsStatic)
-						_moduleStatic = targetDefinition;
-					else
-						typeDefinition = targetDefinition;
-					break;
+					Function setter = dag.Function($"With{fieldInfo.Name}", bareTypeDefinition!)
+						.WithArg("value", TypeReference(fieldInfo.FieldType, true));
+					if (memberDocumentation.Summary != null)
+						setter = setter.WithDescription(memberDocumentation.Summary);
+					targetDefinition = targetDefinition.WithFunction(setter);
+				}
+				catch (Exception)
+				{
+					/* If I can't create setter, just omit it. */
 				}
 
-				case MethodInfo methodInfo:
-					Function function = dag.Function
-					(
-						memberInfo.Name,
-						TypeReferenceWithNullability(_nullabilityContext.Create(methodInfo.ReturnParameter), false)
-					);
-					function = AddParameters(function, methodInfo.GetParameters(), memberDocumentation.Members);
-					if (methodInfo.IsStatic)
-						_moduleStatic = _moduleStatic.WithFunction(function);
-					else
-						typeDefinition = typeDefinition!.WithFunction(function);
-					break;
+			if (fieldInfo.IsStatic)
+				_moduleStatic = targetDefinition;
+			else
+				typeDefinition = targetDefinition;
+		}
 
-				case PropertyInfo propertyInfo:
-					if (propertyInfo.GetCustomAttribute<RequiredMemberAttribute>() != null)
-						throw new NotImplementedException($"Dagger Dotnet runtime does not yet support required properties.  Initialize {propertyInfo.Name} through the constructor instead (or make it internal).");
-					MethodInfo? getMethod = propertyInfo.GetMethod;
-					if (getMethod?.IsPublic ?? false)
-					{
-						TypeDef targetDefinition = getMethod.IsStatic ? _moduleStatic : typeDefinition!;
-						targetDefinition = targetDefinition.WithField
-						(
-							propertyInfo.Name,
-							TypeReferenceWithNullability(_nullabilityContext.Create(propertyInfo), false),
-							memberDocumentation.Summary
-						);
-						if (getMethod.IsStatic)
-							_moduleStatic = targetDefinition;
-						else
-							typeDefinition = targetDefinition;
-					}
+		foreach (MethodInfo methodInfo in type.GetMethods(bindingFlags))
+		{
+			Console.WriteLine($"\tmethod {methodInfo.Name}");
 
-					MethodInfo? setMethod = propertyInfo.SetMethod;
-					if (setMethod is { IsPublic: true, IsStatic: false })
+			if (methodInfo.Name is "GetType")
+			{
+				Console.WriteLine("\t\tIgnoring prohibited name");
+				continue;
+			}
+
+			ElementDocumentation memberDocumentation = new();
+			objectDocumentation?.TryGetValue(methodInfo.Name, out memberDocumentation);
+
+			Function function = dag.Function
+			(
+				methodInfo.Name,
+				TypeReferenceWithNullability(_nullabilityContext.Create(methodInfo.ReturnParameter), false)
+			);
+			function = AddParameters(function, methodInfo.GetParameters(), memberDocumentation.Members);
+			if (methodInfo.IsStatic)
+				_moduleStatic = _moduleStatic.WithFunction(function);
+			else
+				typeDefinition = typeDefinition!.WithFunction(function);
+		}
+
+		foreach (PropertyInfo propertyInfo in type.GetProperties(bindingFlags))
+		{
+			Console.WriteLine($"\tproperty {propertyInfo.Name}");
+			ElementDocumentation memberDocumentation = new();
+			objectDocumentation?.TryGetValue(propertyInfo.Name, out memberDocumentation);
+
+			if (propertyInfo.GetCustomAttribute<RequiredMemberAttribute>() != null)
+				throw new NotImplementedException(
+					$"Dagger Dotnet runtime does not yet support required properties.  Initialize {propertyInfo.Name} through the constructor instead (or make it internal).");
+			MethodInfo? getMethod = propertyInfo.GetMethod;
+			if (getMethod?.IsPublic ?? false)
+			{
+				TypeDef targetDefinition = getMethod.IsStatic ? _moduleStatic : typeDefinition!;
+				targetDefinition = targetDefinition.WithField
+				(
+					propertyInfo.Name,
+					TypeReferenceWithNullability(_nullabilityContext.Create(propertyInfo), false),
+					memberDocumentation.Summary
+				);
+				if (getMethod.IsStatic)
+					_moduleStatic = targetDefinition;
+				else
+					typeDefinition = targetDefinition;
+			}
+
+			MethodInfo? setMethod = propertyInfo.SetMethod;
+			if (setMethod is { IsPublic: true, IsStatic: false })
+			{
+				Type[] setMethodReturnParameterModifiers =
+					setMethod.ReturnParameter.GetRequiredCustomModifiers();
+				if (!setMethodReturnParameterModifiers.Contains(typeof(IsExternalInit)))
+				{
+					try
 					{
-						Type[] setMethodReturnParameterModifiers =
-							setMethod.ReturnParameter.GetRequiredCustomModifiers();
-						if (!setMethodReturnParameterModifiers.Contains(typeof(IsExternalInit)))
-						{
-							try
-							{
-								Function setter = dag.Function($"With{propertyInfo.Name}", bareTypeDefinition!)
-									.WithArg("value", TypeReference(propertyInfo.PropertyType, true));
-								if (memberDocumentation.Summary != null)
-									setter = setter.WithDescription(memberDocumentation.Summary);
-								typeDefinition = typeDefinition!.WithFunction(setter);
-							} catch (Exception) { /* If I can't create setter, just omit it. */ }
-						}
+						Function setter = dag.Function($"With{propertyInfo.Name}", bareTypeDefinition!)
+							.WithArg("value", TypeReference(propertyInfo.PropertyType, true));
+						if (memberDocumentation.Summary != null)
+							setter = setter.WithDescription(memberDocumentation.Summary);
+						typeDefinition = typeDefinition!.WithFunction(setter);
 					}
-					break;
+					catch (Exception)
+					{
+						/* If I can't create setter, just omit it. */
+					}
+				}
 			}
 		}
 	}

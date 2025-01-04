@@ -7,7 +7,15 @@ using System.Threading;
 using System.Threading.Tasks;
 using Dagger.Generated.ModuleTest;
 using Dagger.Thunk;
-using Module = Dagger.Module;
+using Module = Dagger.Generated.ModuleTest.Module;
+
+if (Environment.GetCommandLineArgs().Contains("-DebugIntrospection"))
+{
+	Assembly testAssembly = new AssemblyLoadContext(null)
+		.LoadFromAssemblyPath(Path.GetFullPath("ModuleTest/bin/Release/net8.0/linux-x64/ModuleTest.dll"));
+	new Introspection(testAssembly, "ModuleTest").BuildModule(new ElementDocumentation());
+	return;
+}
 
 // Kick off Dagger query first without awaiting it, so that assembly loading (which doesn't have async methods) can
 // happen in parallel.
