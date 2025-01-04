@@ -268,6 +268,23 @@ class Introspection
 			if (parameterInfo.Name == null)
 				continue;
 
+			string? defaultPath = null;
+			string[]? ignorePatterns = null;
+			string? parameterTypeName = parameterInfo.ParameterType.FullName;
+			if
+			(
+				parameterTypeName != null &&
+				parameterTypeName.StartsWith("Dagger.Generated.") && parameterTypeName.EndsWith(".Directory")
+			)
+			{
+				var metadata = parameterInfo.GetCustomAttribute<DirectoryFromContextAttribute>();
+				if (metadata != null)
+				{
+					defaultPath = metadata.DefaultPath;
+					ignorePatterns = metadata.Ignore;
+				}
+			}
+
 			function = function.WithArg
 			(
 				parameterInfo.Name,
@@ -277,7 +294,9 @@ class Introspection
 					: null,
 				parameterInfo is { HasDefaultValue: true, RawDefaultValue: not null }
 					? new JSON(parameterInfo.RawDefaultValue.ToString()!)
-					: null
+					: null,
+				defaultPath,
+				ignorePatterns
 			);
 		}
 
@@ -368,7 +387,6 @@ class Introspection
 		else if (type == typeof(JsonArray) || type == typeof(JsonElement.ArrayEnumerator))
 			return dag.GetTypeDef().WithListOf(dag.GetTypeDef().WithObject("JSON"));
 
-		// Else it's a class
 		return dag.GetTypeDef().WithObject(type.Name);
 	}
 }
