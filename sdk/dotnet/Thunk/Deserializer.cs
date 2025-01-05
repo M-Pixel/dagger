@@ -12,18 +12,18 @@ namespace Dagger.Thunk;
 // TODO: Instead of doing all of this reflection at runtime, when building a C# Dagger module, code-gen function for each object + method that directly deserialize
 public class Deserializer
 {
-	public static IReadOnlyDictionary<Type, Func<JsonElement, Type, object>> ListStrategies =
-		new Dictionary<Type, Func<JsonElement, Type, object>>
+	public static IReadOnlyDictionary<string, Func<JsonElement, Type, object>> ListStrategies =
+		new Dictionary<string, Func<JsonElement, Type, object>>
 		{
-			{ typeof(IEnumerable<>), ToEnumerable },
-			{ typeof(ICollection<>), ToList },
-			{ typeof(IList<>), ToList },
-			{ typeof(IReadOnlyCollection<>), ToList },
-			{ typeof(IReadOnlyList<>), ToList },
-			{ typeof(IReadOnlySet<>), ToHashSet },
-			{ typeof(ISet<>), ToHashSet },
-			{ typeof(IImmutableList<>), ToImmutableArray },
-			{ typeof(IImmutableSet<>), ToImmutableSet },
+			{ typeof(IEnumerable<>).FullName!, ToEnumerable },
+			{ typeof(ICollection<>).FullName!, ToList },
+			{ typeof(IList<>).FullName!, ToList },
+			{ typeof(IReadOnlyCollection<>).FullName!, ToList },
+			{ typeof(IReadOnlyList<>).FullName!, ToList },
+			{ typeof(IReadOnlySet<>).FullName!, ToHashSet },
+			{ typeof(ISet<>).FullName!, ToHashSet },
+			{ typeof(IImmutableList<>).FullName!, ToImmutableArray },
+			{ typeof(IImmutableSet<>).FullName!, ToImmutableSet }
 		};
 
 	public static object? Deserialize(Type type, string valueJson)
@@ -83,7 +83,11 @@ public class Deserializer
 		if
 		(
 			type.IsGenericType &&
-			ListStrategies.TryGetValue(type.GetGenericTypeDefinition(), out Func<JsonElement, Type, object>? strategy)
+			ListStrategies.TryGetValue
+			(
+				type.GetGenericTypeDefinition().FullName!,
+				out Func<JsonElement, Type, object>? strategy
+			)
 		)
 		{
 			result = strategy(JsonDocument.Parse(valueJson).RootElement, type.GenericTypeArguments[0]);
@@ -129,7 +133,7 @@ public class Deserializer
 			(
 				ListStrategies.TryGetValue
 				(
-					type.GetGenericTypeDefinition(),
+					type.GetGenericTypeDefinition().FullName!,
 					out Func<JsonElement, Type, object>? strategy
 				)
 			)

@@ -11,10 +11,14 @@
 
 	<ItemGroup>
 		<Reference Include="Dagger.Client">
-			<HintPath>Libraries/Dagger.Client.dll</HintPath>
+			<HintPath>../ModuleTest/Libraries/Dagger.Client.dll</HintPath>
 		</Reference>
-		<Compile Remove="Libraries\**" />
-		<EmbeddedResource Remove="Libraries\**" />
-		<None Remove="Libraries\**" />
+		<Reference Include="Dagger.Generated">
+			<HintPath>../ModuleTest/Libraries/Dagger.Generated.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.0" />
 	</ItemGroup>
 </Project>

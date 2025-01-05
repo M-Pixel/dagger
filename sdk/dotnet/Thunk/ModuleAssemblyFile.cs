@@ -5,7 +5,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Dagger.Thunk;
-using static AssemblyLocator;
+using static ModuleAssemblyFile;
 
 readonly record struct AssemblyBuildDirectoryCandidate : IComparable<AssemblyBuildDirectoryCandidate>
 {
@@ -50,12 +50,53 @@ readonly record struct AssemblyBuildDirectoryCandidate : IComparable<AssemblyBui
 	}
 }
 
-record AssemblyStreamSet(Stream Bytecode, Stream? Symbols, Stream? Documentation) : IDisposable
+class ModuleAssemblyFile
 {
-	public static AssemblyStreamSet Locate(string moduleName, string sourceSubpath)
+	public static readonly int frameworkMajorVersion;
+	public static readonly bool preferRelease;
+	public static readonly bool isManualPreference;
+
+
+	public FileInfo File { get; }
+
+
+	static ModuleAssemblyFile()
+	{
+		string frameworkDesc = RuntimeInformation.FrameworkDescription;
+		int lastSpaceIndex = frameworkDesc.LastIndexOf(' ');
+		ReadOnlySpan<char> versionSpan = frameworkDesc.AsSpan(lastSpaceIndex + 1);
+
+		int start = versionSpan[0] == 'v' ? 1 : 0;
+		int end = start;
+		do ++end; while (end < versionSpan.Length && versionSpan[end] != '.');
+
+		frameworkMajorVersion = int.Parse(versionSpan.Slice(start, end - start));
+
+
+		string? preferReleaseString = Environment.GetEnvironmentVariable("Dagger:Dotnet:PreferRelease");
+		if (preferReleaseString is not null)
+		{
+			preferRelease = preferReleaseString.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+				preferReleaseString.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+				preferReleaseString.Equals("yes", StringComparison.OrdinalIgnoreCase);
+			if (preferRelease)
+				isManualPreference = true;
+			else
+				isManualPreference = preferReleaseString.Equals("false", StringComparison.OrdinalIgnoreCase) ||
+					preferReleaseString.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+					preferReleaseString.Equals("no", StringComparison.OrdinalIgnoreCase);
+			if (!isManualPreference)
+				Console.Error.WriteLine
+				(
+					$"Warning: Did not understand Env:Dagger:Dotnet:PreferRelease value \"{preferReleaseString}\""
+				);
+		}
+	}
+
+	public ModuleAssemblyFile(string moduleName, string sourceSubpath)
 	{
 		var basePath = Path.Combine("/mnt/module", sourceSubpath, moduleName, "bin");
-		if (!System.IO.Directory.Exists(basePath))
+		if (!Directory.Exists(basePath))
 			basePath = Path.Combine("/mnt/module", sourceSubpath, "bin");
 
 		List<AssemblyBuildDirectoryCandidate> candidates = new();
@@ -65,10 +106,10 @@ record AssemblyStreamSet(Stream Bytecode, Stream? Symbols, Stream? Documentation
 		{
 			var configPath = Path.Combine(basePath, isDebug ? "Debug" : "Release");
 
-			if (!System.IO.Directory.Exists(configPath))
+			if (!Directory.Exists(configPath))
 				continue;
 
-			foreach (var buildDirectoryPath in System.IO.Directory.EnumerateDirectories(configPath, "net*.0"))
+			foreach (var buildDirectoryPath in Directory.EnumerateDirectories(configPath, "net*.0"))
 			{
 				if (!TryParseBuildDirectoryFrameworkMajorVersion(buildDirectoryPath, out int version))
 					continue;
@@ -76,12 +117,12 @@ record AssemblyStreamSet(Stream Bytecode, Stream? Symbols, Stream? Documentation
 				foreach (string subPath in new[] { $"linux-{RuntimeInformation.ProcessArchitecture.ToString().ToLower()}/", "" })
 				{
 					var fullPath = Path.Combine(buildDirectoryPath, subPath);
-					if (!System.IO.Directory.Exists(fullPath))
+					if (!Directory.Exists(fullPath))
 						continue;
 
 					string? dllPath = Path.Combine(fullPath, $"{moduleName}.dll");
 					if (!System.IO.File.Exists(dllPath))
-						dllPath = System.IO.Directory.EnumerateFiles(fullPath, $"*.{moduleName}.dll").FirstOrDefault();
+						dllPath = Directory.EnumerateFiles(fullPath, $"*.{moduleName}.dll").FirstOrDefault();
 					if (dllPath == null)
 						continue;
 
@@ -165,29 +206,20 @@ record AssemblyStreamSet(Stream Bytecode, Stream? Symbols, Stream? Documentation
 				Console.Error.WriteLine("  Consider using filters, branches, deleting old builds, to reduce disk usage.");
 		}
 
-		// Open file streams
-		FileStream bytecodeStream = new(selected.DllPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-
-		string symbolsFilePath = selected.DllPath[..^3] + "pdb";
-		FileStream? symbolsStream = System.IO.File.Exists(symbolsFilePath)
-			? new(symbolsFilePath, FileMode.Open, FileAccess.Read, FileShare.Read)
-			: null;
-
-		string documentationFilePath = selected.DllPath[..^3] + "xml";
-		FileStream? documentationStream = System.IO.File.Exists(documentationFilePath)
-			? new(documentationFilePath, FileMode.Open, FileAccess.Read, FileShare.Read)
-			: null;
-
-		return new AssemblyStreamSet(bytecodeStream, symbolsStream, documentationStream);
+		File = new FileInfo(selected.DllPath);
 	}
 
-	~AssemblyStreamSet() => Dispose();
 
-	public void Dispose()
+	public Stream? Symbols()
 	{
-		GC.SuppressFinalize(this);
-		Bytecode.Dispose();
-		Symbols?.Dispose();
+		FileInfo file = new FileInfo(File.FullName[..^3] + "pdb");
+		return file.Exists ? file.OpenRead() : null;
+	}
+
+	public Stream? Documentation()
+	{
+		FileInfo file = new FileInfo(File.FullName[..^3] + "xml");
+		return file.Exists ? file.OpenRead() : null;
 	}
 
 
@@ -199,45 +231,5 @@ record AssemblyStreamSet(Stream Bytecode, Stream? Symbols, Stream? Documentation
 			end++;
 
 		return int.TryParse(versionSpan.Slice(0, end), out version);
-	}
-}
-
-static class AssemblyLocator
-{
-	public static readonly int frameworkMajorVersion;
-	public static readonly bool preferRelease;
-	public static readonly bool isManualPreference;
-
-	static AssemblyLocator()
-	{
-		string frameworkDesc = RuntimeInformation.FrameworkDescription;
-		int lastSpaceIndex = frameworkDesc.LastIndexOf(' ');
-		ReadOnlySpan<char> versionSpan = frameworkDesc.AsSpan(lastSpaceIndex + 1);
-
-		int start = versionSpan[0] == 'v' ? 1 : 0;
-		int end = start;
-		do ++end; while (end < versionSpan.Length && versionSpan[end] != '.');
-
-		frameworkMajorVersion = int.Parse(versionSpan.Slice(start, end - start));
-
-
-		string? preferReleaseString = Environment.GetEnvironmentVariable("Dagger:Dotnet:PreferRelease");
-		if (preferReleaseString is not null)
-		{
-			preferRelease = preferReleaseString.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-				preferReleaseString.Equals("1", StringComparison.OrdinalIgnoreCase) ||
-				preferReleaseString.Equals("yes", StringComparison.OrdinalIgnoreCase);
-			if (preferRelease)
-				isManualPreference = true;
-			else
-				isManualPreference = preferReleaseString.Equals("false", StringComparison.OrdinalIgnoreCase) ||
-					preferReleaseString.Equals("0", StringComparison.OrdinalIgnoreCase) ||
-					preferReleaseString.Equals("no", StringComparison.OrdinalIgnoreCase);
-			if (!isManualPreference)
-				Console.Error.WriteLine
-				(
-					$"Warning: Did not understand Env:Dagger:Dotnet:PreferRelease value \"{preferReleaseString}\""
-				);
-		}
 	}
 }

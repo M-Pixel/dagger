@@ -3,7 +3,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
-using System.Threading;
 using System.Threading.Tasks;
 using Dagger.Generated.ModuleTest;
 using Dagger.Thunk;
@@ -11,9 +10,10 @@ using Module = Dagger.Generated.ModuleTest.Module;
 
 if (Environment.GetCommandLineArgs().Contains("-DebugIntrospection"))
 {
-	Assembly testAssembly = new AssemblyLoadContext(null)
-		.LoadFromAssemblyPath(Path.GetFullPath("ModuleTest/bin/Release/net8.0/linux-x64/ModuleTest.dll"));
-	new Introspection(testAssembly, "ModuleTest").BuildModule(new ElementDocumentation());
+	FileInfo moduleAssemblyFileInfo = new("ModuleTest/bin/Release/net8.0/linux-x64/ModuleTest.dll");
+	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyFileInfo.FullName));
+	Assembly moduleAssembly = metadataLoader.LoadFromStream(moduleAssemblyFileInfo.OpenRead());
+	new Introspection(moduleAssembly, "ModuleTest").Build(new ElementDocumentation());
 	return;
 }
 
@@ -26,32 +26,27 @@ Task<string> parentNameTask = functionCall.ParentName();
 // Bare-bones argument parsing because it's an internal API
 string moduleName = Environment.GetCommandLineArgs()[1];
 string sourceSubPath = Environment.GetCommandLineArgs()[2];
-var assemblyStreams = AssemblyStreamSet.Locate(moduleName, sourceSubPath);
-AssemblyLoadContext assemblyLoader = new("Dagger module");
-Assembly moduleAssembly = assemblyLoader.LoadFromStream(assemblyStreams.Bytecode, assemblyStreams.Symbols);
+ModuleAssemblyFile moduleAssemblyFile = new(moduleName, sourceSubPath);
 
-// If I don't yet know whether this is a registration call or an invocation call, start reading the documentation, so
-// that the overall latency is reduced in case it turns out to be a registration call.
-CancellationTokenSource documentationCancellationSource = new();
-Task<ElementDocumentation>? documentationTask =
-	parentNameTask.IsCompletedSuccessfully || assemblyStreams.Documentation == null
-		? null
-		: ElementDocumentation.Parse(assemblyStreams.Documentation, documentationCancellationSource.Token);
 string parentName = await parentNameTask;
 if (parentName == "")
 {
 	// The entrypoint was called for the purpose of introspecting the module, rather than for invoking it.
-	if (documentationTask == null && assemblyStreams.Documentation != null)
-		documentationTask = ElementDocumentation.Parse(assemblyStreams.Documentation);
+	Stream? documentationStream = moduleAssemblyFile.Documentation();
+	var documentationTask = documentationStream == null ? null : ElementDocumentation.Parse(documentationStream);
 
+	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyFile.File.FullName));
+	Assembly moduleAssembly = metadataLoader.LoadFromStream(moduleAssemblyFile.File.OpenRead());
 	Introspection introspection = new(moduleAssembly, moduleName);
-	Module module = introspection.BuildModule(documentationTask == null ? new() : await documentationTask);
+
+	Module module = introspection.Build(documentationTask == null ? new() : await documentationTask);
 	ModuleID moduleID = await module.Id();
 	await functionCall.ReturnValue(new JSON($"\"{moduleID.Value}\""));
 }
 else
 {
-	// Invoking a function, don't need documentation. If preemptive documentation reading had started, stop it.
-	_ = documentationCancellationSource.CancelAsync();
+	AssemblyLoadContext assemblyLoader = new("Dagger module");
+	Assembly moduleAssembly =
+		assemblyLoader.LoadFromStream(moduleAssemblyFile.File.OpenRead(), moduleAssemblyFile.Symbols());
 	await new Invocation(moduleAssembly).Run(functionCall, parentName, moduleName);
 }

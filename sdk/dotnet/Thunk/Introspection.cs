@@ -11,29 +11,36 @@ using Dagger.Generated.ModuleTest;
 using Module = Dagger.Generated.ModuleTest.Module;
 
 namespace Dagger.Thunk;
+using static Alias;
 
 class Introspection
 {
+	public readonly string? DefaultPath;
+	public readonly string[]? DefaultIgnores;
+	public TypeDef StaticObject;
+	public IImmutableDictionary<string, ElementDocumentation>? MembersDocumentation;
 	private Module _module = Query.FromDefaultSession.GetModule();
 	private readonly IEnumerable<Type> _exportedTypes;
 	private readonly NullabilityInfoContext _nullabilityContext = new();
-	private TypeDef _moduleStatic;
-	private readonly TypeDef _moduleStaticOriginal;
+	private readonly TypeDef _staticObjectOriginal;
 	private readonly string _moduleName;
 
 
 	public Introspection(Assembly moduleAssembly, string moduleName)
 	{
 		_exportedTypes = moduleAssembly.ExportedTypes;
-		_moduleStatic = Query.FromDefaultSession.GetTypeDef().WithObject(moduleName);
-		_moduleStaticOriginal = _moduleStatic;
+		StaticObject = Query.FromDefaultSession.GetTypeDef().WithObject(moduleName);
+		_staticObjectOriginal = StaticObject;
 		_moduleName = moduleName;
+		ApplyDirectoryAttribute(moduleAssembly.GetCustomAttributesData(), ref DefaultPath, ref DefaultIgnores);
 	}
 
 
-	public Module BuildModule(ElementDocumentation assemblyDocumentation)
+	public Module Build(ElementDocumentation assemblyDocumentation)
 	{
 		bool sameNameClassExists = false;
+
+		MembersDocumentation = assemblyDocumentation.Members;
 
 		foreach (Type exportedType in _exportedTypes)
 		{
@@ -43,14 +50,8 @@ class Introspection
 
 			if (exportedType.IsInterface)
 			{
-				ElementDocumentation interfaceDocumentation = new();
-				assemblyDocumentation.Members?.TryGetValue(exportedType.FullName!, out interfaceDocumentation);
-
-				TypeDef typeDefinition = Query.FromDefaultSession.GetTypeDef()
-					.WithInterface(exportedType.Name, interfaceDocumentation.Summary);
-
-				AddMembers(ref typeDefinition!, exportedType, assemblyDocumentation.Members);
-				_module = _module.WithInterface(typeDefinition);
+				_module = _module
+					.WithInterface(new InterfaceIntrospection{ Module = this, Type = exportedType }.Build());
 			}
 			else if (exportedType.IsEnum)
 			{
@@ -58,20 +59,13 @@ class Introspection
 			}
 			else if (!exportedType.IsAbstract)
 			{
-				ElementDocumentation objectDocumentation = new();
-				assemblyDocumentation.Members?.TryGetValue(exportedType.FullName!, out objectDocumentation);
-
-				TypeDef typeDefinition = Query.FromDefaultSession.GetTypeDef()
-					.WithObject(exportedType.Name, objectDocumentation.Summary);
-
-				AddMembers(ref typeDefinition!, exportedType, assemblyDocumentation.Members);
-				_module = _module.WithObject(typeDefinition);
+				_module = _module
+					.WithObject(new ObjectIntrospection{ Module = this, Type = exportedType }.Build());
 			}
 			else if (exportedType.IsSealed)
 			{
 				Console.WriteLine("\tIs static.");
-				TypeDef? nullTypeDef = null;
-				AddMembers(ref nullTypeDef, exportedType, assemblyDocumentation.Members);
+				new StaticObjectIntrospection{ Module = this, Type = exportedType }.Build();
 				continue;
 			}
 
@@ -79,11 +73,11 @@ class Introspection
 				sameNameClassExists = true;
 		}
 
-		if (_moduleStaticOriginal != _moduleStatic)
+		if (_staticObjectOriginal != StaticObject)
 		{
 			if (sameNameClassExists)
-				_moduleStatic = _moduleStatic.WithObject($"{_moduleName}Statics");
-			_module = _module.WithObject(_moduleStatic);
+				StaticObject = StaticObject.WithObject($"{_moduleName}Statics");
+			_module = _module.WithObject(StaticObject);
 		}
 
 		return _module;
@@ -109,12 +103,168 @@ class Introspection
 		return false;
 	}
 
-	void AddMembers
+	public TypeDef TypeReferenceWithNullability(FieldInfo field, bool input) =>
+		TypeReferenceWithNullability(_nullabilityContext.Create(field), input);
+
+	public TypeDef TypeReferenceWithNullability(ParameterInfo parameter, bool input) =>
+		TypeReferenceWithNullability(_nullabilityContext.Create(parameter), input);
+
+	public TypeDef TypeReferenceWithNullability(PropertyInfo property, bool input) =>
+		TypeReferenceWithNullability(_nullabilityContext.Create(property), input);
+
+	static TypeDef TypeReferenceWithNullability(NullabilityInfo nullability, bool input)
+	{
+		Type type = nullability.Type;
+		TypeDef typeDefinition = TypeReference(type, input);
+		if (!type.IsValueType && nullability.WriteState == NullabilityState.Nullable)
+			typeDefinition = typeDefinition.WithOptional(true);
+		return typeDefinition;
+	}
+
+	public static TypeDef TypeReference(Type type, bool input)
+	{
+		if (type.IsByRef)
+			throw new NotSupportedException("ref/in/out parameters are fundamentally incompatible with Dagger.");
+
+		var dag = Query.FromDefaultSession;
+		if (type.Name == "String")
+			return dag.GetTypeDef().WithKind(TypeDefKind.STRING_KIND);
+		if (type.IsValueType)
+		{
+			if (type.FullName == typeof(ValueTask).FullName)
+				return input
+					? throw new NotSupportedException("Dagger dotnet binder doesn't support ValueTask parameters.")
+					: dag.GetTypeDef().WithKind(TypeDefKind.VOID_KIND);
+			if (type.IsGenericType)
+			{
+				Type genericType = type.GetGenericTypeDefinition();
+				if (genericType.FullName == typeof(Nullable<>).FullName)
+					return TypeReference(type.GenericTypeArguments[0], input).WithOptional(true);
+				if (genericType.FullName == typeof(ValueTask<>).FullName)
+					return input
+						? throw new NotSupportedException("Dagger Dotnet binder doesn't support ValueTask<> parameters.")
+						: TypeReference(type.GenericTypeArguments[0], false);
+
+				throw new NotSupportedException
+				(
+					$"Dagger does not support introspection of generic structs (apart from Nullable and ValueTask).  " +
+					$"Cannot expose {type.FullName}."
+				);
+			}
+
+			if (type.IsPrimitive)
+			{
+				switch (type.Name)
+				{
+					case "Boolean":
+						return dag.GetTypeDef().WithKind(TypeDefKind.BOOLEAN_KIND);
+					case "Int32":
+						return dag.GetTypeDef().WithKind(TypeDefKind.INTEGER_KIND);
+					case "Float":
+						throw new NotImplementedException("Dagger currently lacks full float support");
+					default:
+						throw new NotSupportedException
+						(
+							$"Dotnet primitive type {type.FullName} cannot be marshalled through Dagger module calls.  " +
+							$"Only bool, int, and string are supported."
+						);
+				}
+			}
+
+			// It's a struct
+		}
+		else if (type.IsArray)
+			return dag.GetTypeDef().WithListOf(TypeReference(type.GetElementType()!, input));
+		else if (type.IsGenericType)
+		{
+			Type genericType = type.GetGenericTypeDefinition();
+			if (Deserializer.ListStrategies.ContainsKey(genericType.FullName!))
+				return dag.GetTypeDef().WithListOf(TypeReference(type.GenericTypeArguments[0], input));
+			if (genericType.FullName == typeof(Task<>).FullName)
+				return input
+					? throw new NotSupportedException("Dagger Dotnet binder doesn't support Task<> parameters.")
+					: TypeReference(type.GenericTypeArguments[0], false);
+			throw new NotSupportedException
+			(
+				$"Dagger does not support introspection of generic classes (apart from enumerables and task).  " +
+				$"Cannot expose {type.FullName}."
+			);
+		}
+		else if (type.FullName == typeof(Task).FullName)
+			return input
+				? throw new NotSupportedException("Dagger Dotnet binder doesn't support Task parameters.")
+				: dag.GetTypeDef().WithKind(TypeDefKind.VOID_KIND);
+		else if
+		(
+			type.FullName == typeof(JsonObject).FullName ||
+			type.FullName == typeof(JsonElement.ObjectEnumerator).FullName
+		)
+			return dag.GetTypeDef().WithObject("JSON");
+		else if
+		(
+			type.FullName == typeof(JsonArray).FullName ||
+			type.FullName == typeof(JsonElement.ArrayEnumerator).FullName
+		)
+			return dag.GetTypeDef().WithListOf(dag.GetTypeDef().WithObject("JSON"));
+
+		return dag.GetTypeDef().WithObject(type.Name);
+	}
+
+	public static void ApplyDirectoryAttribute
 	(
-		ref TypeDef? typeDefinition,
-		Type type,
-		IImmutableDictionary<string, ElementDocumentation>? objectDocumentation
+		IEnumerable<CustomAttributeData> customAttributes,
+		ref string? defaultPath,
+		ref string[]? ignorePatterns
 	)
+	{
+		foreach (CustomAttributeData attribute in customAttributes)
+		{
+			if (attribute.AttributeType.Name != nameof(DirectoryFromContextAttribute))
+				continue;
+
+			foreach (CustomAttributeNamedArgument argument in attribute.NamedArguments)
+				if
+				(
+					argument.MemberName == nameof(DirectoryFromContextAttribute.Inherit) &&
+					argument.TypedValue.Value == (object?)false
+				)
+				{
+					defaultPath = null;
+					ignorePatterns = null;
+				}
+			foreach (CustomAttributeNamedArgument argument in attribute.NamedArguments)
+			{
+				if (argument.MemberName == nameof(DirectoryFromContextAttribute.DefaultPath))
+					defaultPath = argument.TypedValue.Value as string;
+				else if (argument.MemberName == nameof(DirectoryFromContextAttribute.Ignore))
+					ignorePatterns = argument.TypedValue.Value as string[];
+			}
+			break;
+		}
+	}
+}
+
+abstract class ObjectlikeIntrospection<TTypeDefNullability>
+{
+	public required Introspection Module;
+	public required Type Type;
+	public ElementDocumentation Documentation;
+	private string? _defaultPath;
+	private string[]? _defaultIgnore;
+
+
+	public TTypeDefNullability Build()
+	{
+		Module.MembersDocumentation?.TryGetValue(Type.FullName!, out Documentation);
+		_defaultPath = Module.DefaultPath;
+		_defaultIgnore = Module.DefaultIgnores;
+		Introspection.ApplyDirectoryAttribute(Type.GetCustomAttributesData(), ref _defaultPath, ref _defaultIgnore);
+		return BuildImplementation();
+	}
+
+	protected abstract TTypeDefNullability BuildImplementation();
+
+	protected void AddMembers(ref TypeDef? typeDefinition)
 	{
 		var dag = Query.FromDefaultSession;
 		TypeDef? bareTypeDefinition = typeDefinition;
@@ -124,11 +274,11 @@ class Introspection
 			? BindingFlags.Public | BindingFlags.Static
 			: BindingFlags.Public | BindingFlags.Instance;
 		if (typeDefinition != null)
-			foreach (ConstructorInfo constructorInfo in type.GetConstructors(bindingFlags))
+			foreach (ConstructorInfo constructorInfo in Type.GetConstructors(bindingFlags))
 			{
 				Console.WriteLine("\tconstructor");
 				ElementDocumentation memberDocumentation = new();
-				objectDocumentation?.TryGetValue(constructorInfo.Name, out memberDocumentation);
+				Documentation.Members?.TryGetValue(constructorInfo.Name, out memberDocumentation);
 
 				ParameterInfo[] parameters = constructorInfo.GetParameters();
 				if (parameters.Length == 0)
@@ -147,18 +297,18 @@ class Introspection
 
 		// TODO: Events
 
-		foreach (FieldInfo fieldInfo in type.GetFields(bindingFlags))
+		foreach (FieldInfo fieldInfo in Type.GetFields(bindingFlags))
 		{
 			Console.WriteLine($"\tfield {fieldInfo.Name}");
 			ElementDocumentation memberDocumentation = new();
-			objectDocumentation?.TryGetValue(fieldInfo.Name, out memberDocumentation);
+			Documentation.Members?.TryGetValue(fieldInfo.Name, out memberDocumentation);
 
-			TypeDef targetDefinition = fieldInfo.IsStatic ? _moduleStatic : typeDefinition!;
+			TypeDef targetDefinition = fieldInfo.IsStatic ? Module.StaticObject : typeDefinition!;
 
 			targetDefinition = targetDefinition.WithField
 			(
 				fieldInfo.Name,
-				TypeReferenceWithNullability(_nullabilityContext.Create(fieldInfo), false),
+				Module.TypeReferenceWithNullability(fieldInfo, false),
 				memberDocumentation.Summary
 			);
 
@@ -166,7 +316,7 @@ class Introspection
 				try
 				{
 					Function setter = dag.Function($"With{fieldInfo.Name}", bareTypeDefinition!)
-						.WithArg("value", TypeReference(fieldInfo.FieldType, true));
+						.WithArg("value", Introspection.TypeReference(fieldInfo.FieldType, true));
 					if (memberDocumentation.Summary != null)
 						setter = setter.WithDescription(memberDocumentation.Summary);
 					targetDefinition = targetDefinition.WithFunction(setter);
@@ -177,57 +327,64 @@ class Introspection
 				}
 
 			if (fieldInfo.IsStatic)
-				_moduleStatic = targetDefinition;
+				Module.StaticObject = targetDefinition;
 			else
 				typeDefinition = targetDefinition;
 		}
 
-		foreach (MethodInfo methodInfo in type.GetMethods(bindingFlags))
+		foreach (MethodInfo methodInfo in Type.GetMethods(bindingFlags))
 		{
 			Console.WriteLine($"\tmethod {methodInfo.Name}");
 
-			if (methodInfo.Name is "GetType")
+			if (methodInfo.IsSpecialName || methodInfo.Name.StartsWith('<'))
+			{
+				Console.WriteLine("\t\tIgnoring special name");
+				continue;
+			}
+			if (methodInfo.Name is "GetType" or "Deconstruct")
 			{
 				Console.WriteLine("\t\tIgnoring prohibited name");
 				continue;
 			}
 
 			ElementDocumentation memberDocumentation = new();
-			objectDocumentation?.TryGetValue(methodInfo.Name, out memberDocumentation);
+			Documentation.Members?.TryGetValue(methodInfo.Name, out memberDocumentation);
 
 			Function function = dag.Function
 			(
 				methodInfo.Name,
-				TypeReferenceWithNullability(_nullabilityContext.Create(methodInfo.ReturnParameter), false)
+				Module.TypeReferenceWithNullability(methodInfo.ReturnParameter, false)
 			);
 			function = AddParameters(function, methodInfo.GetParameters(), memberDocumentation.Members);
 			if (methodInfo.IsStatic)
-				_moduleStatic = _moduleStatic.WithFunction(function);
+				Module.StaticObject = Module.StaticObject.WithFunction(function);
 			else
 				typeDefinition = typeDefinition!.WithFunction(function);
 		}
 
-		foreach (PropertyInfo propertyInfo in type.GetProperties(bindingFlags))
+		foreach (PropertyInfo propertyInfo in Type.GetProperties(bindingFlags))
 		{
 			Console.WriteLine($"\tproperty {propertyInfo.Name}");
 			ElementDocumentation memberDocumentation = new();
-			objectDocumentation?.TryGetValue(propertyInfo.Name, out memberDocumentation);
+			Documentation.Members?.TryGetValue(propertyInfo.Name, out memberDocumentation);
 
-			if (propertyInfo.GetCustomAttribute<RequiredMemberAttribute>() != null)
+			bool isRequired = propertyInfo.GetCustomAttributesData()
+				.Any(attribute => attribute.AttributeType.Name == nameof(RequiredMemberAttribute));
+			if (isRequired)
 				throw new NotImplementedException(
-					$"Dagger Dotnet runtime does not yet support required properties.  Initialize {propertyInfo.Name} through the constructor instead (or make it internal).");
+					$"Dagger Dotnet runtime does not yet support required properties.  Initialize {propertyInfo.Name} through the constructor instead (or make it non-public).");
 			MethodInfo? getMethod = propertyInfo.GetMethod;
 			if (getMethod?.IsPublic ?? false)
 			{
-				TypeDef targetDefinition = getMethod.IsStatic ? _moduleStatic : typeDefinition!;
+				TypeDef targetDefinition = getMethod.IsStatic ? Module.StaticObject : typeDefinition!;
 				targetDefinition = targetDefinition.WithField
 				(
 					propertyInfo.Name,
-					TypeReferenceWithNullability(_nullabilityContext.Create(propertyInfo), false),
+					Module.TypeReferenceWithNullability(propertyInfo, false),
 					memberDocumentation.Summary
 				);
 				if (getMethod.IsStatic)
-					_moduleStatic = targetDefinition;
+					Module.StaticObject = targetDefinition;
 				else
 					typeDefinition = targetDefinition;
 			}
@@ -242,7 +399,7 @@ class Introspection
 					try
 					{
 						Function setter = dag.Function($"With{propertyInfo.Name}", bareTypeDefinition!)
-							.WithArg("value", TypeReference(propertyInfo.PropertyType, true));
+							.WithArg("value", Introspection.TypeReference(propertyInfo.PropertyType, true));
 						if (memberDocumentation.Summary != null)
 							setter = setter.WithDescription(memberDocumentation.Summary);
 						typeDefinition = typeDefinition!.WithFunction(setter);
@@ -277,18 +434,20 @@ class Introspection
 				parameterTypeName.StartsWith("Dagger.Generated.") && parameterTypeName.EndsWith(".Directory")
 			)
 			{
-				var metadata = parameterInfo.GetCustomAttribute<DirectoryFromContextAttribute>();
-				if (metadata != null)
-				{
-					defaultPath = metadata.DefaultPath;
-					ignorePatterns = metadata.Ignore;
-				}
+				defaultPath = _defaultPath;
+				ignorePatterns = _defaultIgnore;
+				Introspection.ApplyDirectoryAttribute
+				(
+					parameterInfo.GetCustomAttributesData(),
+					ref defaultPath,
+					ref ignorePatterns
+				);
 			}
 
 			function = function.WithArg
 			(
 				parameterInfo.Name,
-				TypeReferenceWithNullability(_nullabilityContext.Create(parameterInfo), true),
+				Module.TypeReferenceWithNullability(parameterInfo, true),
 				documentation?.TryGetValue(parameterInfo.Name, out ElementDocumentation parameterDocumentation) ?? false
 					? parameterDocumentation.Summary
 					: null,
@@ -302,91 +461,34 @@ class Introspection
 
 		return function;
 	}
+}
 
-	TypeDef TypeReferenceWithNullability(NullabilityInfo nullability, bool input)
+class InterfaceIntrospection : ObjectlikeIntrospection<TypeDef>
+{
+	protected override TypeDef BuildImplementation()
 	{
-		Type type = nullability.Type;
-		TypeDef typeDefinition = TypeReference(type, input);
-		if (!type.IsValueType && nullability.WriteState == NullabilityState.Nullable)
-			typeDefinition = typeDefinition.WithOptional(true);
+		TypeDef typeDefinition = DAG.GetTypeDef().WithInterface(Type.Name, Documentation.Summary);
+		AddMembers(ref typeDefinition!);
 		return typeDefinition;
 	}
+}
 
-	TypeDef TypeReference(Type type, bool input)
+class ObjectIntrospection : ObjectlikeIntrospection<TypeDef>
+{
+	protected override TypeDef BuildImplementation()
 	{
-		if (type.IsByRef)
-			throw new NotSupportedException("ref/in/out parameters are fundamentally incompatible with Dagger.");
+		TypeDef typeDefinition = DAG.GetTypeDef().WithObject(Type.Name, Documentation.Summary);
+		AddMembers(ref typeDefinition!);
+		return typeDefinition;
+	}
+}
 
-		var dag = Query.FromDefaultSession;
-		if (type.Name == "String")
-			return dag.GetTypeDef().WithKind(TypeDefKind.STRING_KIND);
-		if (type.IsValueType)
-		{
-			if (type == typeof(ValueTask))
-				return input
-					? throw new NotSupportedException("Dagger dotnet binder doesn't support ValueTask parameters.")
-					: dag.GetTypeDef().WithKind(TypeDefKind.VOID_KIND);
-			if (type.IsGenericType)
-			{
-				Type genericType = type.GetGenericTypeDefinition();
-				if (genericType == typeof(Nullable<>))
-					return TypeReference(type.GenericTypeArguments[0], input).WithOptional(true);
-				if (genericType == typeof(ValueTask<>))
-					return input
-						? throw new NotSupportedException("Dagger Dotnet binder doesn't support ValueTask<> parameters.")
-						: TypeReference(type.GenericTypeArguments[0], false);
-
-				throw new NotSupportedException
-				(
-					$"Dagger does not support introspection of generic types.  Cannot expose {type.Name}."
-				);
-			}
-
-			if (type.IsPrimitive)
-			{
-				switch (type.Name)
-				{
-					case "Boolean":
-						return dag.GetTypeDef().WithKind(TypeDefKind.BOOLEAN_KIND);
-					case "Int32":
-						return dag.GetTypeDef().WithKind(TypeDefKind.INTEGER_KIND);
-					case "Float":
-						throw new NotImplementedException("Dagger currently lacks full float support");
-					default:
-						throw new NotSupportedException
-						(
-							$"Dotnet primitive type {type.Name} cannot be marshalled through Dagger module calls.  " +
-							$"Only bool, int, and string are supported."
-						);
-				}
-			}
-
-			// It's a struct
-		}
-		else if (type.IsArray)
-			return dag.GetTypeDef().WithListOf(TypeReference(type.GetElementType()!, input));
-		else if (type.IsGenericType)
-		{
-			if (Deserializer.ListStrategies.ContainsKey(type.GetGenericTypeDefinition()))
-				return dag.GetTypeDef().WithListOf(TypeReference(type.GenericTypeArguments[0], input));
-			if (type.GetGenericTypeDefinition() == typeof(Task<>))
-				return input
-					? throw new NotSupportedException("Dagger Dotnet binder doesn't support Task<> parameters.")
-					: TypeReference(type.GenericTypeArguments[0], false);
-			throw new NotSupportedException
-			(
-				$"Dagger does not support introspection of generic types.  Cannot expose {type.Name}."
-			);
-		}
-		else if (type == typeof(Task))
-			return input
-				? throw new NotSupportedException("Dagger Dotnet binder doesn't support Task parameters.")
-				: dag.GetTypeDef().WithKind(TypeDefKind.VOID_KIND);
-		else if (type == typeof(JsonObject) || type == typeof(JsonElement.ObjectEnumerator))
-			return dag.GetTypeDef().WithObject("JSON");
-		else if (type == typeof(JsonArray) || type == typeof(JsonElement.ArrayEnumerator))
-			return dag.GetTypeDef().WithListOf(dag.GetTypeDef().WithObject("JSON"));
-
-		return dag.GetTypeDef().WithObject(type.Name);
+class StaticObjectIntrospection : ObjectlikeIntrospection<TypeDef?>
+{
+	protected override TypeDef? BuildImplementation()
+	{
+		TypeDef? nullTypeDef = null;
+		AddMembers(ref nullTypeDef);
+		return nullTypeDef;
 	}
 }
