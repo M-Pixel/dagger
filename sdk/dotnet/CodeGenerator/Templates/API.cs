@@ -1,4 +1,5 @@
 using Dagger.Introspection;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 using static Dagger.SyntaxTree;
@@ -28,6 +29,18 @@ static class API
 					(
 						Structures.Generate(schema)
 							.Concat(Classes.Generate(schema))
+							.Append
+							(
+								ClassDeclaration("Alias")
+									.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.StaticKeyword)
+									.AddDocumentationComment(XmlSummaryElement(XmlText("Static-use this class (using static Dagger.Generated.YourModule.Alias) to use \"DAG\" as a shortcut for \"Query.FromDefaultSession\".")))
+									.AddMembers
+									(
+										PropertyDeclaration("Query", "DAG")
+											.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.StaticKeyword)
+											.WithExpressionBody(MemberAccessExpression("Query", "FromDefaultSession"))
+									)
+							)
 					)
 			);
 }
