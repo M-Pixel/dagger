@@ -17,14 +17,14 @@ public static class ClientCompiler
 		string targetSpecificSubpath = Assembly.GetExecutingAssembly().GetCustomAttribute<TargetFrameworkAttribute>()!
 			.FrameworkDisplayName![5..];
 
+		string? moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name");
+		string clientPath = moduleName != null ? "/mnt/Client" : "Client/bin/Release/net8.0";
+		string generatedAssemblyName = "Dagger.Generated";
+
 		IEnumerable<MetadataReference> references = Directory
-			.EnumerateFiles
-			(
-				Environment.GetEnvironmentVariable("Dagger:Module:Name") != null
-					? "/mnt/Client"
-					: "Client/bin/Release/net8.0"
-			)
-			.Where(file => file.EndsWith(".dll"))
+			.EnumerateFiles(clientPath)
+			// .Where(path => path.EndsWith(".dll") && !path.EndsWith("/Dagger.Client.dll"))
+			.Where(path => path.EndsWith(".dll"))
 			.Concat
 			(
 				new[]
@@ -45,27 +45,39 @@ public static class ClientCompiler
 
 		var compilation = CSharpCompilation.Create
 		(
-			"Dagger.Generated",
+			generatedAssemblyName,
 			[unit.SyntaxTree],
 			references,
 			new CSharpCompilationOptions
 			(
 				OutputKind.DynamicallyLinkedLibrary,
 				optimizationLevel: OptimizationLevel.Release,
-				nullableContextOptions: NullableContextOptions.Enable
+				nullableContextOptions: NullableContextOptions.Annotations
 			)
 		);
 
 		Directory.CreateDirectory("Libraries");
 		using FileStream bytecodeStream =
-			new("Libraries/Dagger.Generated.dll", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			new($"Libraries/{generatedAssemblyName}.dll", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 		using FileStream symbolsStream =
-			new("Libraries/Dagger.Generated.pdb", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			new($"Libraries/{generatedAssemblyName}.pdb", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 		using FileStream documentationStream =
-			new("Libraries/Dagger.Generated.xml", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			new($"Libraries/{generatedAssemblyName}.xml", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 		EmitResult result = compilation.Emit(bytecodeStream, symbolsStream, documentationStream);
 		if (!result.Success)
-			throw new Exception(string.Join('\n', result.Diagnostics.Select(diagnostic => diagnostic.GetMessage())));
-
+		{
+			string sourceCode = compilation.SyntaxTrees[0].ToString();
+			throw new Exception
+			(
+				string.Join
+				(
+					"\n\n",
+					result.Diagnostics
+						.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+						.Select(diagnostic => diagnostic.ToString())
+						.Append(sourceCode)
+				)
+			);
+		}
 	}
 }

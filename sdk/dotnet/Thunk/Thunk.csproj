@@ -16,6 +16,9 @@
 		<Reference Include="Dagger.Generated">
 			<HintPath>../ModuleTest/Libraries/Dagger.Generated.dll</HintPath>
 		</Reference>
+		<Reference Include="GraphQL.Primitives">
+			<HintPath>../ModuleTest/Libraries/GraphQL.Primitives.dll</HintPath>
+		</Reference>
 	</ItemGroup>
 
 	<ItemGroup>

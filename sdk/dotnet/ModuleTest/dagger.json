@@ -5,8 +5,7 @@
   "include": [
     "../Thunk/bin/Release/net8.0/linux-x64",
     "../CodeGenerator/bin/Release/net8.0/linux-x64",
-    "../Client/Client.csproj",
-    "../Client/**/*.cs"
+    "../Client/bin/Release/net8.0/*"
   ],
   "exclude": [
     "../Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk",

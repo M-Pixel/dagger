@@ -38,18 +38,25 @@ static class SyntaxTree
 	public static AttributeSyntax WithArgument(this AttributeSyntax self, string? argument)
 		=> argument == null ? self : self.AddArgumentListArguments(AttributeArgument(LiteralExpression(argument)));
 
-	public static ClassDeclarationSyntax AddBaseListTypes(this ClassDeclarationSyntax self, params string[] baseNames)
+	public static ClassDeclarationSyntax AddBaseListTypes
+	(
+		this ClassDeclarationSyntax self,
+		IEnumerable<TypeSyntax> baseTypes
+	)
 	{
 		BaseListSyntax baseList = self.BaseList ?? BaseList();
-		return self.WithBaseList
-		(
-			baseList.WithTypes
-			(
-				baseList.Types
-					.AddRange(baseNames.Select<string, BaseTypeSyntax>(name => SimpleBaseType(IdentifierName(name))))
-			)
-		);
+		return self.WithBaseList(baseList.WithTypes(baseList.Types.AddRange(baseTypes.Select(SimpleBaseType))));
 	}
+
+	public static ClassDeclarationSyntax WithBaseListTypes
+	(
+		this ClassDeclarationSyntax self,
+		IEnumerable<string> baseNames
+	)
+		=> self.WithBaseList
+		(
+			BaseList(SeparatedList<BaseTypeSyntax>(baseNames.Select(name => SimpleBaseType(IdentifierName(name)))))
+		);
 
 	public static BlockSyntax AddStatements(this BlockSyntax self, IEnumerable<StatementSyntax> statements)
 		=> self.WithStatements(self.Statements.AddRange(statements));
@@ -197,6 +204,28 @@ static class SyntaxTree
 			InitializerExpression(SyntaxKind.ObjectInitializerExpression, SingletonSeparatedList(expression))
 		);
 
+	public static InvocationExpressionSyntax InvocationExpression
+	(
+		string invocableName,
+		params ExpressionSyntax[] argumentExpressions
+	)
+		=> SyntaxFactory.InvocationExpression
+		(
+			IdentifierName(invocableName),
+			ArgumentList(SeparatedList(argumentExpressions.Select(expression => Argument(expression))))
+		);
+
+	public static InvocationExpressionSyntax InvocationExpression
+	(
+		ExpressionSyntax invocableExpression,
+		params ExpressionSyntax[] argumentExpressions
+	)
+		=> SyntaxFactory.InvocationExpression
+		(
+			invocableExpression,
+			ArgumentList(SeparatedList(argumentExpressions.Select(expression => Argument(expression))))
+		);
+
 	public static InvocationExpressionSyntax AddArgumentListArgument
 	(
 		this InvocationExpressionSyntax self,
@@ -252,6 +281,9 @@ static class SyntaxTree
 	public static LiteralExpressionSyntax LiteralExpression(string value)
 		=> SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(value));
 
+	public static LiteralExpressionSyntax LiteralExpression(char character)
+		=> SyntaxFactory.LiteralExpression(SyntaxKind.CharacterLiteralExpression, Literal(character));
+
 	public static readonly LiteralExpressionSyntax NullLiteralExpression
 		= SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression);
 
@@ -280,8 +312,10 @@ static class SyntaxTree
 	public static MemberAccessExpressionSyntax MemberAccessExpression(ExpressionSyntax expression, string name)
 		=> MemberAccessExpression(expression, IdentifierName(name));
 
-	public static MemberAccessExpressionSyntax MemberAccessExpression(string identifierName, string name)
-		=> MemberAccessExpression(IdentifierName(identifierName), name);
+	public static MemberAccessExpressionSyntax MemberAccessExpression(string name1, string name2, params string[] names)
+		=> names.Length == 0
+			? MemberAccessExpression(IdentifierName(name1), name2)
+			: MemberAccessExpression(MemberAccessExpression(name1, name2, names[..^1]), names[^1]);
 
 	public static MethodDeclarationSyntax AddAttributes
 	(
@@ -308,12 +342,35 @@ static class SyntaxTree
 		=> self.WithExpressionBody(ArrowExpressionClause(expression))
 			.WithSemicolonToken(Token(SyntaxKind.SemicolonToken));
 
+
+	public static PropertyDeclarationSyntax WithExpressionBody
+	(
+		this PropertyDeclarationSyntax self,
+		ExpressionSyntax expression
+	)
+		=> self.WithExpressionBody(ArrowExpressionClause(expression))
+			.WithSemicolonToken(Token(SyntaxKind.SemicolonToken));
+
 	public static MethodDeclarationSyntax WithParameters
 	(
 		this MethodDeclarationSyntax self,
 		IEnumerable<ParameterSyntax> parameters
 	)
 		=> self.WithParameterList(ParameterList(SeparatedList(parameters)));
+
+	public static MethodDeclarationSyntax WithExplicitInterfaceSpecifier
+	(
+		this MethodDeclarationSyntax self,
+		string interfaceName
+	)
+		=> self.WithExplicitInterfaceSpecifier(QualifiedName(interfaceName));
+
+	public static MethodDeclarationSyntax WithExplicitInterfaceSpecifier
+	(
+		this MethodDeclarationSyntax self,
+		NameSyntax interfaceName
+	)
+		=> self.WithExplicitInterfaceSpecifier(ExplicitInterfaceSpecifier(interfaceName));
 
 	public static ObjectCreationExpressionSyntax AddArgumentListArguments
 	(
@@ -340,6 +397,16 @@ static class SyntaxTree
 					members.Select(assignment => AssignmentExpression(assignment.Item1, assignment.Item2))
 				)
 			)
+		);
+
+	public static ObjectCreationExpressionSyntax WithInitializer
+	(
+		this ObjectCreationExpressionSyntax self,
+		params AssignmentExpressionSyntax[] members
+	)
+		=> self.WithInitializer
+		(
+			InitializerExpression(SyntaxKind.ObjectInitializerExpression, SeparatedList<ExpressionSyntax>(members))
 		);
 
 	public static ParameterSyntax Parameter(TypeSyntax type, string text)
@@ -389,6 +456,13 @@ static class SyntaxTree
 		IEnumerable<ParameterSyntax> parameters
 	)
 		=> self.WithParameterList(ParameterList(SeparatedList(parameters)));
+
+	public static RecordDeclarationSyntax WithBaseListTypes
+	(
+		this RecordDeclarationSyntax self,
+		IEnumerable<TypeSyntax> baseTypes
+	)
+		=> self.WithBaseList(BaseList(SeparatedList<BaseTypeSyntax>(baseTypes.Select(SimpleBaseType))));
 
 	public static SimpleLambdaExpressionSyntax SimpleLambdaExpression(string parameterName, ExpressionSyntax expression)
 		=> SyntaxFactory.SimpleLambdaExpression(SyntaxFactory.Parameter(Identifier(parameterName)), expression);

@@ -92,7 +92,7 @@ static class APIUtils
 					message,
 					new ExecErrorExceptionOptions
 					(
-						Command: extensions["cmd"] as string[] ?? [],
+						Command: extensions["cmd"] as List<object> ?? [],
 						ExitCode: extensions["exitCode"] as int? ?? -1,
 						Stdout: extensions["stdout"] as string ?? "",
 						Stderr: extensions["stderr"] as string ?? ""

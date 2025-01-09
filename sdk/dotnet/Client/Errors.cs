@@ -110,7 +110,7 @@ public class UnknownDaggerException : DaggerException
 
 record ExecErrorExceptionOptions
 (
-	string[] Command,
+	IReadOnlyList<object> Command,
 	int ExitCode,
 	string Stdout,
 	string Stderr
@@ -124,7 +124,7 @@ public class ExecErrorException : DaggerException
 	public override ErrorCode Code => ErrorCode.ExecError;
 
 	/// <summary>The command that caused the error.</summary>
-	public string[] Command { get; }
+	public IReadOnlyList<object> Command { get; }
 
 	/// <summary>The exit code of the command.</summary>
 	public int ExitCode { get; }

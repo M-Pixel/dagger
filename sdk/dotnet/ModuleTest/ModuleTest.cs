@@ -1,4 +1,4 @@
-﻿using Dagger.Generated.ModuleTest;
+﻿using static Dagger.Generated.ModuleTest.Alias;
 
 namespace ModuleTest;
 
@@ -6,6 +6,8 @@ public static class HelloWorld
 {
 	public static string Foo()
 	{
-		return Query.FromDefaultSession.GetHello().SubHello("Salutations", giant: true).Result;
+		return DAG.GetHello().SubHello("Salutations", giant: true).Result;
 	}
 }
+
+public record RecordTest(int Foo);

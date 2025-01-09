@@ -45,8 +45,8 @@ if (parentName == "")
 }
 else
 {
-	AssemblyLoadContext assemblyLoader = new("Dagger module");
-	Assembly moduleAssembly =
-		assemblyLoader.LoadFromStream(moduleAssemblyFile.File.OpenRead(), moduleAssemblyFile.Symbols());
+	string moduleAssemblyPath = moduleAssemblyFile.File.FullName;
+	AssemblyLoadContext assemblyLoader = new DaggerModuleLoadContext(moduleAssemblyPath);
+	Assembly moduleAssembly = assemblyLoader.LoadFromAssemblyPath(moduleAssemblyPath);
 	await new Invocation(moduleAssembly).Run(functionCall, parentName, moduleName);
 }

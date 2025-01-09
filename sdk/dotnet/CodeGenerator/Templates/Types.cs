@@ -26,10 +26,33 @@ static class Structures
 			.Where(syntax => syntax != null)!;
 
 	static RecordDeclarationSyntax GenerateCustomScalar(Introspection.Type type)
-		=> RecordDeclaration(FormatName(type.Name))
+	{
+		string formattedName = FormatName(type.Name);
+		return RecordDeclaration(formattedName)
 			.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.SealedKeyword)
+			.AddDocumentationComments(type)
 			.AddParameterListParameters(Parameter(Identifier("Value")).WithType(IdentifierName("String")))
-			.AddDocumentationComments(type);
+			.WithBaseListTypes([GenericName("ISelfDeserializable", formattedName)])
+			.WithBody()
+			.AddMembers
+			(
+				MethodDeclaration(GenericName("ValueTask", "String"), "_Serialize")
+					.WithExplicitInterfaceSpecifier("ISelfSerializable")
+					.WithExpressionBody
+					(
+						InvocationExpression
+						(
+							MemberAccessExpression("ValueTask", "FromResult"),
+							IdentifierName("Value")
+						)
+					),
+				MethodDeclaration(IdentifierName(formattedName), "_Deserialize")
+					.AddModifiers(SyntaxKind.StaticKeyword)
+					.WithExplicitInterfaceSpecifier(GenericName("ISelfDeserializable", formattedName))
+					.AddParameterListParameters(Parameter(IdentifierName("String"), "asString"))
+					.WithExpressionBody(ImplicitObjectCreationExpression(IdentifierName("asString")))
+			);
+	}
 
 	static EnumDeclarationSyntax GenerateEnum(Introspection.Type type)
 		=> EnumDeclaration(type.Name)

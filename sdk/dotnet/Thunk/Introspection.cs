@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -39,6 +40,7 @@ class Introspection
 	public Module Build(ElementDocumentation assemblyDocumentation)
 	{
 		bool sameNameClassExists = false;
+		bool sameNameStaticSuffixClassExists = false;
 
 		MembersDocumentation = assemblyDocumentation.Members;
 
@@ -71,12 +73,24 @@ class Introspection
 
 			if (exportedType.Name == _moduleName)
 				sameNameClassExists = true;
+			else if (exportedType.Name == _moduleName + "Static")
+				sameNameStaticSuffixClassExists = true;
 		}
 
 		if (_staticObjectOriginal != StaticObject)
 		{
 			if (sameNameClassExists)
-				StaticObject = StaticObject.WithObject($"{_moduleName}Statics");
+			{
+				if (sameNameStaticSuffixClassExists)
+					throw new Exception
+					(
+						$"Can't have all three of non-static types {_moduleName} and {_moduleName}Static, and static " +
+						$"methods, in the same module."
+					);
+
+				StaticObject = StaticObject.WithObject($"{_moduleName}Static");
+			}
+
 			_module = _module.WithObject(StaticObject);
 		}
 
@@ -178,12 +192,29 @@ class Introspection
 		else if (type.IsGenericType)
 		{
 			Type genericType = type.GetGenericTypeDefinition();
-			if (Deserializer.ListStrategies.ContainsKey(genericType.FullName!))
-				return dag.GetTypeDef().WithListOf(TypeReference(type.GenericTypeArguments[0], input));
 			if (genericType.FullName == typeof(Task<>).FullName)
 				return input
 					? throw new NotSupportedException("Dagger Dotnet binder doesn't support Task<> parameters.")
 					: TypeReference(type.GenericTypeArguments[0], false);
+			if
+			(
+				genericType.IsArray || genericType.FullName is "System.Collections.Generic.HashSet`1" or
+					"System.Collections.Generic.IAsyncEnumerable`1" or "System.Collections.Generic.ICollection`1" or
+					"System.Collections.Generic.IEnumerable`1" or "System.Collections.Generic.IList`1" or
+					"System.Collections.Generic.IReadOnlyCollection`1" or "System.Collections.Generic.IReadOnlyList`1"
+					or "System.Collections.Generic.ISet`1" or "System.Collections.Generic.LinkedList`1" or
+					"System.Collections.Generic.List`1" or "System.Collections.Generic.Queue`1" or
+					"System.Collections.Generic.SortedList`1" or "System.Collections.Generic.SortedSet`1" or
+					"System.Collections.Generic.Stack`1" or "System.Collections.Immutable.IImmutableList`1" or
+					"System.Collections.Immutable.IImmutableQueue`1" or "System.Collections.Immutable.IImmutableSet`1"
+					or "System.Collections.Immutable.IImmutableStack`1" or
+					"System.Collections.Immutable.ImmutableArray`1" or "System.Collections.Immutable.ImmutableHashSet`1"
+					or "System.Collections.Immutable.ImmutableQueue`1" or
+					"System.Collections.Immutable.ImmutableSortedSet`1" or
+					"System.Collections.Immutable.ImmutableStack`1" or "System.Collections.Concurrent.ConcurrentQueue`1"
+					or "System.Collections.Concurrent.ConcurrentStack`1"
+			)
+				return dag.GetTypeDef().WithListOf(TypeReference(type.GenericTypeArguments[0], input));
 			throw new NotSupportedException
 			(
 				$"Dagger does not support introspection of generic classes (apart from enumerables and task).  " +
@@ -206,6 +237,7 @@ class Introspection
 			type.FullName == typeof(JsonElement.ArrayEnumerator).FullName
 		)
 			return dag.GetTypeDef().WithListOf(dag.GetTypeDef().WithObject("JSON"));
+		// TODO: If type isn't from own assembly, add it to object declarations
 
 		return dag.GetTypeDef().WithObject(type.Name);
 	}
@@ -272,7 +304,7 @@ abstract class ObjectlikeIntrospection<TTypeDefNullability>
 
 		BindingFlags bindingFlags = typeDefinition == null
 			? BindingFlags.Public | BindingFlags.Static
-			: BindingFlags.Public | BindingFlags.Instance;
+			: BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance;
 		if (typeDefinition != null)
 			foreach (ConstructorInfo constructorInfo in Type.GetConstructors(bindingFlags))
 			{
@@ -341,7 +373,7 @@ abstract class ObjectlikeIntrospection<TTypeDefNullability>
 				Console.WriteLine("\t\tIgnoring special name");
 				continue;
 			}
-			if (methodInfo.Name is "GetType" or "Deconstruct")
+			if (methodInfo.Name is "GetType" or "Deconstruct" or "Equals")
 			{
 				Console.WriteLine("\t\tIgnoring prohibited name");
 				continue;

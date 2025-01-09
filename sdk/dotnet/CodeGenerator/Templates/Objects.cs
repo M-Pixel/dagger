@@ -11,7 +11,7 @@ static class Classes
 {
 	public static IEnumerable<MemberDeclarationSyntax> Generate(Schema schema)
 		=> schema.Types
-			.Where(type => type.Fields.Length > 0 && type.Name.StartsWith("__") == false)
+			.Where(type => type.Fields.Length > 0 && type.Name.StartsWith('_') == false)
 			.Select(type => GenerateObject(schema, type));
 
 	static MemberDeclarationSyntax GenerateObject(Schema schema, Introspection.Type type)
@@ -20,7 +20,7 @@ static class Classes
 		ClassDeclarationSyntax result = ClassDeclaration(formattedName)
 			.AddModifiers(SyntaxKind.PublicKeyword, SyntaxKind.SealedKeyword)
 			.AddDocumentationComments(type)
-			.AddBaseListTypes("ObjectClient")
+			.WithBaseListTypes(["ObjectClient"])
 			.WithMembers
 			(
 				type.Fields
@@ -71,6 +71,37 @@ static class Classes
 									)
 							)
 					);
-			return result;
+
+			MethodDeclarationSyntax serializeMethod = MethodDeclaration
+			(
+				GenericName("ValueTask", "String"),
+				"_Serialize"
+			)
+				.WithExplicitInterfaceSpecifier("ISelfSerializable")
+				.WithExpressionBody
+				(
+					ImplicitObjectCreationExpression
+					(
+						InvocationExpression
+						(
+							MemberAccessExpression(InvocationExpression("Id"), "ContinueWith"),
+							SimpleLambdaExpression("idTask", MemberAccessExpression("idTask", "Result", "Value"))
+						)
+					)
+				);
+			MethodDeclarationSyntax deserializeMethod = MethodDeclaration(IdentifierName(formattedName), "_Deserialize")
+				.AddModifiers(SyntaxKind.StaticKeyword)
+				.WithExplicitInterfaceSpecifier(GenericName("ISelfDeserializable", formattedName))
+				.AddParameterListParameters(Parameter(IdentifierName("String"), "asString"))
+				.WithExpressionBody
+				(
+					InvocationExpression
+					(
+						MemberAccessExpression("Query", "FromDefaultSession", $"Load{formattedName}FromID"),
+						ImplicitObjectCreationExpression(IdentifierName("asString"))
+					)
+				);
+			return result.AddBaseListTypes([GenericName("ISelfDeserializable", formattedName)])
+				.AddMembers(serializeMethod, deserializeMethod);
 	}
 }

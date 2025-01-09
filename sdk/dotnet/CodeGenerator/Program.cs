@@ -55,6 +55,9 @@ Schema schema = document.Schema with
 };
 
 Console.WriteLine("Generating client library...");
-ClientCompiler.Compile(API.Generate(schema, assemblyName));
+var syntax = API.Generate(schema, assemblyName);
+
+Console.WriteLine("Compiling...");
+ClientCompiler.Compile(syntax);
 
 await disposeTask;
