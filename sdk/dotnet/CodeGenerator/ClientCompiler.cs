@@ -56,13 +56,13 @@ public static class ClientCompiler
 			)
 		);
 
-		Directory.CreateDirectory("Libraries");
+		Directory.CreateDirectory("Generated");
 		using FileStream bytecodeStream =
-			new($"Libraries/{generatedAssemblyName}.dll", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			new($"Generated/{generatedAssemblyName}.dll", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 		using FileStream symbolsStream =
-			new($"Libraries/{generatedAssemblyName}.pdb", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			new($"Generated/{generatedAssemblyName}.pdb", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 		using FileStream documentationStream =
-			new($"Libraries/{generatedAssemblyName}.xml", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			new($"Generated/{generatedAssemblyName}.xml", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
 		EmitResult result = compilation.Emit(bytecodeStream, symbolsStream, documentationStream);
 		if (!result.Success)
 		{

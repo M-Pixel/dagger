@@ -1,0 +1,22 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<!-- Implicit usings are disabled because implicitly included System.IO's File & Directory compete with Dagger's. -->
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<!-- You're welcome to add a prefix to the assembly name.  Only the final part needs to match the module name in dagger.json. -->
+		<AssemblyName>$</AssemblyName>
+		<!-- You are free to use whatever namespaces you want, they don't need to match the module name. -->
+		<RootNamespace>$</RootNamespace>
+		<!-- In order for your module's help text to work, GenerateDocumentationFile must be true. -->
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<!-- These suppressed warnings would have complained about public members that lack full documentation. -->
+		<NoWarn>1591,1573</NoWarn>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Dagger.Generated">
+			<HintPath>Generated/Dagger.Generated.dll</HintPath>
+		</Reference>
+		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
+	</ItemGroup>
+</Project>

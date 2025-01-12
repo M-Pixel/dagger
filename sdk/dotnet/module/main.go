@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"main/internal/dagger"
+	"os"
 	"path"
+	"strings"
 )
 
 const (
@@ -93,12 +95,12 @@ func (sdk *DotnetSdk) Codegen(
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
 // +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!Client/bin/Release/net8.0/*", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "*.pdb"]
+// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!Client/bin/Release/net8.0/*", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "!module/Default.csproj", "*.pdb"]
 	sdkDirectory *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	// TODO: Don't actually generate code if the context is call (as opposed to init or sync), and a generated SDK is
-	// already present.  The generated SDK is less than 200 KB, so it SHOULD be included in distributed modules, so that
-	// invoking dotnet modules doesn't require an over 600 MB compiler to be downloaded.
+	// already present or the module has no dependencies.  The generated SDK is less than 200 KB, so it can be included
+	// in distributed modules, and if there are no deps than it can bind to Thunk's version.
 
 	subPath, err := modSource.SourceSubpath(ctx)
 	if err != nil {
@@ -107,33 +109,52 @@ func (sdk *DotnetSdk) Codegen(
 
 	name, err := modSource.ModuleName(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve module name for dotnet invocation: %v", err)
+		return nil, fmt.Errorf("failed to retrieve module name for dotnet code generation: %v", err)
 	}
 
-	clientBuildDirectory := sdkDirectory.Directory("Client/bin/Release/net8.0")
-
 	buildDirectory := dag.Container().
+		// TODO: Publish container that adds reference assemblies to distroless runtime
 		From("mcr.microsoft.com/dotnet/sdk:8.0-alpine3.20").
 		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
 		WithUser("app").
-		WithDirectory("scratch", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: "app"}).
-		WithWorkdir("scratch").
+		WithDirectory("/scratch", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: "app"}).
+		WithWorkdir("/scratch").
 		// TODO: Figure out if any directories should have cache mounted
 		WithMountedFile("/mnt/introspection.json", introspectionJson).
 		WithMountedDirectory("/mnt/CodeGenerator", sdkDirectory.Directory("CodeGenerator/bin/Release/net8.0/linux-x64")).
-		WithMountedDirectory("/mnt/Client", clientBuildDirectory).
+		WithMountedDirectory("/mnt/Client", sdkDirectory.Directory("Client/bin/Release/net8.0")).
 		WithEnvVariable("Dagger:Module:Name", name).
 		WithExec(
 			[]string{"dotnet", "/mnt/CodeGenerator/Dagger.CodeGenerator.dll"},
 			dagger.ContainerWithExecOpts{ExperimentalPrivilegedNesting: true}).
 		Directory(".")
 
+	// Add csproj if not already present
+	var hasCsproj = false
+	var hasFolder = false
+	var hasSln = false
+	entries, err := modSource.ContextDirectory().Entries(ctx, dagger.DirectoryEntriesOpts{Path: subPath})
+	if err == nil {
+		for _, entry := range entries {
+			if entry == name+".csproj" {
+				hasCsproj = true
+			} else if strings.HasSuffix(entry, ".sln") {
+				hasSln = true
+			} else if entry == name {
+				hasFolder = true
+			}
+		}
+	}
+	if !hasCsproj && (!hasFolder || !hasSln) {
+		contents, err := os.ReadFile("/src/sdk/dotnet/module/Default.csproj")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Default.csproj': %v", err)
+		}
+		buildDirectory = buildDirectory.WithNewFile(name+".csproj", strings.Replace(string(contents), "$", name, -1))
+	}
+
 	// TODO: Configurable whether documentation & PDB are included
 	// TODO: Pass-through (or create) .csproj file, making sure that it contains a ref to the generated SDK
-	return dag.GeneratedCode(
-		dag.Directory().
-			WithDirectory(path.Join(subPath, "Libraries"), clientBuildDirectory).
-			WithDirectory(subPath, buildDirectory),
-	).
-		WithVCSIgnoredPaths([]string{"Libraries", "bin", "obj"}), nil
+	return dag.GeneratedCode(dag.Directory().WithDirectory(subPath, buildDirectory)).
+		WithVCSIgnoredPaths([]string{"**/*.pdb", "bin", "obj"}), nil
 }

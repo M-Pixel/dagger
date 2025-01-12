@@ -1,18 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
-        <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
-        <ImplicitUsings>disable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <AssemblyName>Dagger.Pipelines</AssemblyName>
-        <RootNamespace>Dagger.Pipelines</RootNamespace>
-        <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <NoWarn>1591,1573</NoWarn>
-    </PropertyGroup>
-    <ItemGroup>
-        <Reference Include="Dagger.Generated">
-            <HintPath>Libraries/Dagger.Generated.dll</HintPath>
-        </Reference>
-      <PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
-    </ItemGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+		<ImplicitUsings>disable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AssemblyName>Dagger.Pipelines</AssemblyName>
+		<RootNamespace>Dagger.Pipelines</RootNamespace>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<NoWarn>1591,1573</NoWarn>
+	</PropertyGroup>
+	<ItemGroup>
+		<Reference Include="Dagger.Generated">
+			<HintPath>Generated/Dagger.Generated.dll</HintPath>
+		</Reference>
+		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
+	</ItemGroup>
 </Project>
