@@ -48,7 +48,10 @@ readonly record struct ElementDocumentation
 				continue;
 
 			string? elementName = reader.GetAttribute("name");
-			if (string.IsNullOrEmpty(elementName) || elementName.Contains('`') || elementName[1] != ':')
+			if (string.IsNullOrEmpty(elementName) || elementName[1] != ':')
+				continue;
+			elementName = OmitSignature(elementName);
+			if (elementName.Contains('`'))
 				continue;
 
 			switch (elementName[0])
@@ -94,7 +97,6 @@ readonly record struct ElementDocumentation
 					break;
 				}
 			}
-			break;
 		}
 
 		_ = stream.DisposeAsync();
@@ -173,5 +175,11 @@ readonly record struct ElementDocumentation
         }
 
         return string.Concat(summary);
+    }
+
+    private static string OmitSignature(string maybeFunctionName)
+    {
+	    int index = maybeFunctionName.IndexOf('(');
+	    return index == -1 ? maybeFunctionName : maybeFunctionName[..index];
     }
 }

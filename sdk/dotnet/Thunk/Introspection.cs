@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -387,6 +386,8 @@ abstract class ObjectlikeIntrospection<TTypeDefNullability>
 				methodInfo.Name,
 				Module.TypeReferenceWithNullability(methodInfo.ReturnParameter, false)
 			);
+			if (memberDocumentation.Summary != null)
+				function = function.WithDescription(memberDocumentation.Summary);
 			function = AddParameters(function, methodInfo.GetParameters(), memberDocumentation.Members);
 			if (methodInfo.IsStatic)
 				Module.StaticObject = Module.StaticObject.WithFunction(function);

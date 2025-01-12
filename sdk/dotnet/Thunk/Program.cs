@@ -14,7 +14,8 @@ if (Environment.GetCommandLineArgs().Contains("-DebugIntrospection"))
 	FileInfo moduleAssemblyFileInfo = new("Pipelines/bin/Release/net8.0/linux-x64/Dagger.Pipelines.dll");
 	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyFileInfo.FullName));
 	Assembly moduleAssembly = metadataLoader.LoadFromStream(moduleAssemblyFileInfo.OpenRead());
-	new Introspection(moduleAssembly, "Pipelines").Build(new ElementDocumentation());
+	new Introspection(moduleAssembly, "Pipelines")
+		.Build(await ElementDocumentation.Parse(new FileStream("Pipelines/bin/Release/net8.0/linux-x64/Dagger.Pipelines.xml", FileMode.Open)));
 	return;
 }
 
@@ -33,10 +34,9 @@ if (parentName == "")
 {
 	// The entrypoint was called for the purpose of introspecting the module, rather than for invoking it.
 	string documentationPath = moduleAssemblyPath[..^3] + "xml";
-	Stream? documentationStream = System.IO.File.Exists(documentationPath)
-		? new FileStream(documentationPath, FileMode.Open, FileAccess.Read, FileShare.Read)
+	Task<ElementDocumentation>? documentationTask = System.IO.File.Exists(documentationPath)
+		? ElementDocumentation.Parse(new FileStream(documentationPath, FileMode.Open, FileAccess.Read, FileShare.Read))
 		: null;
-	var documentationTask = documentationStream == null ? null : ElementDocumentation.Parse(documentationStream);
 
 	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyPath));
 	Assembly moduleAssembly = metadataLoader.LoadFromAssemblyPath(moduleAssemblyPath);
