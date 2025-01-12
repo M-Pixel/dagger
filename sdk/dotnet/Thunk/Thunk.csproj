@@ -2,6 +2,7 @@
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<TargetFramework>net8.0</TargetFramework>
+		<RuntimeIdentifier>linux-x64</RuntimeIdentifier>
 		<ImplicitUsings>false</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<AssemblyName>Dagger.Thunk</AssemblyName>
@@ -10,18 +11,10 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<Reference Include="Dagger.Client">
-			<HintPath>../ModuleTest/Libraries/Dagger.Client.dll</HintPath>
-		</Reference>
 		<Reference Include="Dagger.Generated">
 			<HintPath>../ModuleTest/Libraries/Dagger.Generated.dll</HintPath>
 		</Reference>
-		<Reference Include="GraphQL.Primitives">
-			<HintPath>../ModuleTest/Libraries/GraphQL.Primitives.dll</HintPath>
-		</Reference>
-	</ItemGroup>
-
-	<ItemGroup>
-	  <PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.0" />
+		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
+		<PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.0" />
 	</ItemGroup>
 </Project>

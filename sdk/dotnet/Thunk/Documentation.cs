@@ -96,6 +96,8 @@ readonly record struct ElementDocumentation
 			}
 			break;
 		}
+
+		_ = stream.DisposeAsync();
 		CommitType(ref state);
 
 		return new ElementDocumentation{ Members = state.AssemblyMembersBuilder.ToImmutable() };

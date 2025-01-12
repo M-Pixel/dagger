@@ -9,13 +9,24 @@
     <RootNamespace>Dagger</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackageId>MaxPixel.Dagger.Client</PackageId>
+    <Version>0.0.1</Version>
+    <Title>Dagger Client</Title>
+    <Authors>Max Pixel, Dagger contributors</Authors>
+    <Description>Client library for Dagger, the pipeline engine.  In most cases you will not use this package directly.  It provides a low-level API that is used by the project-specific high-level client library that is automatically generated for Dotnet SDK Dagger Modules.  You can start using this library by running `dagger develop --mod path/where/you/want/your/module --sdk https://github.com/M-Pixel/dagger/sdk/dotnet/module`.</Description>
+    <PackageProjectUrl>https://dagger.io</PackageProjectUrl>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/M-Pixel/dagger</RepositoryUrl>
+    <RepositoryType>Git</RepositoryType>
+    <PackageIcon>dagger-icon.png</PackageIcon>
+    <NeutralLanguage>en</NeutralLanguage>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="GraphQL.Client" Version="6.0.2" />
     <PackageReference Include="GraphQL.Client.Serializer.SystemTextJson" Version="6.0.2" />
-    <Compile Include="../Generated.cs" />
+    <None Include="dagger-icon.png" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>

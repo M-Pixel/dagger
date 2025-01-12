@@ -5,13 +5,16 @@
   "include": [
     "../Thunk/bin/Release/net8.0/linux-x64",
     "../CodeGenerator/bin/Release/net8.0/linux-x64",
-    "../Client/bin/Release/net8.0/*"
+    "../Client/bin/Release/net8.0/*",
+    "../DependencyDownloader/bin/Release/net8.0/linux-x64"
   ],
   "exclude": [
     "../Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk",
     "../Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.pdb",
     "../CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGenerator",
     "../CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGenerator.pdb",
+    "../DependencyDownloader/bin/Release/net8.0/linux-x64/Dagger.DependencyDownloader",
+    "../DependencyDownloader/bin/Release/net8.0/linux-x64/Dagger.DependencyDownloader.pdb",
     "obj"
   ],
   "dependencies": [

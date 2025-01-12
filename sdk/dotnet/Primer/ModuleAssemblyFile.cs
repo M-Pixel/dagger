@@ -1,10 +1,6 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 
-namespace Dagger.Thunk;
+namespace Dagger.Primer;
 using static ModuleAssemblyFile;
 
 readonly record struct AssemblyBuildDirectoryCandidate : IComparable<AssemblyBuildDirectoryCandidate>
@@ -50,6 +46,7 @@ readonly record struct AssemblyBuildDirectoryCandidate : IComparable<AssemblyBui
 	}
 }
 
+// TODO: Detect whether project is uncompiled sln or csproj
 class ModuleAssemblyFile
 {
 	public static readonly int frameworkMajorVersion;
@@ -93,11 +90,21 @@ class ModuleAssemblyFile
 		}
 	}
 
-	public ModuleAssemblyFile(string moduleName, string sourceSubpath)
+	public ModuleAssemblyFile(string moduleName, string sourcePath)
 	{
-		var basePath = Path.Combine("/mnt/module", sourceSubpath, moduleName, "bin");
+		var basePath = Path.Combine(sourcePath, moduleName, "bin");
 		if (!Directory.Exists(basePath))
-			basePath = Path.Combine("/mnt/module", sourceSubpath, "bin");
+			basePath = Path.Combine(sourcePath, "bin");
+		if (!Directory.Exists(basePath))
+		{
+			string? dllPath = Path.Combine(sourcePath, $"{moduleName}.dll");
+			if (!System.IO.File.Exists(dllPath))
+				dllPath = Directory.EnumerateFiles(sourcePath, $"*.{moduleName}.dll").FirstOrDefault();
+			if (dllPath == null)
+				throw new Exception("Could not find module assembly in root source.");
+			File = new FileInfo(dllPath);
+			return;
+		}
 
 		List<AssemblyBuildDirectoryCandidate> candidates = new();
 
@@ -207,19 +214,6 @@ class ModuleAssemblyFile
 		}
 
 		File = new FileInfo(selected.DllPath);
-	}
-
-
-	public Stream? Symbols()
-	{
-		FileInfo file = new FileInfo(File.FullName[..^3] + "pdb");
-		return file.Exists ? file.OpenRead() : null;
-	}
-
-	public Stream? Documentation()
-	{
-		FileInfo file = new FileInfo(File.FullName[..^3] + "xml");
-		return file.Exists ? file.OpenRead() : null;
 	}
 
 

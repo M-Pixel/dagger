@@ -1,24 +1,33 @@
+using System.Collections.Immutable;
+using System.IO;
 using System.Reflection;
-using System.Runtime.Loader;
 
 namespace Dagger.Thunk;
 
 class ThunkAssemblyResolver : MetadataAssemblyResolver
 {
-	private readonly AssemblyDependencyResolver _localResolver;
-	private readonly AssemblyDependencyResolver _systemResolver = new(typeof(object).Assembly.Location);
+	private readonly ImmutableArray<string> _searchPaths;
 
 
 	public ThunkAssemblyResolver(string pathToDependentAssembly)
 	{
-		_localResolver = new AssemblyDependencyResolver(pathToDependentAssembly);
+		_searchPaths =
+		[
+			Path.GetDirectoryName(pathToDependentAssembly)! + '/',
+			"/module-deps/",
+			Path.GetDirectoryName(typeof(object).Assembly.Location)! + '/'
+		];
 	}
 
 
 	public override Assembly? Resolve(MetadataLoadContext context, AssemblyName assemblyName)
 	{
-		string? path = _localResolver.ResolveAssemblyToPath(assemblyName);
-		path ??= _systemResolver.ResolveAssemblyToPath(assemblyName);
-		return path == null ? null : context.LoadFromAssemblyPath(path);
+		foreach (var path in _searchPaths)
+		{
+			string assemblyPath = path + assemblyName.Name + ".dll";
+			if (File.Exists(assemblyPath))
+				return context.LoadFromAssemblyPath(assemblyPath);
+		}
+		return null;
 	}
 }

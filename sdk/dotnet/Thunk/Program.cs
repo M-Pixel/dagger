@@ -7,13 +7,14 @@ using System.Threading.Tasks;
 using Dagger.Generated.ModuleTest;
 using Dagger.Thunk;
 using Module = Dagger.Generated.ModuleTest.Module;
+// ReSharper disable NotResolvedInText
 
 if (Environment.GetCommandLineArgs().Contains("-DebugIntrospection"))
 {
-	FileInfo moduleAssemblyFileInfo = new("ModuleTest/bin/Release/net8.0/linux-x64/ModuleTest.dll");
+	FileInfo moduleAssemblyFileInfo = new("Pipelines/bin/Release/net8.0/linux-x64/Dagger.Pipelines.dll");
 	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyFileInfo.FullName));
 	Assembly moduleAssembly = metadataLoader.LoadFromStream(moduleAssemblyFileInfo.OpenRead());
-	new Introspection(moduleAssembly, "ModuleTest").Build(new ElementDocumentation());
+	new Introspection(moduleAssembly, "Pipelines").Build(new ElementDocumentation());
 	return;
 }
 
@@ -23,20 +24,22 @@ Query dag = Query.FromDefaultSession;
 FunctionCall functionCall = dag.CurrentFunctionCall();
 Task<string> parentNameTask = functionCall.ParentName();
 
-// Bare-bones argument parsing because it's an internal API
-string moduleName = Environment.GetCommandLineArgs()[1];
-string sourceSubPath = Environment.GetCommandLineArgs()[2];
-ModuleAssemblyFile moduleAssemblyFile = new(moduleName, sourceSubPath);
+string moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name")
+	?? throw new ArgumentNullException("Dagger:Module:Name");
+string moduleAssemblyPath = await System.IO.File.ReadAllTextAsync("/etc/dagger/AssemblyPath");
 
 string parentName = await parentNameTask;
 if (parentName == "")
 {
 	// The entrypoint was called for the purpose of introspecting the module, rather than for invoking it.
-	Stream? documentationStream = moduleAssemblyFile.Documentation();
+	string documentationPath = moduleAssemblyPath[..^3] + "xml";
+	Stream? documentationStream = System.IO.File.Exists(documentationPath)
+		? new FileStream(documentationPath, FileMode.Open, FileAccess.Read, FileShare.Read)
+		: null;
 	var documentationTask = documentationStream == null ? null : ElementDocumentation.Parse(documentationStream);
 
-	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyFile.File.FullName));
-	Assembly moduleAssembly = metadataLoader.LoadFromStream(moduleAssemblyFile.File.OpenRead());
+	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyPath));
+	Assembly moduleAssembly = metadataLoader.LoadFromAssemblyPath(moduleAssemblyPath);
 	Introspection introspection = new(moduleAssembly, moduleName);
 
 	Module module = introspection.Build(documentationTask == null ? new() : await documentationTask);
@@ -45,7 +48,6 @@ if (parentName == "")
 }
 else
 {
-	string moduleAssemblyPath = moduleAssemblyFile.File.FullName;
 	AssemblyLoadContext assemblyLoader = new DaggerModuleLoadContext(moduleAssemblyPath);
 	Assembly moduleAssembly = assemblyLoader.LoadFromAssemblyPath(moduleAssemblyPath);
 	await new Invocation(moduleAssembly).Run(functionCall, parentName, moduleName);
