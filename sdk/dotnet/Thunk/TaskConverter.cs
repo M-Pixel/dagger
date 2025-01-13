@@ -7,6 +7,9 @@ namespace Dagger.Thunk;
 
 class TaskConverter<T> : JsonConverter<Task<T>>
 {
+	public override bool CanConvert(Type typeToConvert)
+		=> typeToConvert == typeof(Task<T>) || typeToConvert.BaseType == typeof(Task<T>);
+
 	public override Task<T> Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
 		=> Task.FromResult(((JsonConverter<T>)options.GetConverter(typeof(T))).Read(ref reader, typeof(T), options)!);
 
@@ -30,16 +33,18 @@ class TaskConverterFactory : JsonConverterFactory
 {
 	public override bool CanConvert(Type typeToConvert)
 	{
-		if (!typeToConvert.IsGenericType)
-			return false;
-
-		return typeToConvert.GetGenericTypeDefinition() == typeof(Task<>) ||
-			typeToConvert.BaseType?.GetGenericTypeDefinition() == typeof(Task<>);
+		return (typeToConvert.IsGenericType && typeToConvert.GetGenericTypeDefinition() == typeof(Task<>)) ||
+			(
+				typeToConvert.BaseType is { IsGenericType: true } &&
+				typeToConvert.BaseType.GetGenericTypeDefinition() == typeof(Task<>)
+			);
 	}
 
 	public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
 	{
-		Type wrappedType = typeToConvert.GetGenericArguments()[0];
+		Type wrappedType = typeToConvert.IsGenericType && typeToConvert.GetGenericTypeDefinition() == typeof(Task<>)
+			? typeToConvert.GetGenericArguments()[0]
+			: typeToConvert.BaseType!.GetGenericArguments()[0];
 		return (JsonConverter)Activator.CreateInstance(typeof(TaskConverter<>).MakeGenericType(wrappedType))!;
 	}
 }

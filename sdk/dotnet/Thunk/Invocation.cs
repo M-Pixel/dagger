@@ -1,10 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
 using Dagger.Generated.ModuleTest;
 using GraphQL;
@@ -36,62 +37,70 @@ class Invocation
 
 		// If function is static, there is no object to deserialize.
 		Task<object?> parentTask = parentType == null || parentType.IsAbstract
-			? Task.FromResult<object?>(null)
+			? Task.FromResult<object?>(null) // TODO: Support (de)serialization of static fields
 			: parentJsonTask.ContinueWith<object?>
 			(
 				jsonTask => JsonSerializer.Deserialize(jsonTask.Result.Value, parentType, SerializerOptions)
 			);
 
-		Task<MethodBase> functionTask = functionNameTask
-			.ContinueWith<MethodBase>
-			(
-				nameTask =>
+		Task<FunctionSearchResult> functionTask = functionNameTask.ContinueWith
+		(
+			nameTask =>
+			{
+				string functionName = nameTask.Result;
+				Console.Write(functionName);
+				Console.WriteLine("(...)");
+				FunctionSearchResult result;
+
+				if (parentType == null || parentType.IsAbstract)
 				{
-					string functionName = nameTask.Result;
-					Console.Write(functionName);
-					Console.WriteLine("(...)");
-
-					if (parentType == null || parentType.IsAbstract)
+					BindingFlags staticBinding = BindingFlags.Public | BindingFlags.Static;
+					if (parentType != null)
 					{
-						if (parentType != null)
-						{
-							if (functionName == "")
-								return typeof(object).GetConstructor([])!;
-							// If parent type is not null, I got here because parent type is abstract.  The only way for
-							// methods from an abstract class to be registered is if it's the eponymous class and is
-							// static (if it wasn't on the eponymous class, it would be mapped to non-existent
-							// ModuleName or non-existent ModuleNameStatic).  There's a slightly higher chance that the
-							// method is on that class, but it might  not be.  Try this class first.
-							MemberInfo[] eponymousOption = parentType
-								.GetMember(functionName, MemberTypes.Method, BindingFlags.Public|BindingFlags.Static);
-							if (eponymousOption.Length > 0)
-								return (MethodInfo)eponymousOption[0];
-							// Proceed to look for the static method on other classes.
-						}
-
-						foreach (Type type in _moduleAssembly.ExportedTypes)
-						{
-							MemberInfo[] matchingMembers = type
-								.GetMember(functionName, MemberTypes.Method, BindingFlags.Public|BindingFlags.Static);
-							if (matchingMembers.Length != 0)
-								return (MethodInfo)matchingMembers[0];
-						}
-
-						throw new Exception($"No type has static method {functionName}");
+						if (functionName == "")
+							return new FunctionSearchResult((_, _) => new object(), []);
+						// If parent type is not null, I got here because parent type is abstract.  The only way for
+						// methods from an abstract class to be registered is if it's the eponymous class and is static
+						// (if it wasn't on the eponymous class, it would be mapped to non-existent ModuleName or
+						// non-existent ModuleNameStatic).  There's a slightly higher chance that the method is on that
+						// class, but it might  not be.  Try this class first.
+						if (TryFindMethod(parentType, functionName, staticBinding, out result))
+							return result;
+						// Proceed to look for the static method on other classes.
 					}
 
-					// At this point, I need to assume that it's an instance method.  If it were a static method, either
-					// it would be mapped to non-existent class ModuleName, or to non-existent class ModuleNameStatic,
-					// or to existing class ModuleName which is itself static, all three of which are caught by the
-					// above condition.
+					foreach (Type type in _moduleAssembly.ExportedTypes)
+						if (type != parentType && TryFindMethod(type, functionName, staticBinding, out result))
+							return result;
 
-					if (functionName == "")
-						return (ConstructorInfo)parentType.GetMember(".ctor")[0];
-
-					return (MethodInfo)parentType
-						.GetMember(functionName, MemberTypes.Method, BindingFlags.Public|BindingFlags.Instance)[0];
+					throw new Exception($"No type has static method {functionName}");
 				}
-			);
+
+				// At this point, I need to assume that it's an instance method.  If it were a static method, either it
+				// would be mapped to non-existent class ModuleName, or to non-existent class ModuleNameStatic, or to
+				// existing class ModuleName which is itself static, all three of which are caught by the above
+				// condition.
+
+				if (functionName == "")
+				{
+					MemberInfo[] constructor = parentType.GetMember(".ctor");
+					if (constructor.Length == 0)
+						throw new Exception($"No .ctor in {parentName}.");
+					var constructorInfo = (ConstructorInfo)constructor[0];
+					return new FunctionSearchResult
+					(
+						(_, arguments) => constructorInfo.Invoke(null, arguments),
+						ParameterIdentity.Convert(constructorInfo.GetParameters())
+					);
+				}
+
+				var instanceMethodFlags = BindingFlags.Public | BindingFlags.Instance;
+				if (TryFindMethod(parentType, functionName, instanceMethodFlags, out var callable))
+					return callable;
+
+				throw new Exception($"Type {parentType} has no function {functionName}");
+			}
+		);
 		Task<object?[]> argumentsTask = functionCall.InputArgs()
 			.ContinueWith(prior => ResolveFunctionArguments(prior.Result, functionTask)).Unwrap();
 
@@ -100,7 +109,7 @@ class Invocation
 		var arguments = await argumentsTask;
 		try
 		{
-			object? returnValue = function.Invoke(parent, arguments);
+			object? returnValue = function.Callable(parent, arguments);
 
 			if (returnValue?.GetType() == typeof(Task))
 			{
@@ -145,7 +154,7 @@ class Invocation
 						Console.Error.WriteLine("---------- context ----------");
 						Console.Error.WriteLine(requestException.RequestContext);
 						Console.Error.WriteLine("---------- response ----------");
-						foreach (GraphQLError graphQLError in requestException.Response.Errors)
+						foreach (GraphQLError graphQLError in requestException.Response.Errors ?? [])
 						{
 							Console.Error.WriteLine(graphQLError.Message);
 							if (graphQLError.Path != null)
@@ -181,11 +190,10 @@ class Invocation
 	Task<object?[]> ResolveFunctionArguments
 	(
 		IReadOnlyList<FunctionCallArgValue> daggerArguments,
-		Task<MethodBase> functionTask
+		Task<FunctionSearchResult> functionTask
 	)
 	{
 		var result = new Task<object?>[daggerArguments.Count];
-		Task<ParameterInfo[]> parametersTask = functionTask.ContinueWith(priorTask => priorTask.Result.GetParameters());
 
 		// TODO: Do a batch query to Dagger, reduce total number of queries (and make it easier to do that with the Client!)
 		for (int index = 0; index < daggerArguments.Count; ++index)
@@ -193,22 +201,78 @@ class Invocation
 			FunctionCallArgValue daggerArgument = daggerArguments[index];
 			Task<string> nameTask = daggerArgument.Name();
 			Task<JSON> valueTask = daggerArgument.Value();
-			result[index] = Task.WhenAll(nameTask, valueTask, parametersTask).ContinueWith
+			result[index] = Task.WhenAll(nameTask, valueTask, functionTask).ContinueWith
 			(
 				_ =>
 				{
 					string name = nameTask.Result;
-					ParameterInfo parameterInfo = parametersTask.Result.First(parameter => parameter.Name == name);;
+					ParameterIdentity parameter =
+						functionTask.Result.Parameters.First(parameter => parameter.Name == name);
 					return JsonSerializer.Deserialize
 					(
 						valueTask.Result.Value,
-						parameterInfo.ParameterType,
+						parameter.Type,
 						SerializerOptions
 					);
 				}
 			);
 		}
 		return Task.WhenAll(result);
+	}
+
+	private static bool TryFindMethod
+	(
+		Type parentType,
+		string name,
+		BindingFlags bindingFlags,
+		out FunctionSearchResult result
+	)
+	{
+		MemberInfo[] member = parentType.GetMember(name, MemberTypes.Method, bindingFlags);
+		if (member.Length > 0)
+		{
+			var methodInfo = (MethodInfo)member[0];
+			result = new FunctionSearchResult
+			(
+				(self, arguments) => methodInfo.Invoke(self, arguments),
+				ParameterIdentity.Convert(methodInfo.GetParameters())
+			);
+			return true;
+		}
+
+		if (name.StartsWith("With", StringComparison.Ordinal))
+		{
+			member = parentType.GetMember("set_" + name[4..], MemberTypes.Method, bindingFlags|BindingFlags.NonPublic);
+			if (member.Length > 0)
+			{
+				var methodInfo = (MethodInfo)member[0];
+				result = new FunctionSearchResult
+				(
+					(self, arguments) => methodInfo.Invoke(self, arguments),
+					ParameterIdentity.Convert(methodInfo.GetParameters())
+				);
+				return true;
+			}
+
+			member = parentType.GetMember(name[4..], MemberTypes.Field, bindingFlags);
+			if (member.Length > 0)
+			{
+				var fieldInfo = (FieldInfo)member[0];
+				result = new FunctionSearchResult
+				(
+					(self, arguments) =>
+					{
+						fieldInfo.SetValue(self, arguments[0]);
+						return self;
+					},
+					[new ParameterIdentity("value", fieldInfo.FieldType)]
+				);
+				return true;
+			}
+		}
+
+		result = default;
+		return false;
 	}
 
 	JsonSerializerOptions SerializerOptions => _serializerOptions ??= new()
@@ -218,9 +282,32 @@ class Invocation
 			new SelfSerializableConverterFactory(),
 			new JsonStringEnumConverter(),
 			new TaskConverterFactory(),
-			new ValueTaskConverterFactory()
+			new ValueTaskConverterFactory(),
+			new ConstructorlessConverterFactory(_moduleAssembly)
 		},
 		IncludeFields = true,
-		UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
+		UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+		TypeInfoResolver = new DefaultJsonTypeInfoResolver
+		{
+			Modifiers =
+			{
+				ConstructorlessConverter.TypeInfoModifier,
+				PrivateMemberSerialization.TypeInfoModifierFactory(_moduleAssembly)
+			}
+		}
 	};
+
+	private delegate object? Callable(object? self, object?[] parameters);
+
+	private readonly record struct ParameterIdentity(string Name, Type Type)
+	{
+		public static ImmutableArray<ParameterIdentity> Convert(IEnumerable<ParameterInfo> infos)
+			=> [..infos.Select(static info => new ParameterIdentity(info.Name!, info.ParameterType))];
+	}
+
+	private readonly record struct FunctionSearchResult
+	(
+		Callable Callable,
+		ImmutableArray<ParameterIdentity> Parameters
+	);
 }
