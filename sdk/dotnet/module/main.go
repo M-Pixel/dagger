@@ -95,7 +95,7 @@ func (sdk *DotnetSdk) Codegen(
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
 // +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!Client/bin/Release/net8.0/*", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "!module/Default.csproj", "*.pdb"]
+// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!Client/bin/Release/net8.0/*", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "!module/Template.csproj", "*.pdb"]
 	sdkDirectory *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	// TODO: Don't actually generate code if the context is call (as opposed to init or sync), and a generated SDK is
@@ -146,15 +146,21 @@ func (sdk *DotnetSdk) Codegen(
 		}
 	}
 	if !hasCsproj && (!hasFolder || !hasSln) {
-		contents, err := os.ReadFile("/src/sdk/dotnet/module/Default.csproj")
+		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Default.csproj': %v", err)
+			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.csproj': %v", err)
 		}
-		buildDirectory = buildDirectory.WithNewFile(name+".csproj", strings.Replace(string(contents), "$", name, -1))
+		cs, err := os.ReadFile("/src/sdk/dotnet/module/Template.cs")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.cs': %v", err)
+		}
+		buildDirectory = buildDirectory.
+			WithNewFile(name+".csproj", strings.Replace(string(csproj), "$", name, -1)).
+			WithNewFile("Cow.cs", strings.Replace(string(cs), "$", name, -1))
 	}
+	// TODO: If .csproj file exists, make sure that it contains a ref to the generated SDK
 
 	// TODO: Configurable whether documentation & PDB are included
-	// TODO: Pass-through (or create) .csproj file, making sure that it contains a ref to the generated SDK
 	return dag.GeneratedCode(dag.Directory().WithDirectory(subPath, buildDirectory)).
 		WithVCSIgnoredPaths([]string{"**/*.pdb", "bin", "obj"}), nil
 }
