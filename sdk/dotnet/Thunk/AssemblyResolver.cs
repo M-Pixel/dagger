@@ -25,7 +25,7 @@ class ThunkAssemblyResolver : MetadataAssemblyResolver
 		foreach (var path in _searchPaths)
 		{
 			string assemblyPath = path + assemblyName.Name + ".dll";
-			if (File.Exists(assemblyPath))
+			if (System.IO.File.Exists(assemblyPath))
 				return context.LoadFromAssemblyPath(assemblyPath);
 		}
 		return null;

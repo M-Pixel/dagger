@@ -7,9 +7,6 @@ using Dagger.Introspection;
 
 string? moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name");
 bool isHost = moduleName == null;
-if (isHost)
-	moduleName = "Host";
-string assemblyName = $"Dagger.Generated.{moduleName}";
 
 Console.WriteLine("Parsing schema...");
 SchemaDocument document;
@@ -55,7 +52,7 @@ Schema schema = document.Schema with
 };
 
 Console.WriteLine("Generating client library...");
-var syntax = API.Generate(schema, assemblyName);
+var syntax = API.Generate(schema);
 
 Console.WriteLine("Compiling...");
 ClientCompiler.Compile(syntax);

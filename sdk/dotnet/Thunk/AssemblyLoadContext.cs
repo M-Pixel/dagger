@@ -8,9 +8,8 @@ namespace Dagger.Thunk;
 
 /// <summary>
 ///		I can't use the default load context to load the module assembly, because the default context already has a
-///		Dagger.Generated.Thunk-namespaced version of Dagger.Generated loaded into it, and the module needs to link
-///		against its Dagger.Generated.Foo-namespaced version of the Dagger.Generated assembly (they both have the same
-///		assembly name, as explained in Client/Assembly.cs, for the sake of exposing Client internals to Generated).
+///		version of Dagger.Generated loaded into it that may not contain the module-dependency generated members that the
+///		module expects.
 /// </summary>
 class DaggerModuleLoadContext : AssemblyLoadContext
 {

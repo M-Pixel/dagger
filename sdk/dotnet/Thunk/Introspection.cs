@@ -7,8 +7,6 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
-using Dagger.Generated.ModuleTest;
-using Module = Dagger.Generated.ModuleTest.Module;
 
 namespace Dagger.Thunk;
 using static Alias;
@@ -461,11 +459,7 @@ abstract class ObjectlikeIntrospection<TTypeDefNullability>
 			string? defaultPath = null;
 			string[]? ignorePatterns = null;
 			string? parameterTypeName = parameterInfo.ParameterType.FullName;
-			if
-			(
-				parameterTypeName != null &&
-				parameterTypeName.StartsWith("Dagger.Generated.") && parameterTypeName.EndsWith(".Directory")
-			)
+			if (parameterTypeName == "Dagger.Directory")
 			{
 				defaultPath = _defaultPath;
 				ignorePatterns = _defaultIgnore;

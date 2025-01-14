@@ -4,9 +4,9 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Threading.Tasks;
-using Dagger.Generated.ModuleTest;
+using Dagger;
 using Dagger.Thunk;
-using Module = Dagger.Generated.ModuleTest.Module;
+using Module = Dagger.Module;
 // ReSharper disable NotResolvedInText
 
 if (Environment.GetCommandLineArgs().Contains("-DebugIntrospection"))

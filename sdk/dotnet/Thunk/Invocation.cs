@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading.Tasks;
-using Dagger.Generated.ModuleTest;
 using GraphQL;
 
 namespace Dagger.Thunk;

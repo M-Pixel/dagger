@@ -1,4 +1,4 @@
-﻿using static Dagger.Generated.ModuleTest.Alias;
+﻿using static Dagger.Alias;
 
 namespace ModuleTest;
 

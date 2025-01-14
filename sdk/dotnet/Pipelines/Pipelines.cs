@@ -1,12 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using Dagger.Generated.Pipelines;
 using System.Threading.Tasks;
-using static Dagger.Generated.Pipelines.Alias;
 
 namespace Dagger.Dev;
 using static Global;
+using static Alias;
 
 public static class Targets
 {
