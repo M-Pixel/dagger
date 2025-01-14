@@ -8,6 +8,10 @@ This program is responsible for translating a Dotnet [assembly](https://learn.mi
 
 As per the Dagger Module specification, it either submits a description of the assembly, or invokes a specified function from that assembly (in its own process space), depending on the details of that contextual state.
 
+## Regarding `dagger.json`
+
+Thunk is not a Dagger module.  If it was, it would be a chicken-egg paradox.  The reason that there is a `dagger.json` file here is so that SDK developers can easily populate the project with a `Generated` client library, using `dagger develop -m Thunk`.
+
 ## Introspection
 
 All functions, fields, and gettable properties that are both public and static are mapped to a no-parameter Dagger object named after the module.  If the assembly also contains a non-static type with the same name as the module, the Dagger object that they are mapped to will have a "Static" suffix.
