@@ -1,6 +1,4 @@
-using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -12,18 +10,13 @@ public static class ClientCompiler
 {
 	public static void Compile(CompilationUnitSyntax unit)
 	{
-		const string referenceAssemblies = "/usr/share/dotnet/packs/Microsoft.NETCore.App.Ref/";
-		string versionSpecificSubpath = RuntimeInformation.FrameworkDescription[5..];
-		string targetSpecificSubpath = Assembly.GetExecutingAssembly().GetCustomAttribute<TargetFrameworkAttribute>()!
-			.FrameworkDisplayName![5..];
-
+		string referenceAssembliesPath = GetReferenceAssembliesPath();
 		string? moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name");
 		string clientPath = moduleName != null ? "/mnt/Client" : "Client/bin/Release/net8.0";
 		string generatedAssemblyName = "Dagger.Generated";
 
 		IEnumerable<MetadataReference> references = Directory
 			.EnumerateFiles(clientPath)
-			// .Where(path => path.EndsWith(".dll") && !path.EndsWith("/Dagger.Client.dll"))
 			.Where(path => path.EndsWith(".dll"))
 			.Concat
 			(
@@ -35,11 +28,7 @@ public static class ClientCompiler
 					"System.Text.Json",
 					"System.Linq"
 				}
-				.Select
-				(
-					assembly =>
-						$"{referenceAssemblies}/{versionSpecificSubpath}/ref/net{targetSpecificSubpath}/{assembly}.dll"
-				)
+				.Select(assembly => $"{referenceAssembliesPath}{assembly}.dll")
 			)
 			.Select(dllPath => MetadataReference.CreateFromFile(dllPath));
 
@@ -79,5 +68,17 @@ public static class ClientCompiler
 				)
 			);
 		}
+	}
+
+	/// <summary>Constructs the path under which reference assemblies can be found on the current host.</summary>
+	private static string GetReferenceAssembliesPath()
+	{
+		string coreLibraryLocation = typeof(object).Assembly.Location;
+		ReadOnlySpan<char> dotnetLocation =
+			coreLibraryLocation.AsSpan()[..(coreLibraryLocation.IndexOf("dotnet/", StringComparison.Ordinal) + 7)];
+		// FrameworkDescription gives something like ".NET 8.0.11"
+		ReadOnlySpan<char> fullVersion = RuntimeInformation.FrameworkDescription.AsSpan()[5..];
+		ReadOnlySpan<char> majorMinorVersion = fullVersion[..fullVersion.LastIndexOf('.')];
+		return $"{dotnetLocation}packs/Microsoft.NETCore.App.Ref/{fullVersion}/ref/net{majorMinorVersion}/";
 	}
 }
