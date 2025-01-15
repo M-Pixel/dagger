@@ -186,13 +186,14 @@ class Invocation
 		}
 	}
 
-	Task<object?[]> ResolveFunctionArguments
+	async Task<object?[]> ResolveFunctionArguments
 	(
 		IReadOnlyList<FunctionCallArgValue> daggerArguments,
 		Task<FunctionSearchResult> functionTask
 	)
 	{
-		var result = new Task<object?>[daggerArguments.Count];
+		// Dagger doesn't (always) deliver parameters in the same order that they were declared in introspection.
+		var unsortedResultTasks = new Task<ParameterValue>[daggerArguments.Count];
 
 		// TODO: Do a batch query to Dagger, reduce total number of queries (and make it easier to do that with the Client!)
 		for (int index = 0; index < daggerArguments.Count; ++index)
@@ -200,23 +201,37 @@ class Invocation
 			FunctionCallArgValue daggerArgument = daggerArguments[index];
 			Task<string> nameTask = daggerArgument.Name();
 			Task<JSON> valueTask = daggerArgument.Value();
-			result[index] = Task.WhenAll(nameTask, valueTask, functionTask).ContinueWith
+			unsortedResultTasks[index] = Task.WhenAll(nameTask, valueTask, functionTask).ContinueWith
 			(
 				_ =>
 				{
-					string name = nameTask.Result;
+					string name = string.Intern(nameTask.Result);
 					ParameterIdentity parameter =
 						functionTask.Result.Parameters.First(parameter => parameter.Name == name);
-					return JsonSerializer.Deserialize
+					return new ParameterValue
 					(
-						valueTask.Result.Value,
-						parameter.Type,
-						SerializerOptions
+						name,
+						JsonSerializer.Deserialize
+						(
+							valueTask.Result.Value,
+							parameter.Type,
+							SerializerOptions
+						)
 					);
 				}
 			);
 		}
-		return Task.WhenAll(result);
+		ParameterValue[] unsortedResults = await Task.WhenAll(unsortedResultTasks);
+		return functionTask.Result.Parameters
+			.Select
+			(
+				parameter =>
+				{
+					ParameterValue result = unsortedResults.FirstOrDefault(result => result.Name == parameter.Name);
+					return result.Name == null ? parameter.DefaultValue : result.Value;
+				}
+			)
+			.ToArray();
 	}
 
 	private static bool TryFindMethod
@@ -264,7 +279,8 @@ class Invocation
 						fieldInfo.SetValue(self, arguments[0]);
 						return self;
 					},
-					[new ParameterIdentity("value", fieldInfo.FieldType)]
+					// DefaultValue is supplied only because it is required; setter parameters are never optional.
+					[new ParameterIdentity("value", fieldInfo.FieldType, DefaultValue: null)]
 				);
 				return true;
 			}
@@ -298,11 +314,13 @@ class Invocation
 
 	private delegate object? Callable(object? self, object?[] parameters);
 
-	private readonly record struct ParameterIdentity(string Name, Type Type)
+	private readonly record struct ParameterIdentity(string Name, Type Type, object? DefaultValue)
 	{
-		public static ImmutableArray<ParameterIdentity> Convert(IEnumerable<ParameterInfo> infos)
-			=> [..infos.Select(static info => new ParameterIdentity(info.Name!, info.ParameterType))];
+		public static ImmutableArray<ParameterIdentity> Convert(IEnumerable<ParameterInfo> infos) =>
+			[..infos.Select(static info => new ParameterIdentity(info.Name!, info.ParameterType, info.DefaultValue))];
 	}
+
+	private readonly record struct ParameterValue(string Name, object? Value);
 
 	private readonly record struct FunctionSearchResult
 	(
