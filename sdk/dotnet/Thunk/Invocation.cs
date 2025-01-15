@@ -57,7 +57,7 @@ class Invocation
 					if (parentType != null)
 					{
 						if (functionName == "")
-							return new FunctionSearchResult((_, _) => new object(), []);
+							return new FunctionSearchResult((_, _) => new object(), parentType, []);
 						// If parent type is not null, I got here because parent type is abstract.  The only way for
 						// methods from an abstract class to be registered is if it's the eponymous class and is static
 						// (if it wasn't on the eponymous class, it would be mapped to non-existent ModuleName or
@@ -89,6 +89,7 @@ class Invocation
 					return new FunctionSearchResult
 					(
 						(_, arguments) => constructorInfo.Invoke(null, arguments),
+						parentType,
 						ParameterIdentity.Convert(constructorInfo.GetParameters())
 					);
 				}
@@ -110,9 +111,9 @@ class Invocation
 		{
 			object? returnValue = function.Callable(parent, arguments);
 
-			if (returnValue?.GetType() == typeof(Task))
+			if (function.ReturnType == typeof(Task))
 			{
-				await (Task)returnValue;
+				await (Task)returnValue!;
 				returnValue = null;
 			}
 			else if (returnValue is ValueTask valueTask)
@@ -122,7 +123,7 @@ class Invocation
 			}
 
 			if (returnValue is null)
-				await functionCall.ReturnValue(new JSON(""));
+				await functionCall.ReturnValue(new JSON("null"));
 			else
 			{
 				string json = JsonSerializer.Serialize(returnValue, SerializerOptions);
@@ -249,6 +250,7 @@ class Invocation
 			result = new FunctionSearchResult
 			(
 				(self, arguments) => methodInfo.Invoke(self, arguments),
+				methodInfo.ReturnType,
 				ParameterIdentity.Convert(methodInfo.GetParameters())
 			);
 			return true;
@@ -263,6 +265,7 @@ class Invocation
 				result = new FunctionSearchResult
 				(
 					(self, arguments) => methodInfo.Invoke(self, arguments),
+					parentType,
 					ParameterIdentity.Convert(methodInfo.GetParameters())
 				);
 				return true;
@@ -279,6 +282,7 @@ class Invocation
 						fieldInfo.SetValue(self, arguments[0]);
 						return self;
 					},
+					parentType,
 					// DefaultValue is supplied only because it is required; setter parameters are never optional.
 					[new ParameterIdentity("value", fieldInfo.FieldType, DefaultValue: null)]
 				);
@@ -325,6 +329,7 @@ class Invocation
 	private readonly record struct FunctionSearchResult
 	(
 		Callable Callable,
+		Type ReturnType,
 		ImmutableArray<ParameterIdentity> Parameters
 	);
 }
