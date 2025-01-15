@@ -3,10 +3,8 @@ using System.Linq;
 using System.Net.Http;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
-using Dagger.Generated.$;
-using static Dagger.Generated.$.Alias;
-
-namespace $;
+using Dagger;
+using static Dagger.Alias;
 
 /// <summary>A Dagger Module Object that is going places.</summary>
 public class Cow : IJsonOnDeserialized

@@ -150,13 +150,9 @@ func (sdk *DotnetSdk) Codegen(
 		if err != nil {
 			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.csproj': %v", err)
 		}
-		cs, err := os.ReadFile("/src/sdk/dotnet/module/Template.cs")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.cs': %v", err)
-		}
 		buildDirectory = buildDirectory.
 			WithNewFile(name+".csproj", strings.Replace(string(csproj), "$", name, -1)).
-			WithNewFile("Cow.cs", strings.Replace(string(cs), "$", name, -1))
+			WithFile("Cow.cs", dag.CurrentModule().Source().File("Cow.cs"))
 	}
 	// TODO: If .csproj file exists, make sure that it contains a ref to the generated SDK
 
