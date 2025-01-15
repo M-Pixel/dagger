@@ -118,7 +118,9 @@ class Introspection
 		TypeReferenceWithNullability(_nullabilityContext.Create(field), input);
 
 	public TypeDef TypeReferenceWithNullability(ParameterInfo parameter, bool input) =>
-		TypeReferenceWithNullability(_nullabilityContext.Create(parameter), input);
+		input && parameter.HasDefaultValue
+			? TypeReference(parameter.ParameterType, input).WithOptional(true)
+			: TypeReferenceWithNullability(_nullabilityContext.Create(parameter), input);
 
 	public TypeDef TypeReferenceWithNullability(PropertyInfo property, bool input) =>
 		TypeReferenceWithNullability(_nullabilityContext.Create(property), input);
