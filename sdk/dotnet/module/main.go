@@ -34,9 +34,9 @@ func DotnetRuntimeContainer() *dagger.Container {
 		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
 		WithMountedTemp("/tmp").
 		WithMountedCache("/nuget", dag.CacheVolume("nuget"),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeLocked}).
+			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared}).
 		WithMountedCache("/home/app/.local/share/NuGet/http-cache", dag.CacheVolume("nuget-http"),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeLocked})
+			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared})
 }
 
 func (sdk *DotnetSdk) ModuleRuntime(
