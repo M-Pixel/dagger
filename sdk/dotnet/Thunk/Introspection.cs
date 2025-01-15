@@ -479,7 +479,7 @@ abstract class ObjectlikeIntrospection<TTypeDefNullability>
 					? parameterDocumentation.Summary
 					: null,
 				parameterInfo is { HasDefaultValue: true, RawDefaultValue: not null }
-					? new JSON(parameterInfo.RawDefaultValue.ToString()!)
+					? new JSON(parameterInfo.RawDefaultValue.ToString()!.ToLowerInvariant())
 					: null,
 				defaultPath,
 				ignorePatterns
