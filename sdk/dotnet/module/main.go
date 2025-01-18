@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	uid = "1654"
+	uid      = "1654"
+	registry = "ghcr.io/m-pixel/"
 )
 
 // core/schema/sdk.go defines an implicit interface for SDK modules.  This adheres to that interface.
@@ -30,21 +31,20 @@ type DotnetSdk struct {
 
 func DotnetRuntimeContainer() *dagger.Container {
 	return dag.Container().
-		From("mcr.microsoft.com/dotnet/runtime:8.0-noble-chiseled").
+		//From("mcr.microsoft.com/dotnet/runtime:8.0-noble").WithUser(uid).
+		From("mcr.microsoft.com/dotnet/runtime:8.0-noble-chiseled"). // "chiseled" means distroless
 		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
 		WithMountedTemp("/tmp").
-		WithMountedCache("/nuget", dag.CacheVolume("nuget"),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared}).
 		WithMountedCache("/home/app/.local/share/NuGet/http-cache", dag.CacheVolume("nuget-http"),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared})
+			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared}).
+		WithWorkdir("/scratch"). // Match the Dagger convention for running modules workdir name
+		WithDirectory(".", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
+	// TODO: Figure out if any additional directories should have cache mounted
 }
 
 func (sdk *DotnetSdk) ModuleRuntime(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
-// +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!Primer/bin/Release/net8.0/linux-x64/*", "!Thunk/bin/Release/net8.0/linux-x64/Dagger.Generated.dll", "!Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.dll", "!Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.deps.json", "!Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.runtimeconfig.json", "Primer/bin/Release/net8.0/linux-x64/Dagger.Primer", "*.pdb"]
-	sdkDirectory *dagger.Directory,
 ) (*dagger.Container, error) {
 	subPath, err := modSource.SourceSubpath(ctx)
 	if err != nil {
@@ -55,48 +55,36 @@ func (sdk *DotnetSdk) ModuleRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve module name for dotnet invocation: %v", err)
 	}
+
+	version, _ := dag.Version(ctx)
 	// TODO: Is it beneficial for any of this to be async?
 	// TODO: Support compiling the module if it's not pre-compiled
 
+	// TODO: Configurable source container URL (and is it possible to bind a service to an SDK container?)
 	return DotnetRuntimeContainer().
-		// Create writable directories.
-		WithDirectory("/module-deps", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithDirectory("/thunk", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithDirectory("/etc/dagger", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
+		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-primer:"+version).Directory("/")).
+		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-thunk:"+version).Directory("/")).
 
-		// Mount Primer, Thunk, and global NuGet assembly cache.
-		WithMountedDirectory("/primer", sdkDirectory.Directory("Primer/bin/Release/net8.0/linux-x64")).
-		// TODO: Support NuGet server overrides here
-		WithMountedFile("/thunk/Dagger.Generated.dll", sdkDirectory.File("Thunk/bin/Release/net8.0/linux-x64/Dagger.Generated.dll")).
-		WithMountedFile("/thunk/Dagger.Thunk.dll", sdkDirectory.File("Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.dll")).
-		WithMountedFile("/thunk/Dagger.Thunk.deps.json", sdkDirectory.File("Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.deps.json")).
-		WithMountedFile("/thunk/Dagger.Thunk.runtimeconfig.json", sdkDirectory.File("Thunk/bin/Release/net8.0/linux-x64/Dagger.Thunk.runtimeconfig.json")).
-
-		// Download Thunk's NuGet dependencies.  Runs once per Thunk release (or e ach time nuget cache is GC'd).
-		WithEnvVariable("Dagger:Module:Name", "Thunk").
-		WithEnvVariable("Dagger:Module:SourcePath", "/thunk").
-		WithEnvVariable("Dagger:Primer:DirectDeps", "").
-		WithExec([]string{"/usr/bin/dotnet", "/primer/Dagger.Primer.dll"}).
-		WithoutEnvVariable("Dagger:Primer:DirectDeps").
+		// Download Thunk's NuGet dependencies.  Runs once per Thunk release (or each time nuget cache is GC'd).
+		WithEnvVariable("Dagger:Module:SourcePath", "/Thunk").
+		WithEnvVariable("Dagger:Module:IsCore", "").
+		WithExec([]string{"dotnet", "/Primer/Dagger.Primer.dll"}).
+		WithoutEnvVariable("Dagger:Module:IsCore").
 
 		// Discover Module's layout and download its NuGet assemblies.  Runs once per module release.
 		WithEnvVariable("Dagger:Module:Name", name).
-		WithEnvVariable("Dagger:Module:SourcePath", path.Join("/module", subPath)).
-		WithMountedDirectory("/module", modSource.ContextDirectory()).
-		WithExec([]string{"/usr/bin/dotnet", "/primer/Dagger.Primer.dll"}).
+		WithEnvVariable("Dagger:Module:SourcePath", path.Join("/Module", subPath)).
+		WithMountedDirectory("/Module", modSource.ContextDirectory()).
+		WithExec([]string{"/usr/bin/dotnet", "/Primer/Dagger.Primer.dll"}).
 
 		// Done priming, now invoke.  Runs once per invocation.
-		WithoutMount("/primer").
-		WithEntrypoint([]string{"/usr/bin/dotnet", "/thunk/Dagger.Thunk.dll"}), nil
+		WithEntrypoint([]string{"/usr/bin/dotnet", "/Thunk/Dagger.Thunk.dll"}), nil
 }
 
 func (sdk *DotnetSdk) Codegen(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
-// +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!CodeGenerator/bin/Release/net8.0/linux-x64/*", "!Client/bin/Release/net8.0/*", "CodeGenerator/bin/Release/net8.0/linux-x64/Dagger.CodeGen", "!module/Template.csproj", "*.pdb"]
-	sdkDirectory *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	// TODO: Don't actually generate code if the context is call (as opposed to init or sync), and a generated SDK is
 	// already present or the module has no dependencies.  The generated SDK is less than 200 KB, so it can be included
@@ -112,20 +100,24 @@ func (sdk *DotnetSdk) Codegen(
 		return nil, fmt.Errorf("failed to retrieve module name for dotnet code generation: %v", err)
 	}
 
-	buildDirectory := dag.Container().
-		// TODO: Publish container that adds reference assemblies to distroless runtime
-		From("mcr.microsoft.com/dotnet/sdk:8.0-alpine3.20").
-		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
-		WithUser("app").
-		WithDirectory("/scratch", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: "app"}).
-		WithWorkdir("/scratch").
-		// TODO: Figure out if any directories should have cache mounted
+	version, _ := dag.Version(ctx)
+
+	buildDirectory := DotnetRuntimeContainer().
+		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-primer:"+version).Directory("/")).
+		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-codegenerator:"+version).Directory("/")).
+
+		// Install CodeGenerator dependencies, including reference assemblies
+		WithEnvVariable("Dagger:Module:SourcePath", "/CodeGenerator").
+		WithEnvVariable("Dagger:Module:IsCore", "").
+		WithExec([]string{"/usr/bin/dotnet", "/Primer/Dagger.Primer.dll"}).
+		WithoutEnvVariable("Dagger:Module:IsCore").
+		WithoutEnvVariable("Dagger:Module:SourcePath").
+
+		// Set code generation parameters and let it rip.
 		WithMountedFile("/mnt/introspection.json", introspectionJson).
-		WithMountedDirectory("/mnt/CodeGenerator", sdkDirectory.Directory("CodeGenerator/bin/Release/net8.0/linux-x64")).
-		WithMountedDirectory("/mnt/Client", sdkDirectory.Directory("Client/bin/Release/net8.0")).
 		WithEnvVariable("Dagger:Module:Name", name).
 		WithExec(
-			[]string{"dotnet", "/mnt/CodeGenerator/Dagger.CodeGenerator.dll"},
+			[]string{"dotnet", "/CodeGenerator/Dagger.CodeGenerator.dll"},
 			dagger.ContainerWithExecOpts{ExperimentalPrivilegedNesting: true}).
 		Directory(".")
 

@@ -27,7 +27,7 @@ Task<string> parentNameTask = functionCall.ParentName();
 
 string moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name")
 	?? throw new ArgumentNullException("Dagger:Module:Name");
-string moduleAssemblyPath = await System.IO.File.ReadAllTextAsync("/etc/dagger/AssemblyPath");
+string moduleAssemblyPath = await System.IO.File.ReadAllTextAsync("/PrimedState/AssemblyPath");
 
 string parentName = await parentNameTask;
 if (parentName == "")

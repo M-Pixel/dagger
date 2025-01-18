@@ -14,7 +14,7 @@ class ThunkAssemblyResolver : MetadataAssemblyResolver
 		_searchPaths =
 		[
 			Path.GetDirectoryName(pathToDependentAssembly)! + '/',
-			"/module-deps/",
+			"/Dependencies/",
 			Path.GetDirectoryName(typeof(object).Assembly.Location)! + '/'
 		];
 	}

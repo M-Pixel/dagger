@@ -18,7 +18,7 @@ FileStream fileStream = new
 {
 	JsonSerializerOptions serializerOptions = new()
 	{
-		Converters = { new ImmutableArrayConverterFactory(), new JsonStringEnumConverter() },
+		Converters = { new JsonStringEnumConverter() },
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 	};
 	document = await JsonSerializer.DeserializeAsync<SchemaDocument>(fileStream, serializerOptions)

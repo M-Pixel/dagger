@@ -10,14 +10,17 @@ public static class ClientCompiler
 {
 	public static void Compile(CompilationUnitSyntax unit)
 	{
-		string referenceAssembliesPath = GetReferenceAssembliesPath();
 		string? moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name");
-		string clientPath = moduleName != null ? "/mnt/Client" : "Client/bin/Release/net8.0";
+		// Code Generator declares Dagger.Client as a dependency so that Primer will download it (and its dependencies)
+		// from NuGet and symlink them into the /CodeGenerator directory.  The generated code will link against
+		// these.
+		string clientPath = moduleName != null ? "/CodeGenerator" : "Client/bin/Release/net8.0";
+		string referenceAssembliesPath = moduleName != null ? "/Reference/" : GetReferenceAssembliesPath();
 		string generatedAssemblyName = "Dagger.Generated";
 
 		IEnumerable<MetadataReference> references = Directory
 			.EnumerateFiles(clientPath)
-			.Where(path => path.EndsWith(".dll"))
+			.Where(path => path.EndsWith(".dll") && !path.EndsWith("/Dagger.CodeGenerator.dll"))
 			.Concat
 			(
 				new[]

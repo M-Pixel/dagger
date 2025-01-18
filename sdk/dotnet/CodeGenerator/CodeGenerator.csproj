@@ -3,24 +3,21 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>12</LangVersion>
     <AssemblyName>Dagger.CodeGenerator</AssemblyName>
     <RootNamespace>Dagger</RootNamespace>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <InvariantGlobalization>true</InvariantGlobalization>
     <IsPackable>false</IsPackable>
+    <AssemblyVersion>0.0.1</AssemblyVersion>
+    <Deterministic>true</Deterministic>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.9.0-2.final" />
-    <!-- This little bit of JSON deserialization code is used by both projects.  It's not really substantial enough to
-     justify putting it in its own shared project.  It's the kind of thing you would choose to implement as a
-     header-only library in C++. -->
-    <Compile Include="..\Client\Json.cs">
-      <Link>Json.cs</Link>
-    </Compile>
   </ItemGroup>
 
 </Project>
