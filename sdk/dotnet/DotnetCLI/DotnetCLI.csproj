@@ -5,9 +5,9 @@
 		<ImplicitUsings>disable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<!-- You're welcome to add a prefix to the assembly name.  Only the final part needs to match the module name in dagger.json. -->
-		<AssemblyName>$</AssemblyName>
+		<AssemblyName>DotnetCLI</AssemblyName>
 		<!-- You are free to use whatever namespaces you want, they don't need to match the module name. -->
-		<RootNamespace>$</RootNamespace>
+		<RootNamespace>DotnetCLI</RootNamespace>
 		<!-- In order for your module's help text to work, GenerateDocumentationFile must be true. -->
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<!-- These suppressed warnings would have complained about public members that lack full documentation. -->

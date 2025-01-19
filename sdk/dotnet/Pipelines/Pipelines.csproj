@@ -1,13 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<TargetFramework>net8.0</TargetFramework>
-		<RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+		<!-- Implicit usings are disabled because implicitly included System.IO's File & Directory compete with Dagger's. -->
 		<ImplicitUsings>disable</ImplicitUsings>
 		<Nullable>enable</Nullable>
-		<AssemblyName>Dagger.Pipelines</AssemblyName>
-		<RootNamespace>Dagger.Pipelines</RootNamespace>
+		<!-- You're welcome to add a prefix to the assembly name.  Only the final part needs to match the module name in dagger.json. -->
+		<AssemblyName>Pipelines</AssemblyName>
+		<!-- You are free to use whatever namespaces you want, they don't need to match the module name. -->
+		<RootNamespace>Pipelines</RootNamespace>
+		<!-- In order for your module's help text to work, GenerateDocumentationFile must be true. -->
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<!-- These suppressed warnings would have complained about public members that lack full documentation. -->
 		<NoWarn>1591,1573</NoWarn>
+		<Deterministic>true</Deterministic>
 	</PropertyGroup>
 	<ItemGroup>
 		<Reference Include="Dagger.Generated">
