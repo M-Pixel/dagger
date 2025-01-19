@@ -39,28 +39,47 @@ else
 	{
 		string moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name")
 			?? throw new ArgumentNullException("Dagger:Module:Name");
-		ModuleAssemblyFile moduleAssemblyFile = new(moduleName, sourcePath);
-		depsPath = moduleAssemblyFile.File.FullName[..^3] + "deps.json";
-		parallelTasks.Add(File.WriteAllTextAsync(primedStatePath + "AssemblyPath", moduleAssemblyFile.File.FullName));
+		ModuleProber moduleProber = new(moduleName, sourcePath);
+		if (moduleProber.AssemblyFile == null)
+		{
+			Environment.Exit(moduleProber.ResponseCode);
+			return;
+		}
+		depsPath = moduleProber.AssemblyFile.FullName[..^3] + "deps.json";
+		parallelTasks.Add(File.WriteAllTextAsync(primedStatePath + "AssemblyPath", moduleProber.AssemblyFile.FullName));
 	}
-	Console.WriteLine($"Restoring {depsPath}");
 
-	NuGetClient nuGetClient = new(sourcePath);
-	// When it comes to user modules, use the default (/Dependencies) path is used.  This works because user modules are
-	// loaded by Thunk through an Assembly Load Context that knows to look there.  Core programs are loaded by the
-	// dotnet runtime executable, which *does* have a parameter --additionalprobingpath that can be used to give it
-	// additional directories (like /Dependencies) to probe for assemblies... but for such paths it expects a NuGet
-	// style directory structure (e.g. /Dependencies/graphql.client/6.0.2/lib/netstandard2.0/GraphQL.Client.dll).  To
-	// keep everything as simple and consistent as possible, core programs' dependencies are thus placed in the same
-	// directory as the core program itself.
-	string? installPath = coreProgram ? sourcePath + '/' : null;
-	parallelTasks.Add
-	(
-		nuGetClient.RestoreModule(File.OpenRead(depsPath), depsPath[..(depsPath.LastIndexOf('/') + 1)], installPath)
-	);
+	if (File.Exists(depsPath))
+	{
+		Console.WriteLine($"Restoring {depsPath}");
 
-	if (coreProgram && sourcePath == "/CodeGenerator")
-		await nuGetClient.InstallReferenceAssemblies();
+		NuGetClient nuGetClient = new(sourcePath);
+		// When it comes to user modules, use the default (/Dependencies) path is used.  This works because user modules
+		// are loaded by Thunk through an Assembly Load Context that knows to look there.  Core programs are loaded by
+		// the dotnet runtime executable, which *does* have a parameter --additionalprobingpath that can be used to give
+		// it additional directories (like /Dependencies) to probe for assemblies... but for such paths it expects a
+		// NuGet style directory structure (e.g. /Dependencies/graphql.client/6.0.2/lib/netstandard2.0/).  To keep
+		// everything as simple and consistent as possible, core programs' dependencies are thus placed in the same
+		// directory as the core program itself.
+		string? installPath = coreProgram ? sourcePath + '/' : null;
+		parallelTasks.Add
+		(
+			nuGetClient.RestoreModule(File.OpenRead(depsPath), depsPath[..(depsPath.LastIndexOf('/') + 1)], installPath)
+		);
+
+		if (coreProgram)
+		{
+			if (sourcePath == "/CodeGenerator")
+				await nuGetClient.InstallReferenceAssemblies();
+		}
+	}
+
+	// Instead of carrying its own copy of Dagger.Generated.dll, since Dagger inevitably creates a new (or cached)
+	// Dagger.Generated.dll for the module in question, let Thunk use that one.  Thunk only uses Dagger core APIs, so
+	// it's fine if the module's version has additional methods that Thunk doesn't know about.  Because the generated
+	// assembly doesn't have a version, linking will be on a matched-name matched-type basis only.
+	if (!coreProgram)
+		File.CreateSymbolicLink("/Thunk/Dagger.Generated.dll", sourcePath + "/Generated/Dagger.Generated.dll");
 
 	foreach (Task parallelTask in parallelTasks)
 		await parallelTask;

@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 
 namespace Dagger.Primer;
-using static ModuleAssemblyFile;
+using static ModuleProber;
 
 readonly record struct AssemblyBuildDirectoryCandidate : IComparable<AssemblyBuildDirectoryCandidate>
 {
@@ -47,17 +47,22 @@ readonly record struct AssemblyBuildDirectoryCandidate : IComparable<AssemblyBui
 }
 
 // TODO: Detect whether project is uncompiled sln or csproj
-class ModuleAssemblyFile
+class ModuleProber
 {
 	public static readonly int frameworkMajorVersion;
 	public static readonly bool preferRelease;
 	public static readonly bool isManualPreference;
+	private const int _RESPONSE_NOT_FOUND = 120;
+	private const int _RESPONSE_SAME_FOLDER = 121;
+	private const int _RESPONSE_SUB_FOLDER = 122;
 
 
-	public FileInfo File { get; }
+	public FileInfo? AssemblyFile { get; }
+
+	public int ResponseCode { get; }
 
 
-	static ModuleAssemblyFile()
+	static ModuleProber()
 	{
 		string frameworkDesc = RuntimeInformation.FrameworkDescription;
 		int lastSpaceIndex = frameworkDesc.LastIndexOf(' ');
@@ -90,68 +95,41 @@ class ModuleAssemblyFile
 		}
 	}
 
-	public ModuleAssemblyFile(string moduleName, string sourcePath)
+	public ModuleProber(string moduleName, string sourcePath)
 	{
-		var basePath = Path.Combine(sourcePath, moduleName, "bin");
+		string? basePath = Path.Combine(sourcePath, moduleName, "bin");
 		if (!Directory.Exists(basePath))
 			basePath = Path.Combine(sourcePath, "bin");
 		if (!Directory.Exists(basePath))
 		{
 			string? dllPath = Path.Combine(sourcePath, $"{moduleName}.dll");
-			if (!System.IO.File.Exists(dllPath))
+			if (!File.Exists(dllPath))
 				dllPath = Directory.EnumerateFiles(sourcePath, $"*.{moduleName}.dll").FirstOrDefault();
-			if (dllPath == null)
-				throw new Exception("Could not find module assembly in root source.");
-			File = new FileInfo(dllPath);
-			return;
+			if (dllPath != null)
+			{
+				AssemblyFile = new FileInfo(dllPath);
+				return;
+			}
+
+			basePath = null;
 		}
 
 		List<AssemblyBuildDirectoryCandidate> candidates = new();
-
-		// Collect all viable candidates
-		foreach (var isDebug in new[] { true, false })
-		{
-			var configPath = Path.Combine(basePath, isDebug ? "Debug" : "Release");
-
-			if (!Directory.Exists(configPath))
-				continue;
-
-			foreach (var buildDirectoryPath in Directory.EnumerateDirectories(configPath, "net*.0"))
-			{
-				if (!TryParseBuildDirectoryFrameworkMajorVersion(buildDirectoryPath, out int version))
-					continue;
-
-				foreach (string subPath in new[] { $"linux-{RuntimeInformation.ProcessArchitecture.ToString().ToLower()}/", "" })
-				{
-					var fullPath = Path.Combine(buildDirectoryPath, subPath);
-					if (!Directory.Exists(fullPath))
-						continue;
-
-					string? dllPath = Path.Combine(fullPath, $"{moduleName}.dll");
-					if (!System.IO.File.Exists(dllPath))
-						dllPath = Directory.EnumerateFiles(fullPath, $"*.{moduleName}.dll").FirstOrDefault();
-					if (dllPath == null)
-						continue;
-
-					candidates.Add
-					(
-						new AssemblyBuildDirectoryCandidate
-						{
-							IsDebug = isDebug,
-							FrameworkVersion = version,
-							IsPlatformSpecific = subPath.Length > 0,
-							LastWriteTime = System.IO.File.GetLastWriteTime(dllPath),
-							DllPath = dllPath
-						}
-					);
-				}
-			}
-		}
+		if (basePath != null)
+			CollectViableCandidates(moduleName, basePath, candidates);
 
 		// Sort candidates according to the specified criteria
 		using IEnumerator<AssemblyBuildDirectoryCandidate> enumerator = candidates.Order().GetEnumerator();
 		if (!enumerator.MoveNext())
-			throw new Exception($"No build found (expected [{moduleName}/]bin/(Debug|Release)/net{frameworkMajorVersion}.0/[linux-{RuntimeInformation.ProcessArchitecture.ToString().ToLower()}/][AssemblyNamespace.]{moduleName}.dll)");
+		{
+			if (File.Exists(Path.Combine(sourcePath, moduleName, moduleName + ".csproj")))
+				ResponseCode = _RESPONSE_SUB_FOLDER;
+			else if (File.Exists(Path.Combine(sourcePath, moduleName + ".csproj")))
+				ResponseCode = _RESPONSE_SAME_FOLDER;
+			else
+				ResponseCode = _RESPONSE_NOT_FOUND;
+			return;
+		}
 
 		AssemblyBuildDirectoryCandidate selected = enumerator.Current;
 
@@ -213,7 +191,59 @@ class ModuleAssemblyFile
 				Console.Error.WriteLine("  Consider using filters, branches, deleting old builds, to reduce disk usage.");
 		}
 
-		File = new FileInfo(selected.DllPath);
+		AssemblyFile = new FileInfo(selected.DllPath);
+	}
+
+	private static void CollectViableCandidates
+	(
+		string moduleName,
+		string basePath,
+		List<AssemblyBuildDirectoryCandidate> outCandidates
+	)
+	{
+		foreach (var isDebug in new[] { true, false })
+		{
+			var configPath = Path.Combine(basePath, isDebug ? "Debug" : "Release");
+
+			if (!Directory.Exists(configPath))
+				continue;
+
+			foreach (var buildDirectoryPath in Directory.EnumerateDirectories(configPath, "net*.0"))
+			{
+				if (!TryParseBuildDirectoryFrameworkMajorVersion(buildDirectoryPath, out int version))
+					continue;
+
+				foreach
+				(
+					string subPath
+					in
+					new[]{ $"linux-{RuntimeInformation.ProcessArchitecture.ToString().ToLower()}/", "" }
+				)
+				{
+					var fullPath = Path.Combine(buildDirectoryPath, subPath);
+					if (!Directory.Exists(fullPath))
+						continue;
+
+					string? dllPath = Path.Combine(fullPath, $"{moduleName}.dll");
+					if (!File.Exists(dllPath))
+						dllPath = Directory.EnumerateFiles(fullPath, $"*.{moduleName}.dll").FirstOrDefault();
+					if (dllPath == null)
+						continue;
+
+					outCandidates.Add
+					(
+						new AssemblyBuildDirectoryCandidate
+						{
+							IsDebug = isDebug,
+							FrameworkVersion = version,
+							IsPlatformSpecific = subPath.Length > 0,
+							LastWriteTime = File.GetLastWriteTime(dllPath),
+							DllPath = dllPath
+						}
+					);
+				}
+			}
+		}
 	}
 
 

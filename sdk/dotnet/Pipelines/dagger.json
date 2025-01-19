@@ -8,5 +8,6 @@
       "source": "../DotnetCLI"
     }
   ],
-  "source": "."
+  "source": ".",
+  "exclude": ["bin", "obj"]
 }

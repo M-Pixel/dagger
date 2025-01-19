@@ -5,8 +5,7 @@ using Dagger;
 using Dagger.Generator;
 using Dagger.Introspection;
 
-string? moduleName = Environment.GetEnvironmentVariable("Dagger:Module:Name");
-bool isHost = moduleName == null;
+bool isHost = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == null;
 
 Console.WriteLine("Parsing schema...");
 SchemaDocument document;
@@ -55,6 +54,6 @@ Console.WriteLine("Generating client library...");
 var syntax = API.Generate(schema);
 
 Console.WriteLine("Compiling...");
-ClientCompiler.Compile(syntax);
+ClientCompiler.Compile(syntax, isHost);
 
 await disposeTask;
