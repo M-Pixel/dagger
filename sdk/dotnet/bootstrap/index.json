@@ -1,0 +1,13 @@
+{
+  "version": "3.0.0",
+  "resources": [
+    {
+      "@id": "http://nuget/index.json",
+      "@type": "PackagePublish/2.0.0"
+    },
+    {
+      "@id": "http://nuget/",
+      "@type": "PackageBaseAddress/3.0.0"
+    }
+  ]
+}

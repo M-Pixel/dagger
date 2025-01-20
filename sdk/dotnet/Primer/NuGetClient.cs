@@ -110,6 +110,7 @@ class NuGetClient
 			}
 			else if (packageFile.Name.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase))
 			{
+				// TODO: Use nuspec instead (requires frameworkreducer to figure out which libs from dependencies) so that it's possible for nuget-distributed module to reference companion packages, and so that module-as-nupkg doesn't need special csproj tags to include deps-json in output.
 				// If a deps file exists, it will be paired with an assembly of the same name, which will be our primary
 				// assembly (the package name might be different, e.g. have an additional org prefix).
 				moduleAssemblyPath = packageFile.FullName[..^9] + "dll";
@@ -164,8 +165,8 @@ class NuGetClient
 			runtimeTargetPreferenceList = [..runtimeFallbacks.Fallbacks.Prepend(runtimeFallbacks.Runtime).Append("")!];
 		}
 
-		IEnumerable<RuntimeLibrary> runtimeDependencies =
-			dependencyContext.RuntimeLibraries.Where(library => library.RuntimeAssemblyGroups.Count > 0);
+		IEnumerable<RuntimeLibrary> runtimeDependencies = dependencyContext.RuntimeLibraries
+			.Where(library => library is { Type: "package", RuntimeAssemblyGroups.Count: > 0 });
 		await Task.WhenAll
 		(
 			runtimeDependencies.Select(library => ((Func<Task>)(async () =>

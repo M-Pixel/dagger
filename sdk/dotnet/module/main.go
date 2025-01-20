@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"main/internal/dagger"
+	"math/rand"
 	"os"
 	"path"
 	"strings"
@@ -30,10 +31,20 @@ type DotnetSdk struct {
 	// forcefully by moduleSourceResolveFromCaller anyway.  This SDK doesn't need to require any paths outside the
 	// subject module's csproj (source) folder.
 	RequiredPaths []string
+
+	// Used by bootstrap module.  For development only.  See [/sdk/dotnet/bootstrap/readme.md].
+	// +optional
+	ClientContainer *dagger.Container
+	// +optional
+	PrimerContainer *dagger.Container
+	// +optional
+	CodeGeneratorContainer *dagger.Container
+	// +optional
+	ThunkContainer *dagger.Container
 }
 
-func DotnetContainer(container *dagger.Container) *dagger.Container {
-	return container.
+func (sdk *DotnetSdk) DotnetContainer(container *dagger.Container) *dagger.Container {
+	var result = container.
 		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
 		WithMountedTemp("/tmp").
 		WithMountedCache("/home/app/.local/share/NuGet/http-cache", dag.CacheVolume("nuget-http"),
@@ -41,13 +52,44 @@ func DotnetContainer(container *dagger.Container) *dagger.Container {
 		WithWorkdir("/scratch"). // Match the Dagger convention for running modules workdir name
 		WithDirectory(".", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
 	// TODO: Figure out if any additional directories should have cache mounted
+	return result
 }
 
-func DotnetRuntimeContainer() *dagger.Container {
-	return DotnetContainer(dag.Container().
+func (sdk *DotnetSdk) DotnetRuntimeContainer() *dagger.Container {
+	return sdk.DotnetContainer(dag.Container().
 		//From("mcr.microsoft.com/dotnet/runtime:8.0-noble").WithUser(uid),
 		From("mcr.microsoft.com/dotnet/runtime:8.0-noble-chiseled"), // "chiseled" means distroless
 	)
+}
+
+func (sdk *DotnetSdk) DotnetSdkContainer() *dagger.Container {
+	return sdk.DotnetContainer(dag.Container().From("mcr.microsoft.com/dotnet/sdk:8.0-noble")).
+		WithMountedCache("/home/app/.dotnet", dag.CacheVolume(fmt.Sprintf("nuget-home-%i", rand.Uint64())),
+			dagger.ContainerWithMountedCacheOpts{Owner: uid}).
+		WithExec([]string{"dotnet", "workload", "update"}). // Prevents warning from appearing in all logs
+		WithUser(uid).
+		WithDirectory("/Out", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
+}
+
+func (sdk *DotnetSdk) Inject(
+	client *dagger.Container,
+	primer *dagger.Container,
+	codeGenerator *dagger.Container,
+// +optional
+	thunk *dagger.Container,
+) *DotnetSdk {
+	sdk.ClientContainer = client
+	sdk.PrimerContainer = primer
+	sdk.CodeGeneratorContainer = codeGenerator
+	sdk.ThunkContainer = thunk
+	return sdk
+}
+
+func (sdk *DotnetSdk) MaybeAddClientPackage(container *dagger.Container) *dagger.Container {
+	if sdk.ClientContainer != nil {
+		return container.WithDirectory("/", sdk.ClientContainer.Directory("/"))
+	}
+	return container
 }
 
 func (sdk *DotnetSdk) ModuleRuntime(
@@ -68,11 +110,16 @@ func (sdk *DotnetSdk) ModuleRuntime(
 	// TODO: Is it beneficial for any of this to be async?
 	// TODO: Support compiling the module if it's not pre-compiled
 
-	// TODO: Configurable source container URL (and is it possible to bind a service to an SDK container?)
-	readyToPrimeContainer := DotnetRuntimeContainer().
+	if sdk.PrimerContainer == nil {
+		sdk.PrimerContainer = dag.Container().From(registry + "dagger-dotnet-primer:" + version)
+	}
+	if sdk.ThunkContainer == nil {
+		sdk.ThunkContainer = dag.Container().From(registry + "dagger-dotnet-thunk:" + version)
+	}
+	var readyToPrimeContainer = sdk.DotnetRuntimeContainer().
 		// TODO: Wrapper SDK that attaches service for self-hosting the containers, builds them.
-		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-primer:"+version).Directory("/")).
-		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-thunk:"+version).Directory("/")).
+		WithDirectory("/", sdk.PrimerContainer.Directory("/")).
+		WithDirectory("/", sdk.ThunkContainer.Directory("/")).
 
 		// Download Thunk's NuGet dependencies.  Runs once per Thunk release (or each time nuget cache is GC'd).
 		WithEnvVariable("Dagger:Module:SourcePath", "/Thunk").
@@ -83,7 +130,8 @@ func (sdk *DotnetSdk) ModuleRuntime(
 		// Discover Module's layout and maybe download its NuGet assemblies.  Runs once per module release.
 		WithEnvVariable("Dagger:Module:Name", name).
 		WithEnvVariable("Dagger:Module:SourcePath", path.Join("/Module", subPath))
-	maybeReadyToInvokeContainer := readyToPrimeContainer.
+
+	maybeReadyToInvokeContainer := sdk.MaybeAddClientPackage(readyToPrimeContainer).
 		WithMountedDirectory("/Module", modSource.ContextDirectory()).
 		WithExec(
 			[]string{"/usr/bin/dotnet", "/Primer/Dagger.Primer.dll"},
@@ -111,8 +159,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 
 		// `alpine` is slightly smaller than `noble`, but the SDK module uses the distroless variant, which will share
 		// more layers with Ubuntu than with Alpine.
-		buildDirectory := DotnetContainer(dag.Container().From("mcr.microsoft.com/dotnet/sdk:8.0-noble").WithUser(uid)).
-			WithDirectory("/Out", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
+		buildDirectory := sdk.MaybeAddClientPackage(sdk.DotnetSdkContainer()).
 			WithDirectory("/scratch", modSource.ContextDirectory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
 			WithWorkdir(subPath).
 			WithExec([]string{"dotnet", "build", target, "--nologo", "--os=linux", "-property:ContinuousIntegrationBuild=true", "-maxCpuCount"})
@@ -150,13 +197,77 @@ func (sdk *DotnetSdk) Codegen(
 		return nil, fmt.Errorf("failed to retrieve module name for dotnet code generation: %v", err)
 	}
 
+	buildDirectory := sdk.CodegenImplementation(ctx, introspectionJson)
+
+	// Add csproj if not already present, update client version if outdated
+	var hasDll = false
+	var csprojPath = ""
+	entries, err := modSource.ContextDirectory().Entries(ctx, dagger.DirectoryEntriesOpts{Path: subPath})
+	if err == nil {
+		for _, entry := range entries {
+			if strings.HasSuffix(entry, name+".dll") {
+				hasDll = true
+				break
+			} else if entry == name+".csproj" {
+				csprojPath = entry
+				break
+			} else if entry == name {
+				innerEntries, err := modSource.ContextDirectory().
+					Entries(ctx, dagger.DirectoryEntriesOpts{Path: path.Join(subPath, entry)})
+				if err != nil {
+					continue
+				}
+				for _, innerEntry := range innerEntries {
+					if innerEntry == name+".csproj" {
+						csprojPath = path.Join(subPath, entry)
+						break
+					}
+				}
+				if len(csprojPath) > 0 {
+					break
+				}
+			}
+		}
+	}
+	if len(csprojPath) > 0 {
+		csprojFullPath := path.Join(subPath, csprojPath)
+		csproj, err := modSource.ContextDirectory().File(csprojFullPath).Contents(ctx)
+		if err == nil {
+			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, "0.15.1.2")) // TODO: Don't hardcode this version
+		}
+	} else if !hasDll {
+		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.csproj': %v", err)
+		}
+		buildDirectory = buildDirectory.
+			WithNewFile(name+".csproj", strings.Replace(string(csproj), "$", name, -1)).
+			WithFile("Cow.cs", dag.CurrentModule().Source().File("Cow.cs"))
+		// TODO: Add obj and bin to dagger.json ignores
+	}
+
+	// TODO: Configurable whether documentation & PDB are included
+	return dag.GeneratedCode(dag.Directory().WithDirectory(subPath, buildDirectory)).
+		WithVCSIgnoredPaths([]string{"**/*.pdb", "bin", "obj"}), nil
+}
+
+func (sdk *DotnetSdk) CodegenImplementation(
+	ctx context.Context,
+	introspectionJson *dagger.File,
+) *dagger.Directory {
 	version, _ := dag.Version(ctx)
 
 	// buildDirectory composition doesn't use any parameters besides introspectionJson, so if introspectionJson is
 	// identical between modules, code generation is not re-run unnecessarily.
-	buildDirectory := DotnetRuntimeContainer().
-		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-primer:"+version).Directory("/")).
-		WithDirectory("/", dag.Container().From(registry+"dagger-dotnet-codegenerator:"+version).Directory("/")).
+	if sdk.PrimerContainer == nil {
+		sdk.PrimerContainer = dag.Container().From(registry + "dagger-dotnet-primer:" + version)
+	}
+	if sdk.CodeGeneratorContainer == nil {
+		sdk.CodeGeneratorContainer = dag.Container().From(registry + "dagger-dotnet-codegenerator:" + version)
+	}
+	return sdk.DotnetRuntimeContainer().
+		WithDirectory("/", sdk.PrimerContainer.Directory("/")).
+		WithDirectory("/", sdk.CodeGeneratorContainer.Directory("/")).
 
 		// Install CodeGenerator dependencies, including reference assemblies
 		WithEnvVariable("Dagger:Module:SourcePath", "/CodeGenerator").
@@ -167,43 +278,29 @@ func (sdk *DotnetSdk) Codegen(
 
 		// Set code generation parameters and let it rip.
 		WithMountedFile("/mnt/introspection.json", introspectionJson).
-		WithExec(
-			[]string{"dotnet", "/CodeGenerator/Dagger.CodeGenerator.dll"},
-			dagger.ContainerWithExecOpts{ExperimentalPrivilegedNesting: true}).
+		WithExec([]string{"dotnet", "/CodeGenerator/Dagger.CodeGenerator.dll"}).
 		Directory(".")
+}
 
-	// Add csproj if not already present
-	var hasCsproj = false
-	var hasFolder = false
-	var hasSln = false
-	var hasDll = false
-	entries, err := modSource.ContextDirectory().Entries(ctx, dagger.DirectoryEntriesOpts{Path: subPath})
-	if err == nil {
-		for _, entry := range entries {
-			if strings.HasSuffix(entry, name+".dll") {
-				hasDll = true
-				break
-			} else if entry == name+".csproj" {
-				hasCsproj = true
-				break
-			} else if strings.HasSuffix(entry, ".sln") {
-				hasSln = true
-			} else if entry == name {
-				hasFolder = true
-			}
-		}
-	}
-	if !hasDll && !hasCsproj && (!hasFolder || !hasSln) {
-		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
-		if err != nil {
-			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.csproj': %v", err)
-		}
-		buildDirectory = buildDirectory.
-			WithNewFile(name+".csproj", strings.Replace(string(csproj), "$", name, -1)).
-			WithFile("Cow.cs", dag.CurrentModule().Source().File("Cow.cs"))
+func replaceVersion(csproj, version string) string {
+	const prefix = `<PackageReference Include="MaxPixel.Dagger.Client" Version="`
+	start := strings.Index(csproj, prefix)
+	if start == -1 {
+		return csproj
 	}
 
-	// TODO: Configurable whether documentation & PDB are included
-	return dag.GeneratedCode(dag.Directory().WithDirectory(subPath, buildDirectory)).
-		WithVCSIgnoredPaths([]string{"**/*.pdb", "bin", "obj"}), nil
+	start += len(prefix)
+	end := strings.IndexByte(csproj[start:], '"')
+	if end == -1 {
+		return csproj
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(csproj) - (end - len(version)))
+
+	builder.WriteString(csproj[:start])
+	builder.WriteString(version)
+	builder.WriteString(csproj[start+end:])
+
+	return builder.String()
 }

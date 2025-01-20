@@ -1,6 +1,5 @@
-// Builds and publishes all the component Dotnet assemblies required for the SDK module to function correctly.
-// Minimalistic.  Usually you should use the more robust per-project pipelines, but those are built on the dotnet SDK,
-// so this is useful if you break/change a lot of things and can't rely on earlier versions of the binaries.
+// Wrapper around the SDK module implementation, adding in-memory servers, so that local iteration of the SDK module
+//itself is possible without making round-trips through public NuGet or container registry.
 
 package main
 
@@ -9,89 +8,110 @@ import (
 	"dagger/bootstrap/internal/dagger"
 )
 
-type Bootstrap struct{}
+type Bootstrap struct {
+	RequiredPaths []string
+}
 
 const (
 	uid = "1654" // "1654 is 1000 + the ASCII values of each of the characters in dotnet"
 )
 
-func SdkContainer() *dagger.Container {
-	// `alpine` is slightly smaller than `noble`, but the SDK module uses the distroless variant, which will share
-	// more layers with Ubuntu than with Alpine.
-	return dag.Container().
-		From("mcr.microsoft.com/dotnet/sdk:8.0-noble").
-		WithUser(uid).
-		WithWorkdir("/home/app").
-		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
-		WithMountedTemp("/tmp").
-		WithMountedCache("/home/app/.local/share/NuGet/http-cache", dag.CacheVolume("nuget-http"),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared}).
-		WithDirectory("out", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
-}
-
 func Build(source *dagger.Directory, name string) *dagger.Directory {
-	return SdkContainer().
-		WithDirectory(name, source, dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithExec([]string{"dotnet", "build", name, "--output=out", "--nologo", "--os=linux", "-property:ContinuousIntegrationBuild=true", "-maxCpuCount"}).
-		Directory("out")
+	return dag.DotnetSDK().DotnetSDKContainer().
+		WithDirectory(".", source, dagger.ContainerWithDirectoryOpts{Owner: uid}).
+		WithExec([]string{
+			"dotnet", "build", name, "--output=/Out", "--nologo", "--configuration=Release", "--os=linux",
+			"-property:ContinuousIntegrationBuild=true", "-maxCpuCount"}).
+		Directory("/Out")
 }
 
 // TODO: Include Client in this script, instead of relying on it having been published to NuGet already.
 
-func (m *Bootstrap) Primer(
-	ctx context.Context,
-	// +defaultPath="/sdk/dotnet/Primer"
-	// +ignore=["*", "!*.csproj", "!**/*.cs"]
-	source *dagger.Directory,
-	url string,
-	user string,
-	secret *dagger.Secret,
-) (string, error) {
-	version, _ := dag.Version(ctx)
+func (sdk *Bootstrap) Primer(source *dagger.Directory) *dagger.Container {
 	return dag.Container().
 		WithDirectory("/Dependencies", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
 		WithDirectory("/PrimedState", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithDirectory("/Primer", Build(source, "Primer")).
-		WithRegistryAuth(url, user, secret).
-		Publish(ctx, url+"/dagger-dotnet-primer:"+version)
+		WithDirectory("/Primer", Build(source, "Primer"),
+			dagger.ContainerWithDirectoryOpts{Exclude: []string{"*.pdb"}})
+
 }
 
-func (m *Bootstrap) CodeGenerator(
-	ctx context.Context,
-	// +defaultPath="/sdk/dotnet/CodeGenerator"
-	// +ignore=["*", "!*.csproj", "!**/*.cs"]
-	source *dagger.Directory,
-	url string,
-	user string,
-	secret *dagger.Secret,
-) (string, error) {
-	version, _ := dag.Version(ctx)
+func (sdk *Bootstrap) CodeGenerator(source *dagger.Directory) *dagger.Container {
 	return dag.Container().
 		WithDirectory("/Reference", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithDirectory("/CodeGenerator", Build(source, "CodeGenerator"), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithRegistryAuth(url, user, secret).
-		Publish(ctx, url+"/dagger-dotnet-codegenerator:"+version)
+		WithDirectory("/CodeGenerator", Build(source, "CodeGenerator"),
+			// Primer includes its dependencies, so that it can be downloaded and run without needing the large dotnet
+			// SDK or NuGet client.  The other programs on the other hand can rely on Primer to download their
+			// dependencies, so that Foo.dll isn't redundantly included in multiple layers/images.  For reasons
+			// explained in `Primer.cs`, it needs to put those dependencies in the same folder as `Dagger.Program.dll`.
+			// So: this directory needs to be writable by the user, and it can exclude the dependency dlls which `dotnet
+			// build` unavoidably copies into the build output.
+			dagger.ContainerWithDirectoryOpts{
+				Owner: uid,
+				// While it's possible to rely on Primer to pull Dagger.Client from NuGet, due to the fact that project
+				// references don't save the "lib/target" subpath in `.deps.json`, Primer's NuGet client would need some
+				// additional complexity to handle this case.  At the moment, that complexity doesn't seem worth adding
+				// to save a mere ~37 KiB.
+				Include: []string{"Dagger.CodeGenerator.*", "Dagger.Client.dll"},
+				Exclude: []string{"Dagger.CodeGenerator.pdb"}})
 }
 
-func (m *Bootstrap) Thunk(
-	ctx context.Context,
-	// +defaultPath="/sdk/dotnet/Thunk"
-	// +ignore=["*", "!*.csproj", "!**/*.cs", "!Generated/*"]
-	source *dagger.Directory,
-	url string,
-	user string,
-	secret *dagger.Secret,
-) (string, error) {
-	version, _ := dag.Version(ctx)
+func (sdk *Bootstrap) Thunk(source *dagger.Directory) *dagger.Container {
 	return dag.Container().
-		WithDirectory("/ThunkDependencies", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithDirectory("/Thunk", Build(source, "Thunk"), dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithRegistryAuth(url, user, secret).
-		Publish(ctx, url+"/dagger-dotnet-thunk:"+version)
+		WithDirectory("/Thunk", Build(source, "Thunk"),
+			dagger.ContainerWithDirectoryOpts{
+				Owner:   uid,
+				Include: []string{"Dagger.Thunk.*", "Dagger.Client.dll"},
+				Exclude: []string{"Dagger.Thunk.pdb"}})
 }
 
-func (m *Bootstrap) Debug(ctx context.Context) (string, error) {
-	return dag.Container().From("docker.io/busybox").WithDirectory("/mnt", dag.Container().From("ghcr.io/m-pixel/dagger-dotnet-codegenerator:0.0.0").Directory("/")).
-		WithExec([]string{"ls", "-la", "/mnt"}).
-		Stdout(ctx)
+func (sdk *Bootstrap) ClientLayer(source *dagger.Directory) *dagger.Container {
+	return dag.Container().
+		WithFile("/home/app/.nuget/NuGet/NuGet.Config", dag.CurrentModule().Source().File("NuGet.Config"),
+			dagger.ContainerWithFileOpts{Owner: uid}).
+		WithDirectory("/NuGetRepo", sdk.ClientPackages(source))
+}
+
+func (sdk *Bootstrap) ClientPackages(source *dagger.Directory) *dagger.Directory {
+	return dag.DotnetSDK().DotnetSDKContainer().
+		WithDirectory(".", source, dagger.ContainerWithDirectoryOpts{Owner: uid}).
+		WithExec([]string{
+			"dotnet", "pack", ".", "--output=/Out", "--nologo", "-property:ContinuousIntegrationBuild=true",
+			"-maxCpuCount"}).
+		Directory("/Out")
+}
+
+func (sdk *Bootstrap) ModuleRuntime(
+	ctx context.Context,
+	modSource *dagger.ModuleSource,
+	introspectionJson *dagger.File,
+	// +defaultPath="/sdk/dotnet"
+	// +ignore=["*", "!*/*.csproj", "!Thunk/dagger.json", "!*/**/*.cs", "!Client/dagger-icon.png"]
+	source *dagger.Directory,
+) (*dagger.Container, error) {
+	// Thunk needs Dagger.Generated.csproj to compile.
+	source = source.WithDirectory("/Thunk", dag.DotnetSDK().CodegenImplementation(introspectionJson))
+	return dag.DotnetSDK().
+		Inject(
+			sdk.ClientLayer(source.Directory("/Client")),
+			sdk.Primer(source),
+			sdk.CodeGenerator(source),
+			dagger.DotnetSDKInjectOpts{Thunk: sdk.Thunk(source)}).
+		ModuleRuntime(modSource), nil
+}
+
+func (sdk *Bootstrap) Codegen(
+	ctx context.Context,
+	modSource *dagger.ModuleSource,
+	introspectionJson *dagger.File,
+	// +defaultPath="/sdk/dotnet"
+	// +ignore=["*", "!*/*.csproj", "!Thunk/dagger.json", "!*/**/*.cs", "!Client/dagger-icon.png"]
+	source *dagger.Directory,
+) (*dagger.GeneratedCode, error) {
+	return dag.DotnetSDK().
+		Inject(
+			sdk.ClientLayer(source.Directory("/Client")),
+			sdk.Primer(source),
+			sdk.CodeGenerator(source)).
+		Codegen(modSource, introspectionJson), nil
 }

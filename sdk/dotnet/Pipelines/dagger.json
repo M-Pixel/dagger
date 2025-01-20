@@ -1,13 +1,20 @@
 {
   "name": "Pipelines",
   "engineVersion": "v0.15.1",
-  "sdk": "../module",
+  "sdk": "../bootstrap",
+  "exclude": [
+    "bin",
+    "obj"
+  ],
   "dependencies": [
     {
-      "name": "DotnetCLI",
-      "source": "../DotnetCLI"
+      "name": "DotnetSdk",
+      "source": "../module"
+    },
+    {
+      "name": "bootstrap",
+      "source": "../bootstrap"
     }
   ],
-  "source": ".",
-  "exclude": ["bin", "obj"]
+  "source": "."
 }

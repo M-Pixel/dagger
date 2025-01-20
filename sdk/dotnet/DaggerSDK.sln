@@ -17,8 +17,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Thunk", "Thunk\Thunk.csproj
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Primer", "Primer\Primer.csproj", "{06DB2E16-EBEE-42BD-BDF0-532DF5542BD8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetCLI", "DotnetCLI\DotnetCLI.csproj", "{F14EE0A3-771D-4DAC-9F2D-D7582E76E557}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -49,10 +47,6 @@ Global
 		{06DB2E16-EBEE-42BD-BDF0-532DF5542BD8}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{06DB2E16-EBEE-42BD-BDF0-532DF5542BD8}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{06DB2E16-EBEE-42BD-BDF0-532DF5542BD8}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F14EE0A3-771D-4DAC-9F2D-D7582E76E557}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F14EE0A3-771D-4DAC-9F2D-D7582E76E557}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F14EE0A3-771D-4DAC-9F2D-D7582E76E557}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F14EE0A3-771D-4DAC-9F2D-D7582E76E557}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

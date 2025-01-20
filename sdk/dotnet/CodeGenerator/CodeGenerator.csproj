@@ -16,7 +16,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
+    <ProjectReference Include="..\Client\Client.csproj" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.9.0-2.final" />
   </ItemGroup>
 

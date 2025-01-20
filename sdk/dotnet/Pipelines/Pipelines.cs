@@ -3,13 +3,6 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Dagger;
 using static Dagger.Alias;
-using static Const;
-
-static class Const
-{
-	public static readonly string UID = Environment.GetEnvironmentVariable("APP_UID") ??
-		throw new Exception("No env:APP_UID");
-}
 
 public static class Pipelines
 {
@@ -27,7 +20,11 @@ public static class Pipelines
 		Directory source,
 		Secret key
 	)
-		=> await DAG.GetDotnetCli().Project(source).Test().Publish(apiKey: key, noSymbols: true);
+		=> await DAG.GetDotnetSdk()
+			.DotnetSdkContainer()
+			.WithDirectory(".", DAG.GetBootstrap().Client(source))
+			.WithExec(["sh", "-c", "dotnet nuget push *.nupkg --source=https://api.nuget.org/v3/index.json --no-symbols --api-key=" + await key.Plaintext()])
+			.Sync();
 
 	public static async Task<string> Primer
 	(
@@ -40,9 +37,7 @@ public static class Pipelines
 		=> await (await ContainerWithStaticAnnotations("dagger-dotnet-primer"))
 			.WithAnnotation("org.opencontainers.image.title", "Dagger Dotnet SDK Primer")
 			.WithAnnotation("org.opencontainers.image.description", "Primes a Dagger Dotnet SDK context for thunking.")
-			.WithEmptyUserDirectory("/Dependencies")
-			.WithEmptyUserDirectory("/PrimedState")
-			.WithDirectory("/Primer", DAG.GetDotnetCli().Project(source).BuildWithDefaults(), exclude: ["*.pdb"])
+			.WithDirectory("/", DAG.GetBootstrap().Primer(source).Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
 			.Publish($"{url}/dagger-dotnet-primer:{await _version}");
@@ -68,21 +63,7 @@ public static class Pipelines
 				"org.opencontainers.image.description",
 				"Generates a client library for a Dotnet Dagger module."
 			)
-			.WithEmptyUserDirectory("/Reference")
-			.WithDirectory
-			(
-				"/CodeGenerator",
-				DAG.GetDotnetCli().Project(source).BuildWithDefaults(),
-				// Primer includes its dependencies, so that it can be downloaded and run without needing the large
-				// dotnet SDK or NuGet client.  The other programs on the other hand can rely on Primer to download
-				// their dependencies, so that Foo.dll isn't redundantly included in multiple layers/images.  For
-				// reasons explained in `Primer.cs`, it needs to put those dependencies in the same folder as
-				// `Dagger.Program.dll`.  So: this directory needs to be writable by the user, and it can exclude the
-				// dependency dlls which `dotnet build` unavoidably copies into the build output.
-				owner: UID,
-				include: ["Dagger.CodeGenerator.*"],
-				exclude: ["Dagger.CodeGenerator.pdb"]
-			)
+			.WithDirectory("/", DAG.GetBootstrap().CodeGenerator(source).Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
 			.Publish($"{url}/dagger-dotnet-codegenerator:{await _version}");
@@ -98,15 +79,7 @@ public static class Pipelines
 		=> await (await ContainerWithStaticAnnotations("dagger-dotnet-thunk"))
 			.WithAnnotation("org.opencontainers.image.title", "Dagger Dotnet SDK Thunk")
 			.WithAnnotation("org.opencontainers.image.description", "Introspects and invokes Dotnet Dagger modules.")
-			.WithEmptyUserDirectory("/ThunkDependencies")
-			.WithDirectory
-			(
-				"/Thunk",
-				DAG.GetDotnetCli().Project(source).BuildWithDefaults(),
-				owner: UID,
-				include: ["Dagger.Thunk.*"],
-				exclude: ["Dagger.Thunk.pdb"]
-			)
+			.WithDirectory("/", DAG.GetBootstrap().Thunk(source).Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
 			.Publish($"{url}/dagger-dotnet-thunk:{await _version}");
@@ -127,12 +100,6 @@ public static class Pipelines
 
 static class Extensions
 {
-	public static Container WithEmptyUserDirectory(this Container container, string path)
-		=> container.WithDirectory(path, DAG.GetDirectory(), owner: UID);
-
-	public static Directory BuildWithDefaults(this DotnetCliDotnetProject project)
-		=> project.Build(configuration: "Release", os: "linux");
-
 	public static Container WithDynamicAnnotations(this Container container) => container
 		.WithAnnotation("org.opencontainers.image.created", DateTime.Now.ToString("O"));
 }

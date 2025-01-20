@@ -14,10 +14,10 @@
 	</PropertyGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\Client\Client.csproj" />
 		<Reference Include="Dagger.Generated">
 			<HintPath>Generated/Dagger.Generated.dll</HintPath>
 		</Reference>
-		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
 		<PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.0" />
 	</ItemGroup>
 </Project>

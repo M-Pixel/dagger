@@ -1,6 +1,0 @@
-{
-  "name": "DotnetCLI",
-  "engineVersion": "v0.15.1",
-  "sdk": "../module",
-  "exclude": ["bin", "obj"]
-}
