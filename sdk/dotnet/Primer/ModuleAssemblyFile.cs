@@ -97,14 +97,19 @@ class ModuleProber
 
 	public ModuleProber(string moduleName, string sourcePath)
 	{
+		// Try .sln structure: moduleSource/ModuleName/bin
 		string? basePath = Path.Combine(sourcePath, moduleName, "bin");
 		if (!Directory.Exists(basePath))
 			basePath = Path.Combine(sourcePath, "bin");
+		// Try .csproj structure: moduleSource/bin
 		if (!Directory.Exists(basePath))
 		{
+			// Try bare build directory, see if moduleSource contains *.ModuleName.dll
 			string? dllPath = Path.Combine(sourcePath, $"{moduleName}.dll");
 			if (!File.Exists(dllPath))
-				dllPath = Directory.EnumerateFiles(sourcePath, $"*.{moduleName}.dll").FirstOrDefault();
+				dllPath = Directory.Exists(sourcePath)
+					? Directory.EnumerateFiles(sourcePath, $"*.{moduleName}.dll").FirstOrDefault()
+					: null; // TODO: Would rather throw an error in this case, but Primer is called on init new module and not given generated.
 			if (dllPath != null)
 			{
 				AssemblyFile = new FileInfo(dllPath);
