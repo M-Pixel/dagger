@@ -8,7 +8,7 @@ public static class Pipelines
 {
 	[JsonIgnore] private static readonly Task<string> _version = DAG.Version();
 
-	public static async Task Client
+	public static async Task<string> Client
 	(
 		[
 			DirectoryFromContext
@@ -22,13 +22,13 @@ public static class Pipelines
 	)
 		=> await DAG.GetDotnetSdk()
 			.DotnetSdkContainer()
-			.WithDirectory(".", DAG.GetBootstrap().Client(source))
+			.WithDirectory(".", DAG.GetBootstrap().ClientPackages(source))
 			.WithExec(["sh", "-c", "dotnet nuget push *.nupkg --source=https://api.nuget.org/v3/index.json --no-symbols --api-key=" + await key.Plaintext()])
-			.Sync();
+			.Stdout();
 
 	public static async Task<string> Primer
 	(
-		[DirectoryFromContext(DefaultPath = "/sdk/dotnet/Primer", Ignore = ["*", "!Primer.csproj", "!**/*.cs"])]
+		[DirectoryFromContext(DefaultPath = "/sdk/dotnet", Ignore = ["*", "!Primer/Primer.csproj", "!Primer/**/*.cs"])]
 		Directory source,
 		string url,
 		string user,
@@ -47,8 +47,8 @@ public static class Pipelines
 		[
 			DirectoryFromContext
 			(
-				DefaultPath = "/sdk/dotnet/CodeGenerator",
-				Ignore = ["*", "!CodeGenerator.csproj", "!**/*.cs"]
+				DefaultPath = "/sdk/dotnet",
+				Ignore = ["*", "!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs"]
 			)
 		]
 		Directory source,
@@ -70,7 +70,7 @@ public static class Pipelines
 
 	public static async Task<string> Thunk
 	(
-		[DirectoryFromContext(DefaultPath = "/sdk/dotnet/Thunk", Ignore = ["*", "!Thunk.csproj", "!**/*.cs"])]
+		[DirectoryFromContext(DefaultPath = "/sdk/dotnet", Ignore = ["*", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs"])]
 		Directory source,
 		string url,
 		string user,

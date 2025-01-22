@@ -90,13 +90,12 @@ func (sdk *Bootstrap) ModuleRuntime(
 	source *dagger.Directory,
 ) (*dagger.Container, error) {
 	// Thunk needs Dagger.Generated.csproj to compile.
-	source = source.WithDirectory("/Thunk", dag.DotnetSDK().CodegenImplementation(introspectionJson))
-	return dag.DotnetSDK().
-		Inject(
+	implementation := dag.DotnetSDK().InjectCodegenDependencies(sdk.Primer(source), sdk.CodeGenerator(source))
+	source = source.WithDirectory("/Thunk", implementation.CodegenImplementation(introspectionJson))
+	return implementation.
+		InjectModuleRuntimeDependencies(
 			sdk.ClientLayer(source.Directory("/Client")),
-			sdk.Primer(source),
-			sdk.CodeGenerator(source),
-			dagger.DotnetSDKInjectOpts{Thunk: sdk.Thunk(source)}).
+			sdk.Thunk(source)).
 		ModuleRuntime(modSource), nil
 }
 
@@ -109,8 +108,7 @@ func (sdk *Bootstrap) Codegen(
 	source *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	return dag.DotnetSDK().
-		Inject(
-			sdk.ClientLayer(source.Directory("/Client")),
+		InjectCodegenDependencies(
 			sdk.Primer(source),
 			sdk.CodeGenerator(source)).
 		Codegen(modSource, introspectionJson), nil

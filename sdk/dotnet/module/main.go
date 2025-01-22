@@ -71,16 +71,20 @@ func (sdk *DotnetSdk) DotnetSdkContainer() *dagger.Container {
 		WithDirectory("/Out", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
 }
 
-func (sdk *DotnetSdk) Inject(
-	client *dagger.Container,
+func (sdk *DotnetSdk) InjectCodegenDependencies(
 	primer *dagger.Container,
 	codeGenerator *dagger.Container,
-// +optional
+) *DotnetSdk {
+	sdk.PrimerContainer = primer
+	sdk.CodeGeneratorContainer = codeGenerator
+	return sdk
+}
+
+func (sdk *DotnetSdk) InjectModuleRuntimeDependencies(
+	client *dagger.Container,
 	thunk *dagger.Container,
 ) *DotnetSdk {
 	sdk.ClientContainer = client
-	sdk.PrimerContainer = primer
-	sdk.CodeGeneratorContainer = codeGenerator
 	sdk.ThunkContainer = thunk
 	return sdk
 }
