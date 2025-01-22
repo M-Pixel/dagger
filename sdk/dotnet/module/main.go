@@ -151,14 +151,19 @@ func (sdk *DotnetSdk) ModuleRuntime(
 		// Is csproj in src dir or in subdir?
 		var target = "."
 		if primerResponse == primerExitNotFound {
-			// It might be init.  TODO: Why TF is ModuleRuntime even called on init?  I shouldn't have to handle this case.  There's obviously nothing to invoke or introspect.
 			entries, err := modSource.ContextDirectory().Entries(ctx, dagger.DirectoryEntriesOpts{Path: subPath})
-			if err != nil || len(entries) == 0 {
-				return maybeReadyToInvokeContainer.WithEntrypoint([]string{""}), nil
-			} else {
-				fmt.Println("Directory only contains these so it must be init: ", strings.Join(entries, ", "))
-				return maybeReadyToInvokeContainer.WithEntrypoint([]string{""}), nil
+			if err == nil {
+				for _, entry := range entries {
+					if !strings.HasPrefix(entry, ".") {
+						return nil, fmt.Errorf(
+							"couldn't find assembly or project - must have %s/%s.csproj, or %s/%s/%s.csproj",
+							subPath, name, subPath, name, name)
+					}
+				}
 			}
+			// TODO: Why TF is ModuleRuntime even called on init?  I shouldn't have to handle this case.  There's obviously nothing to invoke or introspect.
+			fmt.Println("Assuming init because module root doesn't contain any non-hidden files.")
+			return maybeReadyToInvokeContainer.WithEntrypoint([]string{""}), nil
 		} else if primerResponse == primerExitSubFolder {
 			target = name
 		} else if primerResponse != primerExitSameFolder {
