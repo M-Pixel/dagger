@@ -64,7 +64,7 @@ func (sdk *DotnetSdk) DotnetRuntimeContainer() *dagger.Container {
 
 func (sdk *DotnetSdk) DotnetSdkContainer() *dagger.Container {
 	return sdk.DotnetContainer(dag.Container().From("mcr.microsoft.com/dotnet/sdk:8.0-noble")).
-		WithMountedCache("/home/app/.dotnet", dag.CacheVolume(fmt.Sprintf("nuget-home-%i", rand.Uint64())),
+		WithMountedCache("/home/app/.dotnet", dag.CacheVolume(fmt.Sprintf(`nuget-home-%d`, rand.Uint64())),
 			dagger.ContainerWithMountedCacheOpts{Owner: uid}).
 		WithExec([]string{"dotnet", "workload", "update"}). // Prevents warning from appearing in all logs
 		WithUser(uid).
@@ -121,7 +121,6 @@ func (sdk *DotnetSdk) ModuleRuntime(
 		sdk.ThunkContainer = dag.Container().From(registry + "dagger-dotnet-thunk:" + version)
 	}
 	var readyToPrimeContainer = sdk.DotnetRuntimeContainer().
-		// TODO: Wrapper SDK that attaches service for self-hosting the containers, builds them.
 		WithDirectory("/", sdk.PrimerContainer.Directory("/")).
 		WithDirectory("/", sdk.ThunkContainer.Directory("/")).
 
@@ -184,6 +183,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 
 	// Done priming, now invoke.  Runs once per invocation.
 	return readyToInvokeContainer.
+		WithUser("0"). // https://github.com/dagger/dagger/issues/9427
 		WithEntrypoint([]string{"/usr/bin/dotnet", "/Thunk/Dagger.Thunk.dll"}), nil
 }
 
@@ -242,7 +242,7 @@ func (sdk *DotnetSdk) Codegen(
 		csprojFullPath := path.Join(subPath, csprojPath)
 		csproj, err := modSource.ContextDirectory().File(csprojFullPath).Contents(ctx)
 		if err == nil {
-			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, "0.15.1.2")) // TODO: Don't hardcode this version
+			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, "0.15.2.0")) // TODO: Don't hardcode this version
 		}
 	} else if !hasDll {
 		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
