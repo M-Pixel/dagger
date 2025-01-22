@@ -238,6 +238,42 @@ export type ContainerUpOpts = {
    * Bind each tunnel port to a random port on the host.
    */
   random?: boolean
+
+  /**
+   * Command to run instead of the container's default command (e.g., ["go", "run", "main.go"]).
+   *
+   * If empty, the container's default command is used.
+   */
+  args?: string[]
+
+  /**
+   * If the container has an entrypoint, prepend it to the args.
+   */
+  useEntrypoint?: boolean
+
+  /**
+   * Provides Dagger access to the executed command.
+   *
+   * Do not use this option unless you trust the command being executed; the command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM.
+   */
+  experimentalPrivilegedNesting?: boolean
+
+  /**
+   * Execute the command with all root capabilities. This is similar to running a command with "sudo" or executing "docker run" with the "--privileged" flag. Containerization does not provide any security guarantees when using this option. It should only be used when absolutely necessary and only with trusted commands.
+   */
+  insecureRootCapabilities?: boolean
+
+  /**
+   * Replace "${VAR}" or "$VAR" in the args according to the current environment variables defined in the container (e.g. "/$VAR/foo").
+   */
+  expand?: boolean
+
+  /**
+   * If set, skip the automatic init process injected into containers by default.
+   *
+   * This should only be used if the user requires that their exec process be the pid 1 process in the container. Otherwise it may result in unexpected behavior.
+   */
+  noInit?: boolean
 }
 
 export type ContainerWithDefaultTerminalCmdOpts = {
@@ -1100,6 +1136,10 @@ export type PortForward = {
  * The `PortID` scalar type represents an identifier for an object of type Port.
  */
 export type PortID = string & { __PortID: never }
+
+export type ClientCacheVolumeOpts = {
+  namespace?: string
+}
 
 export type ClientContainerOpts = {
   /**
@@ -1987,6 +2027,18 @@ export class Container extends BaseClient {
    *
    * Frontend is the port accepting traffic on the host, backend is the service port.
    * @param opts.random Bind each tunnel port to a random port on the host.
+   * @param opts.args Command to run instead of the container's default command (e.g., ["go", "run", "main.go"]).
+   *
+   * If empty, the container's default command is used.
+   * @param opts.useEntrypoint If the container has an entrypoint, prepend it to the args.
+   * @param opts.experimentalPrivilegedNesting Provides Dagger access to the executed command.
+   *
+   * Do not use this option unless you trust the command being executed; the command being executed WILL BE GRANTED FULL ACCESS TO YOUR HOST FILESYSTEM.
+   * @param opts.insecureRootCapabilities Execute the command with all root capabilities. This is similar to running a command with "sudo" or executing "docker run" with the "--privileged" flag. Containerization does not provide any security guarantees when using this option. It should only be used when absolutely necessary and only with trusted commands.
+   * @param opts.expand Replace "${VAR}" or "$VAR" in the args according to the current environment variables defined in the container (e.g. "/$VAR/foo").
+   * @param opts.noInit If set, skip the automatic init process injected into containers by default.
+   *
+   * This should only be used if the user requires that their exec process be the pid 1 process in the container. Otherwise it may result in unexpected behavior.
    */
   up = async (opts?: ContainerUpOpts): Promise<void> => {
     if (this._up) {
@@ -6245,6 +6297,15 @@ export class ModuleSource extends BaseClient {
   }
 
   /**
+   * Update one or more module dependencies.
+   * @param dependencies The dependencies to update.
+   */
+  withUpdateDependencies = (dependencies: string[]): ModuleSource => {
+    const ctx = this._ctx.select("withUpdateDependencies", { dependencies })
+    return new ModuleSource(ctx)
+  }
+
+  /**
    * Update the module source with a new named view.
    * @param name The name of the view to set.
    * @param patterns The patterns to set as the view filters.
@@ -6646,8 +6707,8 @@ export class Client extends BaseClient {
    * Constructs a cache volume for a given cache key.
    * @param key A string identifier to target this cache volume (e.g., "modules-cache").
    */
-  cacheVolume = (key: string): CacheVolume => {
-    const ctx = this._ctx.select("cacheVolume", { key })
+  cacheVolume = (key: string, opts?: ClientCacheVolumeOpts): CacheVolume => {
+    const ctx = this._ctx.select("cacheVolume", { key, ...opts })
     return new CacheVolume(ctx)
   }
 

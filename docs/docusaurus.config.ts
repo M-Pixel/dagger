@@ -1,8 +1,10 @@
 import type { Config } from "@docusaurus/types";
 import type * as Preset from "@docusaurus/preset-classic";
-import path from "path";
 import { themes as prismThemes } from "prism-react-renderer";
 import remarkCodeImport from "remark-code-import";
+import remarkTemplate from "./plugins/remark-template";
+
+import { daggerVersion } from './current_docs/partials/version';
 
 const config: Config = {
   title: "Dagger",
@@ -32,6 +34,12 @@ const config: Config = {
   markdown: {
     mermaid: true,
   },
+  scripts: [
+    {
+      src: '/js/commonroom.js',
+      async: true,
+    },
+  ],
   presets: [
     [
       "classic",
@@ -44,6 +52,7 @@ const config: Config = {
           editUrl: "https://github.com/dagger/dagger/edit/main/docs",
           remarkPlugins: [
             [remarkCodeImport, { allowImportingFromOutside: true }],
+            [remarkTemplate, { version: daggerVersion }],
           ],
         },
         blog: false,

@@ -9,7 +9,6 @@ import (
 	"golang.org/x/mod/semver"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/dagger/dagger/.dagger/build"
 	"github.com/dagger/dagger/.dagger/internal/dagger"
 )
 
@@ -34,6 +33,7 @@ const (
 // Publish the CLI using GoReleaser
 func (cli *CLI) Publish(
 	ctx context.Context,
+	tag string,
 
 	githubOrgName string,
 	githubToken *dagger.Secret,
@@ -46,6 +46,8 @@ func (cli *CLI) Publish(
 	awsRegion string,
 	awsBucket string,
 	artefactsFQDN string,
+
+	dryRun bool, // +optional
 ) error {
 	ctr, err := publishEnv(ctx)
 	if err != nil {
@@ -53,32 +55,40 @@ func (cli *CLI) Publish(
 	}
 	ctr = ctr.
 		WithWorkdir("/app").
-		WithDirectory("/app", cli.Dagger.Source()).
-		WithDirectory("/app", cli.Dagger.Git.Directory())
+		WithDirectory(".", cli.Dagger.Source()).
+		WithDirectory(".", cli.Dagger.Git.Directory()).
+		WithDirectory("build", cli.goreleaserBinaries())
 
-	tag := cli.Dagger.Tag
-	_, err = ctr.WithExec([]string{"git", "show-ref", "--verify", "refs/tags/" + tag}).Sync(ctx)
-	if err != nil {
-		err, ok := err.(*ExecError)
-		if !ok || !strings.Contains(err.Stderr, "not a valid ref") {
-			return err
-		}
-
-		// clear the set tag
+	if !semver.IsValid(tag) {
+		// all non-semver tags (like "main") are dev builds
 		tag = ""
+	} else {
+		// sanity check that the semver tag actually exists, otherwise do a dev build
+		_, err = ctr.WithExec([]string{"git", "show-ref", "--verify", "refs/tags/" + tag}).Sync(ctx)
+		if err != nil {
+			err, ok := err.(*ExecError)
+			if !ok || !strings.Contains(err.Stderr, "not a valid ref") {
+				return err
+			}
+			tag = ""
+		}
+	}
+	if tag == "" {
 		// goreleaser refuses to run if there isn't a tag, so set it to a dummy but valid semver
-		ctr = ctr.WithExec([]string{"git", "tag", "0.0.0"})
+		ctr = ctr.WithExec([]string{"git", "tag", "v0.0.0"})
 	}
 
 	args := []string{"release", "--clean", "--skip=validate", "--verbose"}
 	if tag != "" {
 		args = append(args, "--release-notes", fmt.Sprintf(".changes/%s.md", tag))
 	} else {
-		// if this isn't an official semver version, do a dev release
 		args = append(args,
 			"--nightly",
 			"--config", ".goreleaser.nightly.yml",
 		)
+	}
+	if dryRun {
+		args = append(args, "--skip=publish")
 	}
 
 	_, err = ctr.
@@ -158,14 +168,27 @@ func (cli *CLI) TestPublish(ctx context.Context) error {
 	// a key which is private. For now, this just builds the CLI for the same
 	// targets so there's at least some coverage
 
+	var eg errgroup.Group
+	eg.Go(func() error {
+		_, err := cli.goreleaserBinaries().Sync(ctx)
+		return err
+	})
+	eg.Go(func() error {
+		env, err := publishEnv(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = env.Sync(ctx)
+		return err
+	})
+	return eg.Wait()
+}
+
+func (cli *CLI) goreleaserBinaries() *dagger.Directory {
 	oses := []string{"linux", "windows", "darwin"}
 	arches := []string{"amd64", "arm64", "arm"}
 
-	builder, err := build.NewBuilder(ctx, cli.Dagger.Source())
-	if err != nil {
-		return err
-	}
-	var eg errgroup.Group
+	dir := dag.Directory()
 	for _, os := range oses {
 		for _, arch := range arches {
 			if arch == "arm" && os == "darwin" {
@@ -177,40 +200,16 @@ func (cli *CLI) TestPublish(ctx context.Context) error {
 				platform += "/v7" // not always correct but not sure of better way
 			}
 
-			eg.Go(func() error {
-				f, err := builder.
-					WithPlatform(dagger.Platform(platform)).
-					CLI(ctx)
-				if err != nil {
-					return err
-				}
-				_, err = f.Sync(ctx)
-				return err
-			})
+			binary := dag.DaggerCli().Binary(dagger.DaggerCliBinaryOpts{Platform: dagger.Platform(platform)})
+			dest := fmt.Sprintf("dagger_%s_%s/dagger", cli.Dagger.Version, strings.ReplaceAll(platform, "/", "_"))
+			dir = dir.WithFile(dest, binary)
 		}
 	}
-
-	eg.Go(func() error {
-		env, err := publishEnv(ctx)
-		if err != nil {
-			return err
-		}
-		_, err = env.Sync(ctx)
-		return err
-	})
-
-	return eg.Wait()
+	return dir
 }
 
 func publishEnv(ctx context.Context) (*dagger.Container, error) {
 	ctr := dag.Container().From(goReleaserImage)
-
-	// HACK: this can be enabled to force a go update (e.g. when we need it for
-	// a security update)
-	// ctr = ctr.WithDirectory(
-	// 	"/usr/local/go",
-	// 	dag.Container().From("golang:<version>-alpine@sha256:<hash>").Directory("/usr/local/go"),
-	// )
 
 	// install nix
 	ctr = ctr.

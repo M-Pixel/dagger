@@ -19,9 +19,9 @@ import (
 type Distro string
 
 const (
-	DistroAlpine = "alpine"
-	DistroWolfi  = "wolfi"
-	DistroUbuntu = "ubuntu"
+	DistroAlpine Distro = "alpine"
+	DistroWolfi  Distro = "wolfi"
+	DistroUbuntu Distro = "ubuntu"
 )
 
 type DaggerEngine struct {
@@ -111,10 +111,9 @@ func (e *DaggerEngine) Container(
 		WithFile(engineEntrypointPath, entrypoint).
 		WithEntrypoint([]string{filepath.Base(engineEntrypointPath)})
 
-	cli, err := builder.CLI(ctx)
-	if err != nil {
-		return nil, err
-	}
+	cli := dag.DaggerCli().Binary(dagger.DaggerCliBinaryOpts{
+		Platform: platform,
+	})
 	ctr = ctr.
 		WithFile(cliPath, cli).
 		WithEnvVariable("_EXPERIMENTAL_DAGGER_RUNNER_HOST", "unix://"+engineUnixSocketPath)
@@ -428,6 +427,7 @@ func (e *DaggerEngine) Scan(ctx context.Context) error {
 		src = src.
 			WithoutDirectory("docs").
 			WithoutDirectory("sdk/rust/crates/dagger-sdk/examples").
+			WithoutDirectory("core/integration/testdata").
 			WithoutDirectory("dagql/idtui/viztest")
 
 		_, err := ctr.

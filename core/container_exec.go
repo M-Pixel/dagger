@@ -19,6 +19,7 @@ import (
 )
 
 var ErrNoCommand = errors.New("no command has been set")
+var ErrNoSvcCommand = errors.New("no service command has been set")
 
 type ContainerExecOpts struct {
 	// Command to run instead of the container's default command
@@ -279,7 +280,9 @@ func (container *Container) WithExec(ctx context.Context, opts ContainerExecOpts
 		runOpts = append(runOpts, llb.AddMount(mnt.Target, srcSt, mountOpts...))
 	}
 
-	runOpts = append(runOpts, llb.ValidExitCodes(opts.Expect.ReturnCodes()...))
+	if opts.Expect != ReturnSuccess {
+		runOpts = append(runOpts, llb.ValidExitCodes(opts.Expect.ReturnCodes()...))
+	}
 
 	if opts.InsecureRootCapabilities {
 		runOpts = append(runOpts, llb.Security(llb.SecurityModeInsecure))

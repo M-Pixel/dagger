@@ -95,7 +95,10 @@ func (ContainerSuite) TestFrom(ctx context.Context, t *testctx.T) {
 func (ContainerSuite) TestBuild(ctx context.Context, t *testctx.T) {
 	c := connect(ctx, t)
 
-	contextDir := c.Directory().
+	contextDir := c.Container().
+		From("golang:1.18.2-alpine").
+		WithWorkdir("/src").
+		WithExec([]string{"go", "mod", "init", "hello"}).
 		WithNewFile("main.go",
 			`package main
 import "fmt"
@@ -104,7 +107,8 @@ func main() {
 	for _, env := range os.Environ() {
 		fmt.Println(env)
 	}
-}`)
+}`).
+		Directory(".")
 
 	t.Run("default Dockerfile location", func(ctx context.Context, t *testctx.T) {
 		src := contextDir.
@@ -112,7 +116,6 @@ func main() {
 				`FROM golang:1.18.2-alpine
 WORKDIR /src
 COPY main.go .
-RUN go mod init hello
 RUN go build -o /usr/bin/goenv main.go
 ENV FOO=bar
 CMD goenv
@@ -130,7 +133,23 @@ CMD goenv
 FROM golang:1.18.2-alpine
 WORKDIR /src
 COPY main.go .
-RUN go mod init hello
+RUN go build -o /usr/bin/goenv main.go
+ENV FOO=bar
+CMD goenv
+`)
+
+		env, err := c.Container().Build(src).WithExec(nil).Stdout(ctx)
+		require.NoError(t, err)
+		require.Contains(t, env, "FOO=bar\n")
+	})
+
+	t.Run("with old syntax pragma", func(ctx context.Context, t *testctx.T) {
+		src := contextDir.
+			WithNewFile("Dockerfile",
+				`# syntax = docker/dockerfile:1.7
+FROM golang:1.18.2-alpine
+WORKDIR /src
+COPY main.go .
 RUN go build -o /usr/bin/goenv main.go
 ENV FOO=bar
 CMD goenv
@@ -147,7 +166,6 @@ CMD goenv
 				`FROM golang:1.18.2-alpine
 WORKDIR /src
 COPY main.go .
-RUN go mod init hello
 RUN go build -o /usr/bin/goenv main.go
 ENV FOO=bar
 CMD goenv
@@ -169,7 +187,6 @@ CMD goenv
 				`FROM golang:1.18.2-alpine
 WORKDIR /src
 COPY main.go .
-RUN go mod init hello
 RUN go build -o /usr/bin/goenv main.go
 ENV FOO=bar
 CMD goenv
@@ -188,7 +205,6 @@ CMD goenv
 				`FROM golang:1.18.2-alpine
 WORKDIR /src
 COPY main.go .
-RUN go mod init hello
 RUN go build -o /usr/bin/goenv main.go
 ENV FOO=bar
 CMD goenv
@@ -213,7 +229,6 @@ CMD goenv
 ARG FOOARG=bar
 WORKDIR /src
 COPY main.go .
-RUN go mod init hello
 RUN go build -o /usr/bin/goenv main.go
 ENV FOO=$FOOARG
 CMD goenv
@@ -4817,13 +4832,16 @@ func main() {
 		From(alpineImage).
 		WithExec([]string{"sh", "-c", "apk add curl"})
 
-	t.Run("use default args by default", func(ctx context.Context, t *testctx.T) {
+	t.Run("use default args and entrypoint by default", func(ctx context.Context, t *testctx.T) {
+		// create new container with default values
+		defaultBin := c.Container().Import(binctr.AsTarball())
+
 		output, err := curlctr.
-			WithServiceBinding("myapp", binctr.AsService()).
+			WithServiceBinding("myapp", defaultBin.AsService()).
 			WithExec([]string{"sh", "-c", "curl -vXGET 'http://myapp:8080/hello'"}).
 			Stdout(ctx)
 		require.NoError(t, err)
-		require.Equal(t, "args: /bin/app,via-default-args", output)
+		require.Equal(t, "args: /bin/app,via-entrypoint,/bin/app,via-default-args", output)
 	})
 
 	t.Run("can override default args", func(ctx context.Context, t *testctx.T) {
@@ -4850,5 +4868,46 @@ func main() {
 			Stdout(ctx)
 		require.NoError(t, err)
 		require.Equal(t, "args: /bin/app,via-entrypoint,/bin/app,via-default-args", output)
+	})
+
+	t.Run("use both args and entrypoint", func(ctx context.Context, t *testctx.T) {
+		withargsOverwritten := binctr.
+			AsService(dagger.ContainerAsServiceOpts{
+				UseEntrypoint: true,
+				Args:          []string{"/bin/app via-service-override"},
+			})
+
+		output, err := curlctr.
+			WithServiceBinding("myapp", withargsOverwritten).
+			WithExec([]string{"sh", "-c", "curl -vXGET 'http://myapp:8080/hello'"}).
+			Stdout(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "args: /bin/app,via-entrypoint,/bin/app via-service-override", output)
+	})
+
+	t.Run("error when no cmd and entrypoint is set", func(ctx context.Context, t *testctx.T) {
+		withargsOverwritten := binctr.
+			WithoutEntrypoint().
+			WithoutDefaultArgs().
+			AsService()
+
+		_, err := curlctr.
+			WithServiceBinding("myapp", withargsOverwritten).
+			WithExec([]string{"sh", "-c", "curl -vXGET 'http://myapp:8080/hello'"}).
+			Stdout(ctx)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), core.ErrNoSvcCommand.Error())
+	})
+	t.Run("default args no entrypoint", func(ctx context.Context, t *testctx.T) {
+		withargsOverwritten := binctr.
+			WithDefaultArgs([]string{"sh", "-c", "/bin/app via-override-args"}).
+			AsService()
+
+		output, err := curlctr.
+			WithServiceBinding("myapp", withargsOverwritten).
+			WithExec([]string{"sh", "-c", "curl -vXGET 'http://myapp:8080/hello'"}).
+			Stdout(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "args: /bin/app,via-override-args", output)
 	})
 }
