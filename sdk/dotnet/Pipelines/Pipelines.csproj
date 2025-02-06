@@ -18,6 +18,6 @@
 		<Reference Include="Dagger.Generated">
 			<HintPath>Generated/Dagger.Generated.dll</HintPath>
 		</Reference>
-		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.0.1" />
+		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.15.2.0" />
 	</ItemGroup>
 </Project>

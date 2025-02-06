@@ -10,7 +10,7 @@
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <IsPackable>true</IsPackable>
     <PackageId>MaxPixel.Dagger.Client</PackageId>
-    <Version>0.15.2.0</Version>
+    <Version>0.15.3.0</Version>
     <Title>Dagger Client</Title>
     <Authors>Max Pixel, Dagger contributors</Authors>
     <Description>Client library for Dagger, the pipeline engine.  In most cases you will not use this package directly.  It provides a low-level API that is used by the project-specific high-level client library that is automatically generated for Dotnet SDK Dagger Modules.  You can start using this library by running `dagger develop --mod path/where/you/want/your/module --sdk https://github.com/M-Pixel/dagger/sdk/dotnet/module`.</Description>
