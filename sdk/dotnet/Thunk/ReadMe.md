@@ -23,7 +23,7 @@ All public functions, fields, and property accessors of all public types (class,
 - Dagger doesn't support overloads, because some of its supported languages (e.g. TypeScript) don't support overloads.  You cannot have more than two public methods or constructors on the same object with the same name but different parameters.
 - Generic types are not supported, although this rule excludes special cases from the system library that have special meaning like Nullable and Task, as well as all collection types that are supported by `System.Text.Json`.
 - Events are not supported, but will be ignored.
-- Number types other than `int` and `float` are not supported.
+- Number types other than `int`, `float`, and `double` are not supported (`float` should not be used for inputs, as Dagger uses 64 bit floats, but it's technically allowed).
 - Multiple members of the same object, and multiple objects of the same assembly, cannot have names that become identical when converted to camelCase, snake_case, or any other case that is used by other module language SDKs.
 - `ref`, `in`, and `out` parameters are not supported.
 

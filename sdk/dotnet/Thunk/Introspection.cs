@@ -167,21 +167,15 @@ class Introspection
 
 			if (type.IsPrimitive)
 			{
-				switch (type.Name)
+				return type.Name switch
 				{
-					case "Boolean":
-						return dag.GetTypeDef().WithKind(TypeDefKind.BOOLEAN_KIND);
-					case "Int32":
-						return dag.GetTypeDef().WithKind(TypeDefKind.INTEGER_KIND);
-					case "Float":
-						throw new NotImplementedException("Dagger currently lacks full float support");
-					default:
-						throw new NotSupportedException
-						(
-							$"Dotnet primitive type {type.FullName} cannot be marshalled through Dagger module calls.  " +
-							$"Only bool, int, and string are supported."
-						);
-				}
+					"Boolean" => dag.GetTypeDef().WithKind(TypeDefKind.BOOLEAN_KIND),
+					"Int32" => dag.GetTypeDef().WithKind(TypeDefKind.INTEGER_KIND),
+					"Double" or "Single" => dag.GetTypeDef().WithKind(TypeDefKind.FLOAT_KIND),
+					_ => throw new NotSupportedException(
+						$"Dotnet primitive type {type.FullName} cannot be marshalled through Dagger module calls.  " +
+						$"Only bool, int, and string are supported.")
+				};
 			}
 
 			// It's a struct

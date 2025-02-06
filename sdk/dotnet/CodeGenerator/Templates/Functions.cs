@@ -101,7 +101,7 @@ static class Functions
 			{
 				nameof(Scalar.String) => PredefinedType(Token(SyntaxKind.StringKeyword)),
 				nameof(Scalar.Int) => PredefinedType(Token(SyntaxKind.IntKeyword)),
-				nameof(Scalar.Float) => PredefinedType(Token(SyntaxKind.FloatKeyword)),
+				nameof(Scalar.Float) => PredefinedType(Token(SyntaxKind.DoubleKeyword)),
 				nameof(Scalar.Boolean) => PredefinedType(Token(SyntaxKind.BoolKeyword)),
 				_ => IdentifierName(FormatName(typeName!))
 			},
