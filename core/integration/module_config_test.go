@@ -843,7 +843,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "GitHub public",
 		gitTestRepoRef:           "github.com/dagger/dagger-test-modules",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "github.com",
 		expectedBaseHTMLURL:      "github.com/dagger/dagger-test-modules",
 		expectedURLPathComponent: "tree",
@@ -852,7 +852,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "GitLab public",
 		gitTestRepoRef:           "gitlab.com/dagger-modules/test/more/dagger-test-modules-public",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "gitlab.com",
 		expectedBaseHTMLURL:      "gitlab.com/dagger-modules/test/more/dagger-test-modules-public",
 		expectedURLPathComponent: "tree",
@@ -861,7 +861,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "BitBucket public",
 		gitTestRepoRef:           "bitbucket.org/dagger-modules/dagger-test-modules-public",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "bitbucket.org",
 		expectedBaseHTMLURL:      "bitbucket.org/dagger-modules/dagger-test-modules-public",
 		expectedURLPathComponent: "src",
@@ -870,7 +870,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "Azure DevOps public",
 		gitTestRepoRef:           "dev.azure.com/daggere2e/public/_git/dagger-test-modules",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "dev.azure.com",
 		expectedBaseHTMLURL:      "dev.azure.com/daggere2e/public/_git/dagger-test-modules",
 		expectedURLPathComponent: "commit",
@@ -884,7 +884,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "SSH Private GitLab",
 		gitTestRepoRef:           "ssh://gitlab.com/dagger-modules/private/test/more/dagger-test-modules-private.git",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "gitlab.com",
 		expectedBaseHTMLURL:      "gitlab.com/dagger-modules/private/test/more/dagger-test-modules-private",
 		expectedURLPathComponent: "tree",
@@ -896,7 +896,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "SSH Private BitBucket",
 		gitTestRepoRef:           "git@bitbucket.org:dagger-modules/private-modules-test.git",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "bitbucket.org",
 		expectedBaseHTMLURL:      "bitbucket.org/dagger-modules/private-modules-test",
 		expectedURLPathComponent: "src",
@@ -909,7 +909,7 @@ var vcsTestCases = []vcsTestCase{
 	{
 		name:                     "SSH Public GitHub",
 		gitTestRepoRef:           "git@github.com:dagger/dagger-test-modules.git",
-		gitTestRepoCommit:        "323d56c9ece3492d13f58b8b603d31a7c511cd41",
+		gitTestRepoCommit:        "f1b295cc1bce8eeea33cc3f42f89452c6fb3429e",
 		expectedHost:             "github.com",
 		expectedBaseHTMLURL:      "github.com/dagger/dagger-test-modules",
 		expectedURLPathComponent: "tree",

@@ -305,6 +305,9 @@ class TypeDefKind(Enum):
     Always paired with an EnumTypeDef.
     """
 
+    FLOAT_KIND = "FLOAT_KIND"
+    """A float value."""
+
     INPUT_KIND = "INPUT_KIND"
     """A graphql input type, used only when representing the core API via TypeDefs."""
 
@@ -6899,20 +6902,6 @@ class Port(Type):
 @typecheck
 class Client(Root):
     """The root of the DAG."""
-
-    def blob(self, digest: str) -> Directory:
-        """Retrieves a content-addressed blob.
-
-        Parameters
-        ----------
-        digest:
-            Digest of the blob
-        """
-        _args = [
-            Arg("digest", digest),
-        ]
-        _ctx = self._select("blob", _args)
-        return Directory(_ctx)
 
     def builtin_container(self, digest: str) -> Container:
         """Retrieves a container builtin to the engine.

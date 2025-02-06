@@ -6805,16 +6805,6 @@ func (r *Client) WithGraphQLQuery(q *querybuilder.Selection) *Client {
 	}
 }
 
-// Retrieves a content-addressed blob.
-func (r *Client) Blob(digest string) *Directory {
-	q := r.query.Select("blob")
-	q = q.Arg("digest", digest)
-
-	return &Directory{
-		query: q,
-	}
-}
-
 // Retrieves a container builtin to the engine.
 func (r *Client) BuiltinContainer(digest string) *Container {
 	q := r.query.Select("builtinContainer")
@@ -8683,6 +8673,9 @@ const (
 	//
 	// Always paired with an EnumTypeDef.
 	TypeDefKindEnumKind TypeDefKind = "ENUM_KIND"
+
+	// A float value.
+	TypeDefKindFloatKind TypeDefKind = "FLOAT_KIND"
 
 	// A graphql input type, used only when representing the core API via TypeDefs.
 	TypeDefKindInputKind TypeDefKind = "INPUT_KIND"

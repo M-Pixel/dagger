@@ -67,6 +67,10 @@ describe("scan by reference TypeScript", function () {
       directory: "objectParam",
     },
     {
+      name: "Should correctly scan multiple args",
+      directory: "multiArgs",
+    },
+    {
       name: "Should correctly scan multiple objects as fields",
       directory: "multipleObjectsAsFields",
     },
@@ -89,6 +93,10 @@ describe("scan by reference TypeScript", function () {
     {
       name: "Should correctly scan minimal",
       directory: "minimal",
+    },
+    {
+      name: "Should correctly scan interfaces",
+      directory: "interface",
     },
   ]
 
