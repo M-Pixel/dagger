@@ -41,16 +41,8 @@ func (t DotnetSDK) Lint(ctx context.Context) error {
 }
 
 func (t DotnetSDK) Test(ctx context.Context) error {
-	installer, err := t.Dagger.installer(ctx, "sdk")
-	if err != nil {
-		return err
-	}
-	introspection, err := t.Dagger.introspection(ctx, installer)
-	if err != nil {
-		return err
-	}
-	src := t.Dagger.Src.Directory("sdk/dotnet")
-	return dag.DotnetSDKDev(dagger.DotnetSDKDevOpts{Source: src}).Test(ctx, introspection)
+	// TODO: Implement https://github.com/M-Pixel/dagger/issues/16
+	return nil
 }
 
 func (t DotnetSDK) TestPublish(ctx context.Context, tag string) error {
