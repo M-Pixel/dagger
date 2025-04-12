@@ -17,19 +17,16 @@ import (
 
 	"github.com/moby/buildkit/identity"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/log"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/sync/errgroup"
 
 	"dagger.io/dagger"
-	"dagger.io/dagger/telemetry"
 	"github.com/dagger/dagger/core"
 	"github.com/dagger/dagger/internal/testutil"
-	"github.com/dagger/dagger/testctx"
+	"github.com/dagger/testctx"
+	"github.com/dagger/testctx/oteltest"
 )
-
-var testCtx = context.Background()
 
 func TestMain(m *testing.M) {
 	// Preserve original SSH_AUTH_SOCK value and
@@ -37,9 +34,7 @@ func TestMain(m *testing.M) {
 	origAuthSock := os.Getenv("SSH_AUTH_SOCK")
 	os.Unsetenv("SSH_AUTH_SOCK")
 
-	testCtx = telemetry.InitEmbedded(testCtx, nil)
-	res := m.Run()
-	telemetry.Close()
+	res := oteltest.Main(m)
 
 	if origAuthSock != "" {
 		os.Setenv("SSH_AUTH_SOCK", origAuthSock)
@@ -47,28 +42,53 @@ func TestMain(m *testing.M) {
 	os.Exit(res)
 }
 
-const InstrumentationLibrary = "dagger.io/integration"
-
-func Tracer() trace.Tracer {
-	return otel.Tracer(InstrumentationLibrary)
-}
-
-func Logger() log.Logger {
-	return telemetry.Logger(testCtx, InstrumentationLibrary)
-}
-
-func Middleware() []testctx.MiddlewareT {
-	return []testctx.MiddlewareT{
-		testctx.WithParallel,
-		testctx.WithOTelLogging[*testing.T](Logger()),
-		testctx.WithOTelTracing[*testing.T](Tracer()),
+func Middleware() []testctx.Middleware[*testing.T] {
+	return []testctx.Middleware[*testing.T]{
+		testctx.WithParallel(),
+		oteltest.WithTracing[*testing.T](
+			oteltest.TraceConfig{
+				Attributes: []attribute.KeyValue{
+					attribute.String(testctxTypeAttr, "*testing.T"),
+				},
+			},
+		),
+		oteltest.WithLogging[*testing.T](),
+		spanNameMiddleware[*testing.T](),
 	}
 }
 
-func BenchMiddleware() []testctx.MiddlewareB {
-	return []testctx.MiddlewareB{
-		testctx.WithOTelLogging[*testing.B](Logger()),
-		testctx.WithOTelTracing[*testing.B](Tracer()),
+func isPrewarm() bool {
+	_, ok := os.LookupEnv("TESTCTX_PREWARM")
+	return ok
+}
+
+const testctxTypeAttr = "dagger.io/testctx.type"
+const testctxNameAttr = "dagger.io/testctx.name"
+const testctxPrewarmAttr = "dagger.io/testctx.prewarm"
+
+// spanNameMiddleware is a middleware that adds the test name to the span.
+func spanNameMiddleware[T testctx.Runner[T]]() testctx.Middleware[T] {
+	return func(next testctx.RunFunc[T]) testctx.RunFunc[T] {
+		return func(ctx context.Context, w *testctx.W[T]) {
+			span := trace.SpanFromContext(ctx)
+			span.SetAttributes(attribute.String(testctxNameAttr, w.Name()))
+			next(ctx, w)
+		}
+	}
+}
+
+func BenchMiddleware() []testctx.Middleware[*testing.B] {
+	return []testctx.Middleware[*testing.B]{
+		oteltest.WithTracing[*testing.B](
+			oteltest.TraceConfig{
+				Attributes: []attribute.KeyValue{
+					attribute.String(testctxTypeAttr, "*testing.B"),
+					attribute.Bool(testctxPrewarmAttr, isPrewarm()),
+				},
+			},
+		),
+		oteltest.WithLogging[*testing.B](),
+		spanNameMiddleware[*testing.B](),
 	}
 }
 
@@ -357,6 +377,9 @@ func preventCacheMountPrune(ctx context.Context, t *testctx.T, c *dagger.Client,
 // TODO: A better alternative might be to record the log output and assert
 // against what the user sees there, but that's a bigger lift.
 func requireErrOut(t *testctx.T, err error, out string) {
+	if err == nil {
+		require.Fail(t, "expected error, got nil")
+	}
 	var execErr *dagger.ExecError
 	if errors.As(err, &execErr) {
 		require.Contains(
@@ -376,6 +399,9 @@ func requireErrOut(t *testctx.T, err error, out string) {
 // TODO: A better alternative might be to record the log output and assert
 // against what the user sees there, but that's a bigger lift.
 func requireErrRegexp(t *testctx.T, err error, re string) {
+	if err == nil {
+		require.Fail(t, "expected error, got nil")
+	}
 	var execErr *dagger.ExecError
 	if errors.As(err, &execErr) {
 		require.Regexp(

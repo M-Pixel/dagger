@@ -7,6 +7,7 @@ import com.github.javaparser.javadoc.JavadocBlockTag.Type;
 import com.google.auto.service.AutoService;
 import com.palantir.javapoet.*;
 import io.dagger.client.*;
+import io.dagger.module.AbstractModule;
 import io.dagger.module.annotation.*;
 import io.dagger.module.annotation.Function;
 import io.dagger.module.annotation.Module;
@@ -48,6 +49,7 @@ import javax.lang.model.util.Elements;
   "io.dagger.module.annotation.Function",
   "io.dagger.module.annotation.Optional",
   "io.dagger.module.annotation.Default",
+  "io.dagger.module.annotation.DefaultPath",
   "io.dagger.module.annotation.Nullable"
 })
 @SupportedSourceVersion(SourceVersion.RELEASE_17)
@@ -82,6 +84,38 @@ public class DaggerModuleAnnotationProcessor extends AbstractProcessor {
           if (name.isEmpty()) {
             name = typeElement.getSimpleName().toString();
           }
+          if (!element.getModifiers().contains(Modifier.PUBLIC)) {
+            throw new RuntimeException(
+                "The class %s must be public if annotated with @Object".formatted(qName));
+          }
+
+          if (!processingEnv
+              .getTypeUtils()
+              .isSubtype(
+                  typeElement.getSuperclass(),
+                  processingEnv
+                      .getElementUtils()
+                      .getTypeElement(AbstractModule.class.getName())
+                      .asType())) {
+            throw new RuntimeException(
+                "The class %s must extend %s".formatted(qName, AbstractModule.class.getName()));
+          }
+
+          boolean hasDefaultConstructor =
+              typeElement.getEnclosedElements().stream()
+                      .filter(elt -> elt.getKind() == ElementKind.CONSTRUCTOR)
+                      .map(ExecutableElement.class::cast)
+                      .filter(constructor -> constructor.getModifiers().contains(Modifier.PUBLIC))
+                      .anyMatch(constructor -> constructor.getParameters().isEmpty())
+                  || typeElement.getEnclosedElements().stream()
+                      .noneMatch(elt -> elt.getKind() == ElementKind.CONSTRUCTOR);
+
+          if (!hasDefaultConstructor) {
+            throw new RuntimeException(
+                "The class %s must have a public no-argument constructor that calls super()"
+                    .formatted(qName));
+          }
+
           List<FieldInfo> fieldInfoInfos =
               typeElement.getEnclosedElements().stream()
                   .filter(elt -> elt.getKind() == ElementKind.FIELD)
@@ -114,6 +148,11 @@ public class DaggerModuleAnnotationProcessor extends AbstractProcessor {
                         if (fName.isEmpty()) {
                           fName = fqName;
                         }
+                        if (!elt.getModifiers().contains(Modifier.PUBLIC)) {
+                          throw new RuntimeException(
+                              "The method %s#%s must be public if annotated with @Function"
+                                  .formatted(qName, fqName));
+                        }
 
                         List<ParameterInfo> parameterInfos =
                             ((ExecutableElement) elt)
@@ -126,17 +165,45 @@ public class DaggerModuleAnnotationProcessor extends AbstractProcessor {
                                           Default defaultAnnotation =
                                               param.getAnnotation(
                                                   io.dagger.module.annotation.Default.class);
+                                          var hasDefaultAnnotation = defaultAnnotation != null;
+
+                                          DefaultPath defaultPathAnnotation =
+                                              param.getAnnotation(
+                                                  io.dagger.module.annotation.DefaultPath.class);
+                                          var hasDefaultPathAnnotation =
+                                              defaultPathAnnotation != null;
+
+                                          if (hasDefaultPathAnnotation
+                                              && !tm.toString().equals("io.dagger.client.Directory")
+                                              && !tm.toString().equals("io.dagger.client.File")) {
+                                            throw new IllegalArgumentException(
+                                                "Parameter "
+                                                    + param.getSimpleName()
+                                                    + " cannot have @DefaultPath annotation if it is not a Directory or File type");
+                                          }
+
+                                          if (hasDefaultAnnotation && hasDefaultPathAnnotation) {
+                                            throw new IllegalArgumentException(
+                                                "Parameter "
+                                                    + param.getSimpleName()
+                                                    + " cannot have both @Default and @DefaultPath annotations");
+                                          }
+
                                           Nullable nullableAnnotation =
                                               param.getAnnotation(
                                                   io.dagger.module.annotation.Nullable.class);
 
                                           boolean isOptional = nullableAnnotation != null;
 
-                                          var hasDefaultAnnotation = defaultAnnotation != null;
                                           String defaultValue =
                                               hasDefaultAnnotation
                                                   ? quoteIfString(
                                                       defaultAnnotation.value(), tm.toString())
+                                                  : null;
+
+                                          String defaultPath =
+                                              hasDefaultPathAnnotation
+                                                  ? defaultPathAnnotation.value()
                                                   : null;
 
                                           // if @Default("null") we handle that as @Nullable only
@@ -146,14 +213,30 @@ public class DaggerModuleAnnotationProcessor extends AbstractProcessor {
                                             hasDefaultAnnotation = false;
                                           }
 
+                                          Ignore ignoreAnnotation =
+                                              param.getAnnotation(Ignore.class);
+                                          var hasIgnoreAnnotation = ignoreAnnotation != null;
+                                          if (hasIgnoreAnnotation
+                                              && !tm.toString()
+                                                  .equals("io.dagger.client.Directory")) {
+                                            throw new IllegalArgumentException(
+                                                "Parameter "
+                                                    + param.getSimpleName()
+                                                    + " cannot have @Ignore annotation if it is not a Directory");
+                                          }
+
+                                          String[] ignoreValue =
+                                              hasIgnoreAnnotation ? ignoreAnnotation.value() : null;
+
                                           String paramName = param.getSimpleName().toString();
                                           return new ParameterInfo(
                                               paramName,
                                               parseParameterDescription(elt, paramName),
                                               new TypeInfo(tm.toString(), tk.name()),
                                               isOptional,
-                                              hasDefaultAnnotation,
-                                              defaultValue);
+                                              Optional.ofNullable(defaultValue),
+                                              Optional.ofNullable(defaultPath),
+                                              Optional.ofNullable(ignoreValue));
                                         })
                                     .toList();
 
@@ -236,15 +319,27 @@ public class DaggerModuleAnnotationProcessor extends AbstractProcessor {
               rm.addCode(".withOptional(true)");
             }
             boolean hasDescription = isNotBlank(parameterInfo.description());
-            boolean hasDefaultValue = parameterInfo.hasDefaultValue();
-            if (hasDescription || hasDefaultValue) {
+            boolean hasDefaultValue = parameterInfo.defaultValue().isPresent();
+            boolean hasDefaultPath = parameterInfo.defaultPath().isPresent();
+            boolean hasIgnore = parameterInfo.ignore().isPresent();
+            if (hasDescription || hasDefaultValue || hasDefaultPath || hasIgnore) {
               rm.addCode(", new $T.WithArgArguments()", io.dagger.client.Function.class);
               if (hasDescription) {
                 rm.addCode(".withDescription($S)", parameterInfo.description());
               }
               if (hasDefaultValue) {
                 rm.addCode(
-                    ".withDefaultValue($T.from($S))", JSON.class, parameterInfo.defaultValue());
+                    ".withDefaultValue($T.from($S))",
+                    JSON.class,
+                    parameterInfo.defaultValue().get());
+              }
+              if (hasDefaultPath) {
+                rm.addCode(".withDefaultPath($S)", parameterInfo.defaultPath().get());
+              }
+              if (hasIgnore) {
+                rm.addCode(".withIgnore(")
+                    .addCode(listOf(parameterInfo.ignore().get()))
+                    .addCode(")");
               }
             }
             rm.addCode(")");
@@ -605,5 +700,13 @@ public class DaggerModuleAnnotationProcessor extends AbstractProcessor {
             .filter(tag -> tag.getName().isPresent() && tag.getName().get().equals(paramName))
             .findFirst();
     return blockTag.map(tag -> tag.getContent().toText()).orElse("");
+  }
+
+  private static CodeBlock listOf(String[] array) {
+    return CodeBlock.builder()
+        .add("$T.of(", List.class)
+        .add(CodeBlock.join(Arrays.stream(array).map(s -> CodeBlock.of("$S", s)).toList(), ", "))
+        .add(")")
+        .build();
   }
 }

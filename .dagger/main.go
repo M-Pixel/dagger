@@ -68,6 +68,9 @@ func New(
 		if strings.HasPrefix(module, "core/integration/") {
 			continue
 		}
+		if strings.HasPrefix(module, "dagql/idtui/viztest/broken/") {
+			continue
+		}
 		dev.ModCodegenTargets = append(dev.ModCodegenTargets, module)
 	}
 
@@ -269,7 +272,7 @@ func (dev *DaggerDev) DevExport(
 	// +optional
 	race bool,
 	// +optional
-	trace bool,
+	logLevel string,
 
 	// Set target distro
 	// +optional
@@ -293,8 +296,8 @@ func (dev *DaggerDev) DevExport(
 	if race {
 		engine = engine.WithRace()
 	}
-	if trace {
-		engine = engine.WithTrace()
+	if logLevel != "" {
+		engine = engine.WithLogLevel(logLevel)
 	}
 	enginePlatformSpec := platformSpec
 	enginePlatformSpec.OS = "linux"

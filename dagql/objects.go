@@ -514,16 +514,39 @@ func (r Instance[T]) call(
 
 		if isPure && digestChanged && matchesType {
 			newID = valID
-			_, _, err := s.Cache.GetOrInitialize(ctx, valID.Digest(), func(context.Context) (Typed, error) {
-				return val, nil
-			})
+			_, _, err := s.Cache.GetOrInitializeValue(ctx, valID.Digest(), val)
 			if err != nil {
 				return nil, nil, err
 			}
 		}
 	}
 
+	// field implementations can optionally return a wrapped Typed val that has
+	// a callback that should always run after the field is called
+	if postCallVal, ok := val.(*PostCallTyped); ok {
+		val = postCallVal.Typed
+		if postCallVal.PostCall != nil {
+			if err := postCallVal.PostCall(ctx); err != nil {
+				return nil, nil, fmt.Errorf("post-call error: %w", err)
+			}
+		}
+	}
+
 	return val, newID, nil
+}
+
+// PostCallTyped wraps a Typed value with an additional callback that
+// needs to be called after any value is returned, whether the value was from
+// cache or not
+type PostCallTyped struct {
+	Typed
+	PostCall func(context.Context) error
+}
+
+var _ Wrapper = PostCallTyped{}
+
+func (p PostCallTyped) Unwrap() Typed {
+	return p.Typed
 }
 
 type View interface {

@@ -19,7 +19,7 @@ concurrency:
 jobs:
     dotnet:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: dotnet
         steps:
             - name: Checkout
@@ -35,9 +35,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -47,19 +51,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -195,10 +205,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/dotnet
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     dotnet-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: dotnet-dev
         steps:
             - name: Checkout
@@ -214,9 +224,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -226,9 +240,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -278,10 +292,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -417,10 +437,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/dotnet
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     elixir:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: elixir
         steps:
             - name: Checkout
@@ -436,9 +456,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -448,19 +472,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -596,10 +626,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/elixir
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     elixir-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: elixir-dev
         steps:
             - name: Checkout
@@ -615,9 +645,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -627,9 +661,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -679,10 +713,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -818,10 +858,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/elixir
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     go:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: go
         steps:
             - name: Checkout
@@ -837,9 +877,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -849,19 +893,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -997,10 +1047,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/go
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     go-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: go-dev
         steps:
             - name: Checkout
@@ -1016,9 +1066,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -1028,9 +1082,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -1080,10 +1134,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -1219,10 +1279,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/go
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     java:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: java
         steps:
             - name: Checkout
@@ -1238,9 +1298,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -1250,19 +1314,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -1398,10 +1468,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/java
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     java-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: java-dev
         steps:
             - name: Checkout
@@ -1417,9 +1487,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -1429,9 +1503,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -1481,10 +1555,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -1620,10 +1700,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/java
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     php:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: php
         steps:
             - name: Checkout
@@ -1639,9 +1719,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -1651,19 +1735,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -1799,10 +1889,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/php
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     php-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: php-dev
         steps:
             - name: Checkout
@@ -1818,9 +1908,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -1830,9 +1924,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -1882,10 +1976,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -2021,10 +2121,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/php
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     python:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: python
         steps:
             - name: Checkout
@@ -2040,9 +2140,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -2052,19 +2156,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -2200,10 +2310,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/python
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     python-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: python-dev
         steps:
             - name: Checkout
@@ -2219,9 +2329,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -2231,9 +2345,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -2283,10 +2397,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -2422,10 +2542,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/python
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     rust:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: rust
         steps:
             - name: Checkout
@@ -2441,9 +2561,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -2453,19 +2577,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -2601,10 +2731,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/rust
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     rust-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: rust-dev
         steps:
             - name: Checkout
@@ -2620,9 +2750,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -2632,9 +2766,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -2684,10 +2818,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -2823,10 +2963,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/rust
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     typescript:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-4c' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-4c' || 'ubuntu-latest' }}
         name: typescript
         steps:
             - name: Checkout
@@ -2842,9 +2982,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -2854,19 +2998,25 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: v0.15.3
+                DAGGER_VERSION: v0.15.4
               shell: bash
             - name: scripts/warm-engine.sh
               id: warm-engine
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -3002,10 +3152,10 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/typescript
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20
     typescript-dev:
         runs-on:
-            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-3-8c-dind' || 'ubuntu-latest' }}
+            - ${{ github.repository == 'dagger/dagger' && 'dagger-g3-v0-15-4-8c-dind' || 'ubuntu-latest' }}
         name: typescript-dev
         steps:
             - name: Checkout
@@ -3021,9 +3171,13 @@ jobs:
 
                 # Ensure the dir is writable otherwise fallback to tmpdir
                 if [[ ! -d "$prefix_dir" ]] || [[ ! -w "$prefix_dir" ]]; then
-                    prefix_dir="$(mktemp -d)"
+                  prefix_dir="$(mktemp -d)"
                 fi
-                printf '%s/bin' "$prefix_dir" >> $GITHUB_PATH
+                printf '%s/bin' "$prefix_dir" >>$GITHUB_PATH
+
+                if [ -f "$DAGGER_VERSION_FILE" ]; then
+                  DAGGER_VERSION=$(cat "$DAGGER_VERSION_FILE" | jq -r .engineVersion)
+                fi
 
                 # If the dagger version is 'latest', set the version back to an empty
                 # string. This allows the install script to detect and install the latest
@@ -3033,9 +3187,9 @@ jobs:
                 fi
 
                 # The install.sh script creates path ${prefix_dir}/bin
-                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin sh
+                curl -fsS https://dl.dagger.io/dagger/install.sh | BIN_DIR=${prefix_dir}/bin DAGGER_VERSION=$DAGGER_VERSION sh
               env:
-                DAGGER_VERSION: latest
+                DAGGER_VERSION_FILE: dagger.json
               shell: bash
             - name: Install go
               uses: actions/setup-go@v5
@@ -3085,10 +3239,16 @@ jobs:
               run: |
                 #!/bin/bash
 
-                # Make sure not to load any implicit module
-                cd $(mktemp -d)
+                # Detect if a dev engine is available, if so: use that
+                # We don't rely on PATH because the GHA runner messes with that
+                if [[ -n "$_EXPERIMENTAL_DAGGER_CLI_BIN" ]]; then
+                    ls -lh $(dirname $_EXPERIMENTAL_DAGGER_CLI_BIN)
+                    export PATH=$(dirname "$_EXPERIMENTAL_DAGGER_CLI_BIN"):$PATH
+                fi
+
                 # Run a simple query to "warm up" the engine
-                echo '{directory{id}}' | dagger query
+                dagger version
+                dagger core version
               shell: bash
             - name: scripts/exec.sh
               id: exec
@@ -3224,4 +3384,4 @@ jobs:
                 COMMAND: dagger call -q --docker-cfg=file:$HOME/.docker/config.json check --targets=sdk/typescript
                 DAGGER_CLOUD_TOKEN: dag_dagger_sBIv6DsjNerWvTqt2bSFeigBUqWxp9bhh3ONSSgeFnw
               shell: bash
-        timeout-minutes: 10
+        timeout-minutes: 20

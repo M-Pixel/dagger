@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dagger/dagger/testctx"
+	"github.com/dagger/testctx"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -15,7 +15,7 @@ import (
 type TypescriptSuite struct{}
 
 func TestTypescript(t *testing.T) {
-	testctx.Run(testCtx, t, TypescriptSuite{}, Middleware()...)
+	testctx.New(t, Middleware()...).RunTests(TypescriptSuite{})
 }
 
 func (TypescriptSuite) TestInit(ctx context.Context, t *testctx.T) {
@@ -202,32 +202,6 @@ func (TypescriptSuite) TestInit(ctx context.Context, t *testctx.T) {
 		sourcePackageJSON, err := modGen.File("./dagger/package.json").Contents(ctx)
 		require.NoError(t, err)
 		require.Contains(t, sourcePackageJSON, `"packageManager": "yarn@`) // We don't check the exact version because it's a SHA
-	})
-
-	t.Run("fail if --merge is specified", func(ctx context.Context, t *testctx.T) {
-		c := connect(ctx, t)
-
-		modGen := c.Container().From(golangImage).
-			WithMountedFile(testCLIBinPath, daggerCliFile(t, c)).
-			WithWorkdir("/work").
-			WithNewFile("/work/package.json", `{
-  "name": "my-module",
-  "version": "1.0.0",
-  "description": "My module",
-  "main": "index.js",
-  "scripts": {
-  "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "John doe",
-  "license": "MIT"
-  }`,
-			).
-			With(daggerExec("init", "--source=.", "--merge", "--name=hasPkgJson", "--sdk=typescript"))
-
-		_, err := modGen.
-			With(daggerQuery(`{hasPkgJson{containerEcho(stringArg:"hello"){stdout}}}`)).
-			Stdout(ctx)
-		requireErrOut(t, err, "merge is only supported")
 	})
 
 	t.Run("init module in .dagger if files present in current dir", func(ctx context.Context, t *testctx.T) {

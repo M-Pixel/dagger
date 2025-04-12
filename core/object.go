@@ -161,7 +161,7 @@ func (t *ModuleObjectType) TypeDef() *TypeDef {
 }
 
 type Callable interface {
-	Call(context.Context, *CallOpts) (dagql.Typed, error)
+	Call(context.Context, *CallOpts) (*dagql.PostCallTyped, error)
 	ReturnType() (ModType, error)
 	ArgType(argName string) (ModType, error)
 }
@@ -183,7 +183,7 @@ func (t *ModuleObjectType) GetCallable(ctx context.Context, name string) (Callab
 		}, nil
 	}
 	if fun, ok := t.typeDef.FunctionByName(name); ok {
-		return newModFunction(
+		return NewModFunction(
 			ctx,
 			mod.Query,
 			mod,
@@ -325,7 +325,7 @@ func (obj *ModuleObject) installConstructor(ctx context.Context, dag *dagql.Serv
 		return fmt.Errorf("constructor function for object %s must return that object", objDef.OriginalName)
 	}
 
-	fn, err := newModFunction(ctx, mod.Query, mod, objDef, mod.Runtime, fnTypeDef)
+	fn, err := NewModFunction(ctx, mod.Query, mod, objDef, mod.Runtime, fnTypeDef)
 	if err != nil {
 		return fmt.Errorf("failed to create function: %w", err)
 	}
@@ -366,8 +366,7 @@ func (obj *ModuleObject) installConstructor(ctx context.Context, dag *dagql.Serv
 				Server:       dag,
 			})
 		},
-		// cache constructor calls per client; a given client will hit cache when making the same call repeatedly
-		CachePerClientObject,
+		nil,
 	)
 
 	return nil
@@ -425,7 +424,7 @@ func objField(mod *Module, field *FieldTypeDef) dagql.Field[*ModuleObject] {
 
 func objFun(ctx context.Context, mod *Module, objDef *ObjectTypeDef, fun *Function, dag *dagql.Server) (dagql.Field[*ModuleObject], error) {
 	var f dagql.Field[*ModuleObject]
-	modFun, err := newModFunction(
+	modFun, err := NewModFunction(
 		ctx,
 		mod.Query,
 		mod,
@@ -476,11 +475,6 @@ func objFun(ctx context.Context, mod *Module, objDef *ObjectTypeDef, fun *Functi
 			})
 			return modFun.Call(ctx, opts)
 		},
-		// Cache calls per client; a given client will hit cache when making the same call repeatedly.
-		// We can't *quite* mark them as fully cached across clients in a session, since Call has special
-		// logic for transferring secrets between cached calls (covered by TestModule/TestSecretNested
-		// integ tests).
-		CacheKeyFunc: CachePerClient[*ModuleObject, map[string]dagql.Input],
 	}, nil
 }
 
@@ -490,12 +484,16 @@ type CallableField struct {
 	Return ModType
 }
 
-func (f *CallableField) Call(ctx context.Context, opts *CallOpts) (dagql.Typed, error) {
+func (f *CallableField) Call(ctx context.Context, opts *CallOpts) (*dagql.PostCallTyped, error) {
 	val, ok := opts.ParentFields[f.Field.OriginalName]
 	if !ok {
 		return nil, fmt.Errorf("field %q not found on object %q", f.Field.Name, opts.ParentFields)
 	}
-	return f.Return.ConvertFromSDKResult(ctx, val)
+	typed, err := f.Return.ConvertFromSDKResult(ctx, val)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert field %q: %w", f.Field.Name, err)
+	}
+	return &dagql.PostCallTyped{Typed: typed}, nil
 }
 
 func (f *CallableField) ReturnType() (ModType, error) {
