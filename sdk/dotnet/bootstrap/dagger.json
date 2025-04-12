@@ -8,30 +8,5 @@
       "source": "../module"
     }
   ],
-  "source": ".",
-  "exclude": [
-    "../../../.dagger",
-    "../../../.github",
-    "../../../analytics",
-    "../../../auth",
-    "../../../cmd",
-    "../../../core",
-    "../../../dagql",
-    "../../../docs",
-    "../../../engine",
-    "../../../examples",
-    "../../../go.mod",
-    "../../../go.sum",
-    "../../../helm",
-    "../../../internal",
-    "../../../modules",
-    "../../../network",
-    "../../../releaser",
-    "../../../testctx",
-    "../../../version",
-    "../../../sdk/elixir",
-    "../../../sdk/php",
-    "../../../sdk/python",
-    "../../../sdk/typescript"
-  ]
+  "source": "."
 }
