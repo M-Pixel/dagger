@@ -11,11 +11,11 @@ using Module = Dagger.Module;
 
 if (Environment.GetCommandLineArgs().Contains("-DebugIntrospection"))
 {
-	FileInfo moduleAssemblyFileInfo = new("Pipelines/bin/Release/net8.0/linux-x64/Dagger.Pipelines.dll");
+	FileInfo moduleAssemblyFileInfo = new("dev/bin/Release/net8.0/linux-x64/Dagger.DotnetSdkDev.dll");
 	MetadataLoadContext metadataLoader = new(new ThunkAssemblyResolver(moduleAssemblyFileInfo.FullName));
 	Assembly moduleAssembly = metadataLoader.LoadFromStream(moduleAssemblyFileInfo.OpenRead());
-	new Introspection(moduleAssembly, "Pipelines")
-		.Build(await ElementDocumentation.Parse(new FileStream("Pipelines/bin/Release/net8.0/linux-x64/Dagger.Pipelines.xml", FileMode.Open)));
+	new Introspection(moduleAssembly, "DotnetSdkDev")
+		.Build(await ElementDocumentation.Parse(new FileStream("dev/bin/Release/net8.0/linux-x64/Dagger.DotnetSdkDev.xml", FileMode.Open)));
 	return;
 }
 

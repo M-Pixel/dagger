@@ -5,19 +5,18 @@
 		<ImplicitUsings>disable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<!-- You're welcome to add a prefix to the assembly name.  Only the final part needs to match the module name in dagger.json. -->
-		<AssemblyName>Pipelines</AssemblyName>
 		<!-- You are free to use whatever namespaces you want, they don't need to match the module name. -->
-		<RootNamespace>Pipelines</RootNamespace>
 		<!-- In order for your module's help text to work, GenerateDocumentationFile must be true. -->
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<!-- These suppressed warnings would have complained about public members that lack full documentation. -->
 		<NoWarn>1591,1573</NoWarn>
 		<Deterministic>true</Deterministic>
+		<PackageId>DotnetSdkDev</PackageId>
 	</PropertyGroup>
 	<ItemGroup>
 		<Reference Include="Dagger.Generated">
 			<HintPath>Generated/Dagger.Generated.dll</HintPath>
 		</Reference>
-		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.15.4.0" />
+		<PackageReference Include="MaxPixel.Dagger.Client" Version="0.16.1" />
 	</ItemGroup>
 </Project>

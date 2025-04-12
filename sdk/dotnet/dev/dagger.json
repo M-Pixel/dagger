@@ -1,6 +1,6 @@
 {
-  "name": "Pipelines",
-  "engineVersion": "v0.16.0",
+  "name": "dotnet-sdk-dev",
+  "engineVersion": "v0.16.1",
   "sdk": {
     "source": "../bootstrap"
   },

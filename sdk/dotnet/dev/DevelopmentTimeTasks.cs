@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using Dagger;
 using static Dagger.Alias;
 
-public static class Pipelines
+public static class DevelopmentTimeTasks
 {
 	[JsonIgnore] private static readonly Task<string> _version = DAG.Version();
 
