@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"go.opentelemetry.io/otel/codes"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/dagger/dagger/.dagger/internal/dagger"
 )
@@ -12,7 +14,30 @@ type DotnetSDK struct {
 }
 
 func (t DotnetSDK) Lint(ctx context.Context) error {
-	return dag.DotnetSDKDev().Lint(ctx)
+	// Run all checks in parallel using errgroup
+	eg := errgroup.Group{}
+
+	eg.Go(func() (rerr error) {
+		ctx, span := Tracer().Start(ctx, "lint the dotnet Go modules")
+		defer func() {
+			if rerr != nil {
+				span.SetStatus(codes.Error, rerr.Error())
+			}
+			span.End()
+		}()
+		return dag.
+			Go(t.Dagger.WithModCodegen().Source()).
+			Lint(ctx, dagger.GoLintOpts{
+				Packages: []string{
+					"sdk/dotnet/module",
+					"sdk/dotnet/bootstrap",
+				},
+			})
+	})
+
+	// TODO: call dotnet native lint command https://github.com/M-Pixel/dagger/issues/22
+
+	return eg.Wait()
 }
 
 func (t DotnetSDK) Test(ctx context.Context) error {
