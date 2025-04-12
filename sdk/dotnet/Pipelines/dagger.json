@@ -1,6 +1,6 @@
 {
   "name": "Pipelines",
-  "engineVersion": "v0.15.4",
+  "engineVersion": "v0.16.0",
   "sdk": {
     "source": "../bootstrap"
   },

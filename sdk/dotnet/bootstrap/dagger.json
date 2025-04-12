@@ -1,12 +1,13 @@
 {
   "name": "bootstrap",
-  "engineVersion": "v0.15.2",
-  "sdk": "go",
+  "engineVersion": "v0.16.0",
+  "sdk": {
+    "source": "go"
+  },
   "dependencies": [
     {
       "name": "DotnetSdk",
       "source": "../module"
     }
-  ],
-  "source": "."
+  ]
 }
