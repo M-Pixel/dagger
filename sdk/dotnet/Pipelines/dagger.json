@@ -1,7 +1,9 @@
 {
   "name": "Pipelines",
-  "engineVersion": "v0.15.3",
-  "sdk": "../bootstrap",
+  "engineVersion": "v0.15.4",
+  "sdk": {
+    "source": "../bootstrap"
+  },
   "exclude": [
     "bin",
     "obj"
