@@ -389,7 +389,7 @@ export class Test {
 			require.JSONEq(t, `{"test":{"set":{"foo": "abc"}}}`, out)
 
 			_, err = modGen.With(daggerQuery(`{test{set(foo: "abc", bar: "xyz"){bar}}}`)).Stdout(ctx)
-			requireErrOut(t, err, `Test has no such field: "bar"`)
+			requireErrOut(t, err, `Cannot query field \"bar\" on type \"Test\"`)
 		})
 	}
 }
@@ -951,7 +951,7 @@ func (ModuleSuite) TestUseLocal(ctx context.Context, t *testctx.T) {
 			// cannot use transitive dependency directly
 			_, err = modGen.With(daggerQuery(`{dep{hello}}`)).Stdout(ctx)
 			require.Error(t, err)
-			requireErrOut(t, err, `Query has no such field: "dep"`)
+			requireErrOut(t, err, `Cannot query field \"dep\" on type \"Query\"`)
 		})
 	}
 }
@@ -1549,7 +1549,7 @@ class Test:
 
 		out, err = ctr.With(daggerCall("--foo=dagger.json", "foo", "contents")).Stdout(ctx)
 		require.NoError(t, err)
-		require.Contains(t, out, `"sdk": "python"`)
+		require.Contains(t, out, `"source": "python"`)
 
 		_, err = ctr.With(daggerCall("bar")).Sync(ctx)
 		require.NoError(t, err)
@@ -1591,7 +1591,7 @@ export class Test {
 
 		out, err = ctr.With(daggerCall("--foo=dagger.json", "foo", "contents")).Stdout(ctx)
 		require.NoError(t, err)
-		require.Contains(t, out, `"sdk": "typescript"`)
+		require.Contains(t, out, `"source": "typescript"`)
 
 		_, err = ctr.With(daggerCall("bar")).Sync(ctx)
 		require.NoError(t, err)
@@ -3115,7 +3115,7 @@ import (
 type Leaker struct {}
 
 func (l *Leaker) Leak(ctx context.Context) error {
-	secret, _ := dag.Secret("mysecret").Plaintext(ctx)
+	secret, _ := dag.LoadSecretFromName("mysecret").Plaintext(ctx)
 	fmt.Println("trying to read secret:", secret)
 	return nil
 }
@@ -5036,7 +5036,7 @@ func schemaVersion(ctx context.Context) (string, error) {
 			File("dagger.json").
 			Contents(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"name": "foo", "sdk": "go", "source": ".", "engineVersion": "`+engine.Version+`"}`, daggerJSON)
+		require.JSONEq(t, `{"name": "foo", "sdk": {"source": "go"}, "source": ".", "engineVersion": "`+engine.Version+`"}`, daggerJSON)
 	})
 
 	t.Run("from high", func(ctx context.Context, t *testctx.T) {
@@ -5053,7 +5053,7 @@ func schemaVersion(ctx context.Context) (string, error) {
 			File("dagger.json").
 			Contents(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"name": "foo", "sdk": "go", "source": ".", "engineVersion": "`+engine.Version+`"}`, daggerJSON)
+		require.JSONEq(t, `{"name": "foo", "sdk": {"source": "go"}, "source": ".", "engineVersion": "`+engine.Version+`"}`, daggerJSON)
 	})
 
 	t.Run("from missing", func(ctx context.Context, t *testctx.T) {
@@ -5070,7 +5070,7 @@ func schemaVersion(ctx context.Context) (string, error) {
 			File("dagger.json").
 			Contents(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"name": "foo", "sdk": "go", "source": ".", "engineVersion": "`+engine.Version+`"}`, daggerJSON)
+		require.JSONEq(t, `{"name": "foo", "sdk": {"source": "go"}, "source": ".", "engineVersion": "`+engine.Version+`"}`, daggerJSON)
 	})
 
 	t.Run("to specified", func(ctx context.Context, t *testctx.T) {
@@ -5086,7 +5086,7 @@ func schemaVersion(ctx context.Context) (string, error) {
 			File("dagger.json").
 			Contents(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"name": "foo", "sdk": "go", "source": ".", "engineVersion": "v0.9.9"}`, daggerJSON)
+		require.JSONEq(t, `{"name": "foo", "sdk": {"source": "go"}, "source": ".", "engineVersion": "v0.9.9"}`, daggerJSON)
 	})
 
 	t.Run("skipped", func(ctx context.Context, t *testctx.T) {
@@ -5102,7 +5102,7 @@ func schemaVersion(ctx context.Context) (string, error) {
 			File("dagger.json").
 			Contents(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"name": "foo", "sdk": "go", "source": ".", "engineVersion": "v0.9.9"}`, daggerJSON)
+		require.JSONEq(t, `{"name": "foo", "sdk": {"source": "go"}, "source": ".", "engineVersion": "v0.9.9"}`, daggerJSON)
 	})
 }
 

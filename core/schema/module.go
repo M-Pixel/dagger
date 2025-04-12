@@ -57,7 +57,7 @@ func (s *moduleSchema) Install() {
 			ArgDoc("line", "The line number within the filename.").
 			ArgDoc("column", "The column number within the line."),
 
-		dagql.FuncWithCacheKey("currentModule", s.currentModule, CachePerClient).
+		dagql.FuncWithCacheKey("currentModule", s.currentModule, core.CachePerClient).
 			Doc(`The module currently being served in the session, if any.`),
 
 		dagql.Func("currentTypeDefs", s.currentTypeDefs).
@@ -66,7 +66,7 @@ func (s *moduleSchema) Install() {
 			Impure("Can change when modules are loaded into the schema.").
 			Doc(`The TypeDef representations of the objects currently being served in the session.`),
 
-		dagql.FuncWithCacheKey("currentFunctionCall", s.currentFunctionCall, CachePerClient).
+		dagql.FuncWithCacheKey("currentFunctionCall", s.currentFunctionCall, core.CachePerClient).
 			Doc(`The FunctionCall context that the SDK caller is currently executing in.`,
 				`If the caller is not currently executing in a function, this will
 				return an error.`),
@@ -86,10 +86,10 @@ func (s *moduleSchema) Install() {
 	}.Install(s.dag)
 
 	dagql.Fields[*core.FunctionCall]{
-		dagql.FuncWithCacheKey("returnValue", s.functionCallReturnValue, CachePerClient).
+		dagql.FuncWithCacheKey("returnValue", s.functionCallReturnValue, core.CachePerClient).
 			Doc(`Set the return value of the function call to the provided value.`).
 			ArgDoc("value", `JSON serialization of the return value.`),
-		dagql.FuncWithCacheKey("returnError", s.functionCallReturnError, CachePerClient).
+		dagql.FuncWithCacheKey("returnError", s.functionCallReturnError, core.CachePerClient).
 			Doc(`Return an error from the function.`).
 			ArgDoc("error", `The error to return.`),
 	}.Install(s.dag)
@@ -143,7 +143,7 @@ func (s *moduleSchema) Install() {
 
 		dagql.Func("withSDK", s.moduleSourceWithSDK).
 			Doc(`Update the module source with a new SDK.`).
-			ArgDoc("sdk", `The SDK to set.`),
+			ArgDoc("source", `The SDK source to set.`),
 
 		dagql.Func("withInit", s.moduleSourceWithInit).
 			Doc(`Sets module init arguments`).
@@ -166,13 +166,13 @@ func (s *moduleSchema) Install() {
 			Doc(`Load the source as a module. If this is a local source, the parent directory must have been provided during module source creation`).
 			ArgDoc("engineVersion", `The engine version to upgrade to.`),
 
-		dagql.FuncWithCacheKey("resolveFromCaller", s.moduleSourceResolveFromCaller, CachePerClient).
+		dagql.FuncWithCacheKey("resolveFromCaller", s.moduleSourceResolveFromCaller, core.CachePerClient).
 			Doc(`Load the source from its path on the caller's filesystem, including only needed+configured files and directories. Only valid for local sources.`),
 
-		dagql.FuncWithCacheKey("resolveContextPathFromCaller", s.moduleSourceResolveContextPathFromCaller, CachePerClient).
+		dagql.FuncWithCacheKey("resolveContextPathFromCaller", s.moduleSourceResolveContextPathFromCaller, core.CachePerClient).
 			Doc(`The path to the module source's context directory on the caller's filesystem. Only valid for local sources.`),
 
-		dagql.FuncWithCacheKey("resolveDirectoryFromCaller", s.moduleSourceResolveDirectoryFromCaller, CachePerClient).
+		dagql.FuncWithCacheKey("resolveDirectoryFromCaller", s.moduleSourceResolveDirectoryFromCaller, core.CachePerClient).
 			ArgDoc("path", `The path on the caller's filesystem to load.`).
 			ArgDoc("viewName", `If set, the name of the view to apply to the path.`).
 			ArgDoc("ignore", `Patterns to ignore when loading the directory.`).
@@ -217,6 +217,7 @@ func (s *moduleSchema) Install() {
 	}.Install(s.dag)
 
 	dagql.Fields[*core.ModuleDependency]{}.Install(s.dag)
+	dagql.Fields[*core.SDKConfig]{}.Install(s.dag)
 
 	dagql.Fields[*core.Module]{
 		dagql.Func("withSource", s.moduleWithSource).
@@ -256,13 +257,13 @@ func (s *moduleSchema) Install() {
 		dagql.Func("source", s.currentModuleSource).
 			Doc(`The directory containing the module's source code loaded into the engine (plus any generated code that may have been created).`),
 
-		dagql.FuncWithCacheKey("workdir", s.currentModuleWorkdir, CachePerClient).
+		dagql.FuncWithCacheKey("workdir", s.currentModuleWorkdir, core.CachePerClient).
 			Doc(`Load a directory from the module's scratch working directory, including any changes that may have been made to it during module function execution.`).
 			ArgDoc("path", `Location of the directory to access (e.g., ".").`).
 			ArgDoc("exclude", `Exclude artifacts that match the given pattern (e.g., ["node_modules/", ".git*"]).`).
 			ArgDoc("include", `Include only artifacts that match the given pattern (e.g., ["app/", "package.*"]).`),
 
-		dagql.FuncWithCacheKey("workdirFile", s.currentModuleWorkdirFile, CachePerClient).
+		dagql.FuncWithCacheKey("workdirFile", s.currentModuleWorkdirFile, core.CachePerClient).
 			Doc(`Load a file from the module's scratch working directory, including any changes that may have been made to it during module function execution.Load a file from the module's scratch working directory, including any changes that may have been made to it during module function execution.`).
 			ArgDoc("path", `Location of the file to retrieve (e.g., "README.md").`),
 	}.Install(s.dag)
@@ -835,7 +836,7 @@ func (s *moduleSchema) moduleInitialize(
 	inst dagql.Instance[*core.Module],
 	args struct{},
 ) (*core.Module, error) {
-	if inst.Self.NameField == "" || inst.Self.SDKConfig == "" {
+	if inst.Self.NameField == "" || inst.Self.SDKConfig == nil || inst.Self.SDKConfig.Source == "" {
 		return nil, fmt.Errorf("module name and SDK must be set")
 	}
 	mod, err := inst.Self.Initialize(ctx, inst.ID(), dagql.CurrentID(ctx), s.dag)
@@ -1038,6 +1039,7 @@ func (s *moduleSchema) updateDeps(
 	return nil
 }
 
+//nolint:gocyclo // adding a nil check for SDK Config is triggering this failure
 func (s *moduleSchema) updateCodegenAndRuntime(
 	ctx context.Context,
 	mod *core.Module,
@@ -1046,14 +1048,13 @@ func (s *moduleSchema) updateCodegenAndRuntime(
 	ctx, span := core.Tracer(ctx).Start(ctx, "build module")
 	defer telemetry.End(span, func() error { return rerr })
 
-	if mod.NameField == "" || mod.SDKConfig == "" {
+	if mod.NameField == "" || mod.SDKConfig == nil || mod.SDKConfig.Source == "" {
 		// can't codegen yet
 		return nil
 	}
 
 	if src.Self.WithInitConfig != nil &&
-		src.Self.WithInitConfig.Merge &&
-		mod.SDKConfig != string(SDKGo) {
+		src.Self.WithInitConfig.Merge && mod.SDKConfig.Source != string(SDKGo) {
 		return fmt.Errorf("merge is only supported for Go SDKs")
 	}
 
@@ -1232,7 +1233,12 @@ func (s *moduleSchema) updateDaggerConfig(
 	modCfg := &modCfgWithUserFields.ModuleConfig
 
 	modCfg.Name = mod.OriginalName
-	modCfg.SDK = mod.SDKConfig
+	if mod.SDKConfig != nil {
+		modCfg.SDK = &modules.SDK{
+			Source: mod.SDKConfig.Source,
+		}
+	}
+
 	switch engineVersion {
 	case "":
 		if modCfg.EngineVersion == "" {

@@ -338,6 +338,12 @@ func LoadPortFromID(id dagger.PortID) *dagger.Port {
 	return client.LoadPortFromID(id)
 }
 
+// Load a SDKConfig from its ID.
+func LoadSDKConfigFromID(id dagger.SDKConfigID) *dagger.SDKConfig {
+	client := initClient()
+	return client.LoadSDKConfigFromID(id)
+}
+
 // Load a ScalarTypeDef from its ID.
 func LoadScalarTypeDefFromID(id dagger.ScalarTypeDefID) *dagger.ScalarTypeDef {
 	client := initClient()
@@ -348,6 +354,12 @@ func LoadScalarTypeDefFromID(id dagger.ScalarTypeDefID) *dagger.ScalarTypeDef {
 func LoadSecretFromID(id dagger.SecretID) *dagger.Secret {
 	client := initClient()
 	return client.LoadSecretFromID(id)
+}
+
+// Load a Secret from its Name.
+func LoadSecretFromName(name string, opts ...dagger.LoadSecretFromNameOpts) *dagger.Secret {
+	client := initClient()
+	return client.LoadSecretFromName(name, opts...)
 }
 
 // Load a Service from its ID.
@@ -398,10 +410,10 @@ func ModuleSource(refString string, opts ...dagger.ModuleSourceOpts) *dagger.Mod
 	return client.ModuleSource(refString, opts...)
 }
 
-// Reference a secret by name.
-func Secret(name string, opts ...dagger.SecretOpts) *dagger.Secret {
+// Creates a new secret.
+func Secret(uri string) *dagger.Secret {
 	client := initClient()
-	return client.Secret(name, opts...)
+	return client.Secret(uri)
 }
 
 // Sets a secret given a user defined name to its plaintext and returns the secret.

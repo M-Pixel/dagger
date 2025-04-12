@@ -19,7 +19,7 @@ on:
 jobs:
   publish:
     if: ${{ github.repository == 'dagger/dagger' && github.event_name == 'push' }}
-    runs-on: dagger-g3-v0-15-2-16c
+    runs-on: dagger-g3-v0-15-3-16c
     steps:
       - uses: actions/checkout@v4
       - name: "Publish"
@@ -47,8 +47,9 @@ jobs:
             --aws-bucket="$AWS_BUCKET" \
             --aws-cloudfront-distribution="$AWS_CLOUDFRONT_DISTRIBUTION" \
             --artefacts-fqdn="$ARTEFACTS_FQDN" \
-            --discord-webhook=env:DISCORD_WEBHOOK
-          redirect: $GITHUB_STEP_SUMMARY
+            --discord-webhook=env:DISCORD_WEBHOOK \
+            markdown
+          redirect: /tmp/release-report
         env:
           DAGGER_ENGINE_IMAGE: ${{ vars.RELEASE_DAGGER_ENGINE_IMAGE }}
           DAGGER_ENGINE_IMAGE_USERNAME: ${{ github.actor }}
@@ -74,12 +75,21 @@ jobs:
           ARTEFACTS_FQDN: ${{ vars.RELEASE_FQDN }}
 
           DISCORD_WEBHOOK: ${{ secrets.NEW_RELEASE_DISCORD_WEBHOOK }}
+      - name: "Report"
+        if: always()
+        run: |
+          REPORT="/tmp/release-report"
+          cat $REPORT | tee $GITHUB_STEP_SUMMARY
+          if grep -q '\[!CAUTION\]' "$REPORT"; then
+            # workaround for https://github.com/dagger/dagger/issues/8421
+            exit 1
+          fi
 
   # TODO: move this into Publish above
   daggerverse-bump-dagger:
     needs: publish
     if: github.ref_name != 'main'
-    runs-on: dagger-g3-v0-15-2-4c
+    runs-on: dagger-g3-v0-15-3-4c
     steps:
       - uses: actions/checkout@v4
       - name: "Bump Dagger version in Daggerverse"
@@ -133,7 +143,7 @@ jobs:
         shell: bash
 
       - name: "Install Docker"
-        uses: douglascamata/setup-docker-macos-action@v1-alpha.14
+        uses: douglascamata/setup-docker-macos-action@v1-alpha.16
         env:
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
       - uses: docker/setup-qemu-action@v3
