@@ -46,8 +46,7 @@ func (t DotnetSDK) Test(ctx context.Context) error {
 }
 
 func (t DotnetSDK) TestPublish(ctx context.Context, tag string) error {
-	// The SDK doesn't publish as a library at the moment.
-	return nil
+	return dag.DotnetSDKDev().TestPublish(ctx, tag)
 }
 
 func (t DotnetSDK) Generate(ctx context.Context) (*dagger.Directory, error) {

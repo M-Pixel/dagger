@@ -1,14 +1,65 @@
 using System;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Dagger;
 using static Dagger.Alias;
 
 public static class DevelopmentTimeTasks
 {
-	[JsonIgnore] private static readonly Task<string> _version = DAG.Version();
+	private static Task<string> DaggerVerion => _daggerVersion ??= DAG.Version();
+	[JsonIgnore] private static Task<string>? _daggerVersion;
 
-	public static async Task<string> Client
+	public static Task TestPublish
+	(
+		[
+			DirectoryFromContext
+			(
+				DefaultPath = "/sdk/dotnet",
+				Ignore =
+				[
+					"*",
+					"!Client/Client.csproj", "!dagger-icon.png", "!**/*.cs",
+					"!Primer/Primer.csproj", "!Primer/**/*.cs",
+					"!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs",
+					"!Thunk/Thunk.csproj", "!Thunk/**/*.cs"
+				]
+			)
+		]
+		Directory source,
+		string tag
+	)
+	{
+		string version = tag.Substring("sdk/dotnet/v".Length);
+		Secret noSecret = DAG.Secret("no secret");
+
+		return Task.WhenAll
+		(
+			PublishClient(source.SubDirectory("Client"), noSecret, dryRun: true, version),
+			PublishCodeGenerator(
+				source,
+				"no URL", "no user", noSecret,
+				dryRun: true,
+				version
+			),
+			PublishPrimer
+			(
+				source,
+				"no URL", "no user", noSecret,
+				dryRun: true,
+				version
+			),
+			PublishThunk
+			(
+				source,
+				"no URL", "no user", noSecret,
+				dryRun: true,
+				version
+			)
+		);
+	}
+
+	public static async Task<string> PublishClient
 	(
 		[
 			DirectoryFromContext
@@ -18,21 +69,40 @@ public static class DevelopmentTimeTasks
 			)
 		]
 		Directory source,
-		Secret key
+		Secret key,
+		bool dryRun,
+		string? version = null
 	)
-		=> await DAG.GetDotnetSdk()
-			.DotnetSdkContainer()
-			.WithDirectory(".", DAG.GetBootstrap().ClientPackages(source))
-			.WithExec(["sh", "-c", "dotnet nuget push *.nupkg --source=https://api.nuget.org/v3/index.json --no-symbols --api-key=" + await key.Plaintext()])
-			.Stdout();
+	{
+		string csproj = await source.File("Client.csproj").Contents();
+		Regex versionReplacer = new("<Version>.*</Version>");
+		source = source
+			.SubDirectory("Client")
+			.WithNewFile("Client.csproj", versionReplacer.Replace(csproj, $"<Version>{version}</Version>", 1));
 
-	public static async Task<string> Primer
+		var packages = DAG.GetBootstrap().ClientPackages(source);
+		if (dryRun)
+			return "success";
+		return await DAG.GetDotnetSdk()
+			.DotnetSdkContainer()
+			.WithDirectory(".", packages)
+			.WithExec([
+				"sh", "-c",
+				"dotnet nuget push *.nupkg --source=https://api.nuget.org/v3/index.json --no-symbols --api-key=" +
+				await key.Plaintext()
+			])
+			.Stdout();
+	}
+
+	public static async Task<string> PublishPrimer
 	(
 		[DirectoryFromContext(DefaultPath = "/sdk/dotnet", Ignore = ["*", "!Primer/Primer.csproj", "!Primer/**/*.cs"])]
 		Directory source,
 		string url,
 		string user,
-		Secret secret
+		Secret secret,
+		bool dryRun,
+		string? version = null
 	)
 		=> await (await ContainerWithStaticAnnotations("dagger-dotnet-primer"))
 			.WithAnnotation("org.opencontainers.image.title", "Dagger Dotnet SDK Primer")
@@ -40,9 +110,9 @@ public static class DevelopmentTimeTasks
 			.WithDirectory("/", DAG.GetBootstrap().Primer(source).Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
-			.Publish($"{url}/dagger-dotnet-primer:{await _version}");
+			.Publish($"{url}/dagger-dotnet-primer:{version ?? await DaggerVerion}", dryRun);
 
-	public static async Task<string> CodeGenerator
+	public static async Task<string> PublishCodeGenerator
 	(
 		[
 			DirectoryFromContext
@@ -54,7 +124,9 @@ public static class DevelopmentTimeTasks
 		Directory source,
 		string url,
 		string user,
-		Secret secret
+		Secret secret,
+		bool dryRun,
+		string? version = null
 	)
 		=> await (await ContainerWithStaticAnnotations("dagger-dotnet-codegenerator"))
 			.WithAnnotation("org.opencontainers.image.title", "Dagger Dotnet SDK Code Generator")
@@ -66,15 +138,17 @@ public static class DevelopmentTimeTasks
 			.WithDirectory("/", DAG.GetBootstrap().CodeGenerator(source).Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
-			.Publish($"{url}/dagger-dotnet-codegenerator:{await _version}");
+			.Publish($"{url}/dagger-dotnet-codegenerator:{version ?? await DaggerVerion}", dryRun);
 
-	public static async Task<string> Thunk
+	public static async Task<string> PublishThunk
 	(
 		[DirectoryFromContext(DefaultPath = "/sdk/dotnet", Ignore = ["*", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs"])]
 		Directory source,
 		string url,
 		string user,
-		Secret secret
+		Secret secret,
+		bool dryRun,
+		string? version = null
 	)
 		=> await (await ContainerWithStaticAnnotations("dagger-dotnet-thunk"))
 			.WithAnnotation("org.opencontainers.image.title", "Dagger Dotnet SDK Thunk")
@@ -82,7 +156,7 @@ public static class DevelopmentTimeTasks
 			.WithDirectory("/", DAG.GetBootstrap().Thunk(source).Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
-			.Publish($"{url}/dagger-dotnet-thunk:{await _version}");
+			.Publish($"{url}/dagger-dotnet-thunk:{version ?? await DaggerVerion}", dryRun);
 
 
 	private static async Task<Container> ContainerWithStaticAnnotations(string imageName) => DAG.Container()
@@ -95,11 +169,15 @@ public static class DevelopmentTimeTasks
 			$"https://github.com/users/M-Pixel/packages/container/package/{imageName}"
 		)
 		.WithAnnotation("org.opencontainers.image.source", "https://github.com/M-Pixel/dagger")
-		.WithAnnotation("org.opencontainers.image.version", await _version);
+		.WithAnnotation("org.opencontainers.image.version", await DaggerVerion);
 }
 
 static class Extensions
 {
 	public static Container WithDynamicAnnotations(this Container container) => container
 		.WithAnnotation("org.opencontainers.image.created", DateTime.Now.ToString("O"));
+
+	public static Task<string> Publish(this Container container, string address, bool dryRun) => dryRun
+		? container.Sync().ContinueWith(_ => "success")
+		: container.Publish(address);
 }

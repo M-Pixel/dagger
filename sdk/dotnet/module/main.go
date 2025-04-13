@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/iancoleman/strcase"
 	"main/internal/dagger"
 	"math/rand"
 	"os"
@@ -96,6 +97,19 @@ func (sdk *DotnetSdk) MaybeAddClientPackage(container *dagger.Container) *dagger
 	return container
 }
 
+func ModuleNamePascalCase(ctx context.Context, modSource *dagger.ModuleSource) (string, error) {
+	name, err := modSource.ModuleName(ctx)
+	if err != nil {
+		return "", err
+	}
+	isKebab := strings.Index(name, "-")
+	if isKebab != -1 {
+		// actually results in PascalCase, library function name violates historical standard
+		name = strcase.ToCamel(name)
+	}
+	return name, nil
+}
+
 func (sdk *DotnetSdk) ModuleRuntime(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
@@ -105,7 +119,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 		return nil, fmt.Errorf("failed to retrieve module source subpath for dotnet invocation: %v", err)
 	}
 
-	name, err := modSource.ModuleName(ctx)
+	name, err := ModuleNamePascalCase(ctx, modSource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve module name for dotnet invocation: %v", err)
 	}
@@ -206,7 +220,7 @@ func (sdk *DotnetSdk) Codegen(
 		return nil, fmt.Errorf("failed to retrieve module source subpath for dotnet code generation: %v", err)
 	}
 
-	name, err := modSource.ModuleName(ctx)
+	name, err := ModuleNamePascalCase(ctx, modSource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve module name for dotnet code generation: %v", err)
 	}
