@@ -50,25 +50,10 @@ func (t DotnetSDK) TestPublish(ctx context.Context, tag string) error {
 }
 
 func (t DotnetSDK) Generate(ctx context.Context) (*dagger.Directory, error) {
-	installer, err := t.Dagger.installer(ctx, "sdk")
-	if err != nil {
-		return nil, err
-	}
-	introspection, err := t.Dagger.introspection(ctx, installer)
-	if err != nil {
-		return nil, err
-	}
-	src := t.Dagger.Src.Directory("sdk/dotnet")
-
-	return dag.
-		Directory().
-		WithDirectory(
-			"sdk/dotnet",
-			dag.DotnetSDKDev(dagger.DotnetSDKDevOpts{Source: src}).Generate(introspection),
-		), nil
+	// Dotnet module generates IL directly, does not need to store derived artifacts in Git
+	return dag.Directory(), nil
 }
 
 func (t DotnetSDK) Bump(ctx context.Context, version string) (*dagger.Directory, error) {
-	// The SDK has no engine to bump at the moment. So skip it.
-	return dag.Directory(), nil
+	return dag.DotnetSDKDev().Bump(version), nil
 }

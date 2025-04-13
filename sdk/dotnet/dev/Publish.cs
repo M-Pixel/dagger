@@ -1,15 +1,11 @@
 using System;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Dagger;
 using static Dagger.Alias;
 
-public static class DevelopmentTimeTasks
+public static partial class DevelopmentTimeTasks
 {
-	private static Task<string> DaggerVerion => _daggerVersion ??= DAG.Version();
-	[JsonIgnore] private static Task<string>? _daggerVersion;
-
 	public static Task TestPublish
 	(
 		[
@@ -74,11 +70,7 @@ public static class DevelopmentTimeTasks
 		string? version = null
 	)
 	{
-		string csproj = await source.File("Client.csproj").Contents();
-		Regex versionReplacer = new("<Version>.*</Version>");
-		source = source
-			.SubDirectory("Client")
-			.WithNewFile("Client.csproj", versionReplacer.Replace(csproj, $"<Version>{version}</Version>", 1));
+		source = source.WithDirectory("/", await UpdatePackageVersion(source, version ?? await DaggerVerion));
 
 		var packages = DAG.GetBootstrap().ClientPackages(source);
 		if (dryRun)
