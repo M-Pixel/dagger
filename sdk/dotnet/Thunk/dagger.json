@@ -1,6 +1,6 @@
 {
   "name": "Thunk",
-  "engineVersion": "v0.16.0",
+  "engineVersion": "v0.16.1",
   "sdk": {
     "source": "../bootstrap"
   },
