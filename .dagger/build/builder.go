@@ -72,6 +72,10 @@ func NewBuilder(ctx context.Context, source *dagger.Directory) (*Builder, error)
 			"**/deps",
 			"**/cover",
 			"**/_build",
+
+			// dotnet
+			"sdk/dotnet",
+			"!sdk/dotnet/module",
 		},
 	})
 	v := dag.Version()
