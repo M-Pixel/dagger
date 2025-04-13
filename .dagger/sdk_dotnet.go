@@ -49,6 +49,22 @@ func (t DotnetSDK) TestPublish(ctx context.Context, tag string) error {
 	return dag.DotnetSDKDev().TestPublish(ctx, tag)
 }
 
+func (t DotnetSDK) Publish(
+	ctx context.Context,
+	tag string,
+	nugetApiKey *dagger.Secret,
+	containerRegistryUrl string,
+	containerRegistryUsername string,
+	containerRegistryPassword *dagger.Secret,
+	dryRun bool,
+) error {
+	if dryRun {
+		return t.TestPublish(ctx, tag)
+	}
+	return dag.DotnetSDKDev().
+		PublishFromCd(ctx, tag, nugetApiKey, containerRegistryUrl, containerRegistryUsername, containerRegistryPassword)
+}
+
 func (t DotnetSDK) Generate(ctx context.Context) (*dagger.Directory, error) {
 	// Dotnet module generates IL directly, does not need to store derived artifacts in Git
 	return dag.Directory(), nil

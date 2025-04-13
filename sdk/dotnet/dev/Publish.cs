@@ -4,25 +4,25 @@ using System.Threading.Tasks;
 using Dagger;
 using static Dagger.Alias;
 
+[
+	DirectoryFromContext
+	(
+		DefaultPath = "/sdk/dotnet",
+		Ignore =
+		[
+			"*",
+			"!Client/Client.csproj", "!dagger-icon.png", "!**/*.cs",
+			"!Primer/Primer.csproj", "!Primer/**/*.cs",
+			"!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs",
+			"!Thunk/Thunk.csproj", "!Thunk/**/*.cs"
+		]
+	)
+]
 public static partial class DevelopmentTimeTasks
 {
 	public static Task TestPublish
 	(
-		[
-			DirectoryFromContext
-			(
-				DefaultPath = "/sdk/dotnet",
-				Ignore =
-				[
-					"*",
-					"!Client/Client.csproj", "!dagger-icon.png", "!**/*.cs",
-					"!Primer/Primer.csproj", "!Primer/**/*.cs",
-					"!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs",
-					"!Thunk/Thunk.csproj", "!Thunk/**/*.cs"
-				]
-			)
-		]
-		Directory source,
+		[DirectoryFromContext] Directory source,
 		string tag
 	)
 	{
@@ -32,24 +32,46 @@ public static partial class DevelopmentTimeTasks
 		return Task.WhenAll
 		(
 			PublishClient(source.SubDirectory("Client"), noSecret, dryRun: true, version),
-			PublishCodeGenerator(
+			PublishCodeGenerator(source, "no URL", "no user", noSecret, dryRun: true, version),
+			PublishPrimer(source, "no URL", "no user", noSecret, dryRun: true, version),
+			PublishThunk(source.SubDirectory("Thunk"), "no URL", "no user", noSecret, dryRun: true, version)
+		);
+	}
+
+	public static async Task PublishFromCD
+	(
+		[DirectoryFromContext] Directory source,
+		string tag,
+		Secret nugetApiKey,
+		string containerRegistryUrl,
+		string containerRegistryUsername,
+		Secret containerRegistryPassword
+	)
+	{
+		string version = tag.Substring("sdk/dotnet/v".Length);
+
+		await PublishClient(source.SubDirectory("Client"), nugetApiKey, dryRun: false, version);
+		await Task.WhenAll
+		(
+			PublishCodeGenerator
+			(
 				source,
-				"no URL", "no user", noSecret,
-				dryRun: true,
+				containerRegistryUrl, containerRegistryUsername, containerRegistryPassword,
+				dryRun: false,
 				version
 			),
 			PublishPrimer
 			(
 				source,
-				"no URL", "no user", noSecret,
-				dryRun: true,
+				containerRegistryUrl, containerRegistryUsername, containerRegistryPassword,
+				dryRun: false,
 				version
 			),
 			PublishThunk
 			(
 				source,
-				"no URL", "no user", noSecret,
-				dryRun: true,
+				containerRegistryUrl, containerRegistryUsername, containerRegistryPassword,
+				dryRun: false,
 				version
 			)
 		);
@@ -88,7 +110,7 @@ public static partial class DevelopmentTimeTasks
 
 	public static async Task<string> PublishPrimer
 	(
-		[DirectoryFromContext(DefaultPath = "/sdk/dotnet", Ignore = ["*", "!Primer/Primer.csproj", "!Primer/**/*.cs"])]
+		[DirectoryFromContext(Ignore = ["*", "!Primer/Primer.csproj", "!Primer/**/*.cs"])]
 		Directory source,
 		string url,
 		string user,
@@ -134,7 +156,7 @@ public static partial class DevelopmentTimeTasks
 
 	public static async Task<string> PublishThunk
 	(
-		[DirectoryFromContext(DefaultPath = "/sdk/dotnet", Ignore = ["*", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs"])]
+		[DirectoryFromContext(Ignore = ["*", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs"])]
 		Directory source,
 		string url,
 		string user,

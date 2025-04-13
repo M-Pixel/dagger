@@ -144,6 +144,7 @@ func (r *Releaser) Publish(
 	npmToken *dagger.Secret, // +optional
 	hexAPIKey *dagger.Secret, // +optional
 	cargoRegistryToken *dagger.Secret, // +optional
+	nugetAPIKey *dagger.Secret, // +optional
 
 	awsAccessKeyID *dagger.Secret, // +optional
 	awsSecretAccessKey *dagger.Secret, // +optional
@@ -302,6 +303,19 @@ func (r *Releaser) Publish(
 					GithubToken: githubToken,
 					DryRun:      dryRun,
 				})
+			},
+		},
+		{
+			name: "🐵 Dotnet SDK components",
+			path: "sdk/dotnet/",
+			tag:  "sdk/dotnet/",
+			link: "https://www.nuget.org/packages/Dagger.Client",
+			publish: func() error {
+				// Registry image if valid will be `hostname(/prefix)*/image(:tag)?(@hash)?`.
+				// Dotnet wants `hostname/prefix`.
+				registryUrl := registryImage[:strings.LastIndex(registryImage, "/")]
+				return r.Dagger.SDK().Dotnet().
+					Publish(ctx, tag, nugetAPIKey, registryUrl, registryUsername, registryPassword, dryRun)
 			},
 		},
 		{
