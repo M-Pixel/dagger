@@ -2,7 +2,7 @@ name: Publish
 on:
   push:
     branches: ["main"]
-    tags: ["v**"]
+    tags: ["v**", "sdk/dotnet/v*"]
 
   pull_request:
     types:
@@ -18,8 +18,8 @@ on:
 
 jobs:
   publish:
-    if: ${{ github.repository == 'dagger/dagger' && github.event_name == 'push' }}
-    runs-on: dagger-g3-v0-15-4-16c
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: "Publish"
