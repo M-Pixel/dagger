@@ -1,10 +1,9 @@
 // Wrapper around the SDK module implementation, adding in-memory servers, so that local iteration of the SDK module
-//itself is possible without making round-trips through public NuGet or container registry.
+// itself is possible without making round-trips through public NuGet or container registry.
 
 package main
 
 import (
-	"context"
 	"dagger/bootstrap/internal/dagger"
 )
 
@@ -33,7 +32,6 @@ func (sdk *Bootstrap) Primer(source *dagger.Directory) *dagger.Container {
 		WithDirectory("/PrimedState", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid}).
 		WithDirectory("/Primer", Build(source, "Primer"),
 			dagger.ContainerWithDirectoryOpts{Exclude: []string{"*.pdb"}})
-
 }
 
 func (sdk *Bootstrap) CodeGenerator(source *dagger.Directory) *dagger.Container {
@@ -82,16 +80,15 @@ func (sdk *Bootstrap) ClientPackages(source *dagger.Directory) *dagger.Directory
 }
 
 func (sdk *Bootstrap) ModuleRuntime(
-	ctx context.Context,
 	modSource *dagger.ModuleSource,
-	introspectionJson *dagger.File,
+	introspectionJSON *dagger.File,
 	// +defaultPath="/sdk/dotnet"
 	// +ignore=["*", "!*/*.csproj", "!Thunk/dagger.json", "!*/**/*.cs", "!Client/dagger-icon.png"]
 	source *dagger.Directory,
 ) (*dagger.Container, error) {
 	// Thunk needs Dagger.Generated.csproj to compile.
 	implementation := dag.DotnetSDK().InjectCodegenDependencies(sdk.Primer(source), sdk.CodeGenerator(source))
-	source = source.WithDirectory("/Thunk", implementation.CodegenImplementation(introspectionJson))
+	source = source.WithDirectory("/Thunk", implementation.CodegenImplementation(introspectionJSON))
 	return implementation.
 		InjectModuleRuntimeDependencies(
 			sdk.ClientLayer(source.Directory("/Client")),
@@ -100,7 +97,6 @@ func (sdk *Bootstrap) ModuleRuntime(
 }
 
 func (sdk *Bootstrap) Codegen(
-	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
 	// +defaultPath="/sdk/dotnet"

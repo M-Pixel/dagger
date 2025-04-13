@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/iancoleman/strcase"
 	"main/internal/dagger"
 	"math/rand"
 	"os"
 	"path"
 	"strings"
+
+	"github.com/iancoleman/strcase"
 )
 
 const (
@@ -49,7 +50,7 @@ func (sdk *DotnetSdk) DotnetContainer(container *dagger.Container) *dagger.Conta
 		WithEnvVariable("DOTNET_CLI_TELEMETRY_OPTOUT", "1").
 		WithMountedTemp("/tmp").
 		WithMountedCache("/home/app/.local/share/NuGet/http-cache", dag.CacheVolume("nuget-http"),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared}).
+						dagger.ContainerWithMountedCacheOpts{Owner: uid, Sharing: dagger.CacheSharingModeShared}).
 		WithWorkdir("/scratch"). // Match the Dagger convention for running modules workdir name
 		WithDirectory(".", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
 	// TODO: Figure out if any additional directories should have cache mounted
@@ -58,7 +59,7 @@ func (sdk *DotnetSdk) DotnetContainer(container *dagger.Container) *dagger.Conta
 
 func (sdk *DotnetSdk) DotnetRuntimeContainer() *dagger.Container {
 	return sdk.DotnetContainer(dag.Container().
-		//From("mcr.microsoft.com/dotnet/runtime:8.0-noble").WithUser(uid),
+		// From("mcr.microsoft.com/dotnet/runtime:8.0-noble").WithUser(uid),
 		From("mcr.microsoft.com/dotnet/runtime:8.0-noble-chiseled"), // "chiseled" means distroless
 	)
 }
@@ -66,7 +67,7 @@ func (sdk *DotnetSdk) DotnetRuntimeContainer() *dagger.Container {
 func (sdk *DotnetSdk) DotnetSdkContainer() *dagger.Container {
 	return sdk.DotnetContainer(dag.Container().From("mcr.microsoft.com/dotnet/sdk:8.0-noble")).
 		WithMountedCache("/home/app/.dotnet", dag.CacheVolume(fmt.Sprintf(`nuget-home-%d`, rand.Uint64())),
-			dagger.ContainerWithMountedCacheOpts{Owner: uid}).
+									dagger.ContainerWithMountedCacheOpts{Owner: uid}).
 		WithExec([]string{"dotnet", "workload", "update"}). // Prevents warning from appearing in all logs
 		WithUser(uid).
 		WithDirectory("/Out", dag.Directory(), dagger.ContainerWithDirectoryOpts{Owner: uid})
@@ -116,12 +117,12 @@ func (sdk *DotnetSdk) ModuleRuntime(
 ) (*dagger.Container, error) {
 	subPath, err := modSource.SourceSubpath(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve module source subpath for dotnet invocation: %v", err)
+		return nil, fmt.Errorf("failed to retrieve module source subpath for dotnet invocation: %w", err)
 	}
 
 	name, err := ModuleNamePascalCase(ctx, modSource)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve module name for dotnet invocation: %v", err)
+		return nil, fmt.Errorf("failed to retrieve module name for dotnet invocation: %w", err)
 	}
 
 	version, _ := dag.Version(ctx)
@@ -157,7 +158,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 	var readyToInvokeContainer *dagger.Container
 	primerResponse, err := maybeReadyToInvokeContainer.ExitCode(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get exit code for dotnet invocation: %v", err)
+		return nil, fmt.Errorf("failed to get exit code for dotnet invocation: %w", err)
 	}
 	if primerResponse >= 120 {
 		// Needs to be built.
@@ -195,7 +196,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 			WithExec([]string{"/usr/bin/dotnet", "/Primer/Dagger.Primer.dll"})
 	} else if primerResponse != 0 {
 		_, err := maybeReadyToInvokeContainer.Stdout(ctx)
-		return nil, fmt.Errorf("failed to prime module container for dotnet invocation: %v", err)
+		return nil, fmt.Errorf("failed to prime module container for dotnet invocation: %w", err)
 	} else {
 		readyToInvokeContainer = maybeReadyToInvokeContainer
 	}
@@ -209,7 +210,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 func (sdk *DotnetSdk) Codegen(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
-	introspectionJson *dagger.File,
+	introspectionJSON *dagger.File,
 ) (*dagger.GeneratedCode, error) {
 	// TODO: Don't actually generate code if the context is call (as opposed to init or sync), and a generated SDK is
 	// already present or the module has no dependencies.  The generated SDK is less than 200 KB, so it can be included
@@ -217,15 +218,15 @@ func (sdk *DotnetSdk) Codegen(
 
 	subPath, err := modSource.SourceSubpath(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve module source subpath for dotnet code generation: %v", err)
+		return nil, fmt.Errorf("failed to retrieve module source subpath for dotnet code generation: %w", err)
 	}
 
 	name, err := ModuleNamePascalCase(ctx, modSource)
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve module name for dotnet code generation: %v", err)
+		return nil, fmt.Errorf("failed to retrieve module name for dotnet code generation: %w", err)
 	}
 
-	buildDirectory := sdk.CodegenImplementation(ctx, introspectionJson)
+	buildDirectory := sdk.CodegenImplementation(ctx, introspectionJSON)
 
 	// Add csproj if not already present, update client version if outdated
 	var hasDll = false
@@ -266,10 +267,10 @@ func (sdk *DotnetSdk) Codegen(
 	} else if !hasDll {
 		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.csproj': %v", err)
+			return nil, fmt.Errorf("failed to read file '/src/sdk/dotnet/module/Template.csproj': %w", err)
 		}
 		buildDirectory = buildDirectory.
-			WithNewFile(name+".csproj", strings.Replace(string(csproj), "$", name, -1)).
+			WithNewFile(name+".csproj", strings.ReplaceAll(string(csproj), "$", name)).
 			WithFile("Cow.cs", dag.CurrentModule().Source().File("Cow.cs"))
 		// TODO: Add obj and bin to dagger.json ignores
 	}
@@ -281,11 +282,11 @@ func (sdk *DotnetSdk) Codegen(
 
 func (sdk *DotnetSdk) CodegenImplementation(
 	ctx context.Context,
-	introspectionJson *dagger.File,
+	introspectionJSON *dagger.File,
 ) *dagger.Directory {
 	version, _ := dag.Version(ctx)
 
-	// buildDirectory composition doesn't use any parameters besides introspectionJson, so if introspectionJson is
+	// buildDirectory composition doesn't use any parameters besides introspectionJSON, so if introspectionJSON is
 	// identical between modules, code generation is not re-run unnecessarily.
 	if sdk.PrimerContainer == nil {
 		sdk.PrimerContainer = dag.Container().From(registry + "dagger-dotnet-primer:" + version)
@@ -305,7 +306,7 @@ func (sdk *DotnetSdk) CodegenImplementation(
 		WithoutEnvVariable("Dagger:Module:SourcePath").
 
 		// Set code generation parameters and let it rip.
-		WithMountedFile("/mnt/introspection.json", introspectionJson).
+		WithMountedFile("/mnt/introspection.json", introspectionJSON).
 		WithExec([]string{"dotnet", "/CodeGenerator/Dagger.CodeGenerator.dll"}).
 		Directory(".")
 }
