@@ -48,13 +48,20 @@ public static class ClientCompiler
 		);
 
 		Directory.CreateDirectory("Generated");
+		EmitResult result;
 		using FileStream bytecodeStream =
 			new($"Generated/{generatedAssemblyName}.dll", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
-		using FileStream symbolsStream =
-			new($"Generated/{generatedAssemblyName}.pdb", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
-		using FileStream documentationStream =
-			new($"Generated/{generatedAssemblyName}.xml", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
-		EmitResult result = compilation.Emit(bytecodeStream, symbolsStream, documentationStream);
+		if (Environment.GetEnvironmentVariable("Dagger:CodeGenerator:NoDebug") == null)
+		{
+			using FileStream symbolsStream =
+				new($"Generated/{generatedAssemblyName}.pdb", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			using FileStream documentationStream =
+				new($"Generated/{generatedAssemblyName}.xml", FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+			result = compilation.Emit(bytecodeStream, symbolsStream, documentationStream);
+		}
+		else
+			result = compilation.Emit(bytecodeStream);
+
 		if (!result.Success)
 		{
 			string sourceCode = compilation.SyntaxTrees[0].ToString();

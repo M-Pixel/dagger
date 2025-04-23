@@ -52,14 +52,18 @@ class ModuleProber
 	public static readonly int frameworkMajorVersion;
 	public static readonly bool preferRelease;
 	public static readonly bool isManualPreference;
-	private const int _RESPONSE_NOT_FOUND = 120;
-	private const int _RESPONSE_SAME_FOLDER = 121;
-	private const int _RESPONSE_SUB_FOLDER = 122;
+
+	private const int _RESPONSE_BASE = 120;
+	private const int _RESPONSE_NOT_FOUND = 0b000;
+	private const int _RESPONSE_SAME_FOLDER = 0b001;
+	private const int _RESPONSE_SUB_FOLDER = 0b010;
+
+	private const int _RESPONSE_NEEDS_CODEGEN = 0b100;
 
 
 	public FileInfo? AssemblyFile { get; }
 
-	public int ResponseCode { get; }
+	public int ResponseCode { get; } = _RESPONSE_BASE;
 
 
 	static ModuleProber()
@@ -128,11 +132,15 @@ class ModuleProber
 		if (!enumerator.MoveNext())
 		{
 			if (File.Exists(Path.Combine(sourcePath, moduleName, moduleName + ".csproj")))
-				ResponseCode = _RESPONSE_SUB_FOLDER;
+				ResponseCode |= _RESPONSE_SUB_FOLDER;
 			else if (File.Exists(Path.Combine(sourcePath, moduleName + ".csproj")))
-				ResponseCode = _RESPONSE_SAME_FOLDER;
+				ResponseCode |= _RESPONSE_SAME_FOLDER;
 			else
-				ResponseCode = _RESPONSE_NOT_FOUND;
+				ResponseCode |= _RESPONSE_NOT_FOUND;
+
+			if (!File.Exists(Path.Combine(sourcePath, "Generated/Dagger.Generated.dll")))
+				ResponseCode |= _RESPONSE_NEEDS_CODEGEN;
+
 			return;
 		}
 
