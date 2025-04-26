@@ -22,13 +22,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: "Get tags for commit"
+        id: get-tags
+        run: |
+          TAGS=$(git tag --points-at ${{ github.sha }})
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
       - name: "Publish"
         uses: ./.github/actions/call
         with:
           module: ./releaser
           function: |-
             publish \
-            --tag="${{ github.ref_name }}" --commit="${{ github.sha }}" \
+            --raw-tags="${{ steps.get-tags.outputs.tags }}" --commit="${{ github.sha }}" \
             --registry-image="$DAGGER_ENGINE_IMAGE" \
             --registry-username="$DAGGER_ENGINE_IMAGE_USERNAME" \
             --registry-password=env:DAGGER_ENGINE_IMAGE_PASSWORD \
@@ -90,7 +97,7 @@ jobs:
   # TODO: move this into Publish above
   daggerverse-bump-dagger:
     needs: publish
-    if: github.ref_name != 'main'
+    if: ${{ github.repository == 'dagger/dagger' && github.ref_name != 'main' }}
     runs-on: dagger-g3-v0-15-4-4c
     steps:
       - uses: actions/checkout@v4

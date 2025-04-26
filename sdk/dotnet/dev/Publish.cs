@@ -41,15 +41,14 @@ public static partial class DevelopmentTimeTasks
 	public static async Task PublishFromCD
 	(
 		[DirectoryFromContext] Directory source,
-		string tag,
+		string version,
 		Secret nugetApiKey,
 		string containerRegistryUrl,
 		string containerRegistryUsername,
 		Secret containerRegistryPassword
 	)
 	{
-		string version = tag.Substring("sdk/dotnet/v".Length);
-
+		version = version.Substring(1);
 		await PublishClient(source.SubDirectory("Client"), nugetApiKey, dryRun: false, version);
 		await Task.WhenAll
 		(

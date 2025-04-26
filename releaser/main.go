@@ -124,7 +124,7 @@ func (report *ReleaseReport) hasErrors() bool {
 
 func (r *Releaser) Publish(
 	ctx context.Context,
-	tag string,
+	rawTags string,
 	commit string,
 
 	dryRun bool, // +optional
@@ -155,71 +155,87 @@ func (r *Releaser) Publish(
 
 	discordWebhook *dagger.Secret, // +optional
 ) (*ReleaseReport, error) {
+	tags := strings.Fields(rawTags)
+	componentTags := make(map[string]string)
+
 	version := ""
-	if semver.IsValid(tag) {
-		version = tag
+	tag := ""
+	for _, tagIt := range tags {
+		finalSlashIndex := strings.LastIndex(tagIt, "/")
+		if finalSlashIndex != -1 {
+			componentTag := tagIt[finalSlashIndex+1:]
+			prefix := tagIt[:finalSlashIndex+1]
+			componentTags[prefix] = componentTag
+		} else if semver.IsValid(tagIt) {
+			version = tagIt
+			tag = tagIt
+		} else if version != "" {
+			tag = tagIt
+		}
 	}
+
 	report := ReleaseReport{
 		Date:    time.Now().UTC().Format(time.RFC822),
 		Ref:     tag,
 		Commit:  commit,
 		Version: version,
 	}
-
-	artifact := &ReleaseReportArtifact{
-		Name:   "🚙 Engine",
-		Tag:    tag,
-		Notify: true,
-	}
-	err := r.Dagger.Engine().Publish(ctx, []string{tag, commit}, dagger.DaggerDevDaggerEnginePublishOpts{
-		Image:            registryImage,
-		RegistryUsername: registryUsername,
-		RegistryPassword: registryPassword,
-		DryRun:           dryRun,
-	})
-	if err != nil {
-		artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
-	}
-	report.Artifacts = append(report.Artifacts, artifact)
-
-	artifact = &ReleaseReportArtifact{
-		Name: "🚗 CLI",
-		Tag:  tag,
-	}
-	if !dryRun {
-		err = r.Dagger.Cli().Publish(ctx, tag, githubOrgName, githubToken, goreleaserKey, awsAccessKeyID, awsSecretAccessKey, awsRegion, awsBucket, artefactsFQDN)
+	if tag != "" {
+		artifact := &ReleaseReportArtifact{
+			Name:   "🚙 Engine",
+			Tag:    version,
+			Notify: true,
+		}
+		err := r.Dagger.Engine().Publish(ctx, []string{tag, commit}, dagger.DaggerDevDaggerEnginePublishOpts{
+			Image:            registryImage,
+			RegistryUsername: registryUsername,
+			RegistryPassword: registryPassword,
+			DryRun:           dryRun,
+		})
 		if err != nil {
 			artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
 		}
-		err = r.Dagger.Cli().PublishMetadata(ctx, awsAccessKeyID, awsSecretAccessKey, awsRegion, awsBucket, awsCloudfrontDistribution)
-		if err != nil {
-			artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
-		}
-	} else {
-		err = r.Dagger.Cli().TestPublish(ctx)
-		if err != nil {
-			artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
-		}
-	}
-	report.Artifacts = append(report.Artifacts, artifact)
+		report.Artifacts = append(report.Artifacts, artifact)
 
-	if report.hasErrors() {
-		// early-exit if engine or cli could not publish
-		return &report, nil
-	}
-
-	if semver.IsValid(version) {
 		artifact = &ReleaseReportArtifact{
-			Name: "📖 Docs",
-			Link: "https://docs.dagger.io",
+			Name: "🚗 CLI",
+			Tag:  tag,
 		}
 		if !dryRun {
-			err = r.Dagger.Docs().Publish(ctx, netlifyToken)
+			err = r.Dagger.Cli().Publish(ctx, tag, githubOrgName, githubToken, goreleaserKey, awsAccessKeyID, awsSecretAccessKey, awsRegion, awsBucket, artefactsFQDN)
+			if err != nil {
+				artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
+			}
+			err = r.Dagger.Cli().PublishMetadata(ctx, awsAccessKeyID, awsSecretAccessKey, awsRegion, awsBucket, awsCloudfrontDistribution)
+			if err != nil {
+				artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
+			}
+		} else {
+			err = r.Dagger.Cli().TestPublish(ctx)
 			if err != nil {
 				artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
 			}
 		}
 		report.Artifacts = append(report.Artifacts, artifact)
+
+		if report.hasErrors() {
+			// early-exit if engine or cli could not publish
+			return &report, nil
+		}
+
+		if semver.IsValid(version) {
+			artifact = &ReleaseReportArtifact{
+				Name: "📖 Docs",
+				Link: "https://docs.dagger.io",
+			}
+			if !dryRun {
+				err = r.Dagger.Docs().Publish(ctx, netlifyToken)
+				if err != nil {
+					artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
+				}
+			}
+			report.Artifacts = append(report.Artifacts, artifact)
+		}
 	}
 
 	components := []struct {
@@ -228,7 +244,7 @@ func (r *Releaser) Publish(
 		tag     string
 		link    string
 		dev     bool
-		publish func() error
+		publish func(tag string) error
 	}{
 		{
 			name: "🐹 Go SDK",
@@ -236,7 +252,7 @@ func (r *Releaser) Publish(
 			tag:  "sdk/go/",
 			link: "https://pkg.go.dev/dagger.io/dagger@" + cmp.Or(version, "main"),
 			dev:  true,
-			publish: func() error {
+			publish: func(tag string) error {
 				return r.Dagger.SDK().Go().Publish(ctx, tag, dagger.DaggerDevGoSDKPublishOpts{
 					GithubToken: githubToken,
 					DryRun:      dryRun,
@@ -248,7 +264,7 @@ func (r *Releaser) Publish(
 			path: "sdk/python/",
 			tag:  "sdk/python/",
 			link: "https://pypi.org/project/dagger-io/" + strings.TrimPrefix(version, "v"),
-			publish: func() error {
+			publish: func(tag string) error {
 				return r.Dagger.SDK().Python().Publish(ctx, tag, dagger.DaggerDevPythonSDKPublishOpts{
 					PypiToken: pypiToken,
 					PypiRepo:  pypiRepo,
@@ -261,7 +277,7 @@ func (r *Releaser) Publish(
 			path: "sdk/typescript/",
 			tag:  "sdk/typescript/",
 			link: "https://www.npmjs.com/package/@dagger.io/dagger/v/" + strings.TrimPrefix(version, "v"),
-			publish: func() error {
+			publish: func(tag string) error {
 				return r.Dagger.SDK().Typescript().Publish(ctx, tag, dagger.DaggerDevTypescriptSDKPublishOpts{
 					NpmToken: npmToken,
 					DryRun:   dryRun,
@@ -273,7 +289,7 @@ func (r *Releaser) Publish(
 			path: "sdk/elixir/",
 			tag:  "sdk/elixir/",
 			link: "https://hex.pm/packages/dagger/" + strings.TrimPrefix(version, "v"),
-			publish: func() error {
+			publish: func(tag string) error {
 				return r.Dagger.SDK().Elixir().Publish(ctx, tag, dagger.DaggerDevElixirSDKPublishOpts{
 					HexApikey: hexAPIKey,
 					DryRun:    dryRun,
@@ -285,7 +301,7 @@ func (r *Releaser) Publish(
 			path: "sdk/rust/",
 			tag:  "sdk/rust/",
 			link: "https://crates.io/crates/dagger-sdk/" + strings.TrimPrefix(version, "v"),
-			publish: func() error {
+			publish: func(tag string) error {
 				return r.Dagger.SDK().Rust().Publish(ctx, tag, dagger.DaggerDevRustSDKPublishOpts{
 					CargoRegistryToken: cargoRegistryToken,
 					DryRun:             dryRun,
@@ -298,7 +314,7 @@ func (r *Releaser) Publish(
 			tag:  "sdk/php/",
 			link: "https://packagist.org/packages/dagger/dagger#" + cmp.Or(version, "dev-main"),
 			dev:  true,
-			publish: func() error {
+			publish: func(tag string) error {
 				return r.Dagger.SDK().Php().Publish(ctx, tag, dagger.DaggerDevPhpsdkPublishOpts{
 					GithubToken: githubToken,
 					DryRun:      dryRun,
@@ -310,7 +326,7 @@ func (r *Releaser) Publish(
 			path: "sdk/dotnet/",
 			tag:  "sdk/dotnet/",
 			link: "https://www.nuget.org/packages/Dagger.Client",
-			publish: func() error {
+			publish: func(tag string) error {
 				// Registry image if valid will be `hostname(/prefix)*/image(:tag)?(@hash)?`.
 				// Dotnet wants `hostname/prefix`.
 				registryUrl := registryImage[:strings.LastIndex(registryImage, "/")]
@@ -322,8 +338,8 @@ func (r *Releaser) Publish(
 			name: "☸️ Helm Chart",
 			path: "helm/dagger/",
 			tag:  "helm/chart/",
-			link: "https://github.com/dagger/dagger/pkgs/container/dagger-helm",
-			publish: func() error {
+			link: "https://github.com/" + githubOrgName + "/dagger/pkgs/container/dagger-helm",
+			publish: func(tag string) error {
 				return dag.Helm().Publish(ctx, tag, dagger.HelmPublishOpts{
 					GithubToken: githubToken,
 					DryRun:      dryRun,
@@ -334,32 +350,26 @@ func (r *Releaser) Publish(
 	artifacts := make([]*ReleaseReportArtifact, len(components))
 	var eg errgroup.Group
 	for i, component := range components {
-		if component.dev || semver.IsValid(version) {
+		componentTag, exists := componentTags[component.tag]
+		if exists && (component.dev || semver.IsValid(componentTag)) {
 			eg.Go(func() error {
-				target := ""
-				if semver.IsValid(version) {
-					target = strings.TrimSuffix(component.tag, "/") + "/" + version
-				}
-
 				artifact := &ReleaseReportArtifact{
 					Name:   component.name,
-					Tag:    target,
+					Tag:    componentTag,
 					Link:   component.link,
 					Notify: true,
 				}
 				artifacts[i] = artifact
 
-				if err := component.publish(); err != nil {
+				if err := component.publish(componentTag); err != nil {
 					artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
 					return nil
 				}
 
-				if semver.IsValid(version) {
-					notes := r.changeNotes(component.path, version)
-					if err := r.githubRelease(ctx, "https://github.com/dagger/dagger", tag, target, notes, githubToken, dryRun); err != nil {
-						artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
-						return nil
-					}
+				notes := r.changeNotes(component.path, version)
+				if err := r.githubRelease(ctx, "https://github.com/"+githubOrgName+"/dagger", tag, componentTag, notes, githubToken, dryRun); err != nil {
+					artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
+					return nil
 				}
 
 				return nil
@@ -376,15 +386,15 @@ func (r *Releaser) Publish(
 		report.Artifacts = append(report.Artifacts, artifact)
 	}
 
-	if semver.IsValid(version) {
+	if tag != "" {
 		report.FollowUps = append(report.FollowUps, &ReleaseReportFollowUp{
 			Name: "❄️ Nix",
-			Link: "https://github.com/dagger/nix",
+			Link: "https://github.com/" + githubOrgName + "/nix",
 		})
 
 		report.FollowUps = append(report.FollowUps, &ReleaseReportFollowUp{
 			Name: "🍺 Homebrew Tap",
-			Link: "https://github.com/dagger/homebrew-tap",
+			Link: "https://github.com/" + githubOrgName + "/homebrew-tap",
 		})
 		report.FollowUps = append(report.FollowUps, &ReleaseReportFollowUp{
 			Name: "🍺 Homebrew Core",
@@ -393,11 +403,11 @@ func (r *Releaser) Publish(
 
 		report.FollowUps = append(report.FollowUps, &ReleaseReportFollowUp{
 			Name: "🌌 Daggerverse",
-			Link: "https://github.com/dagger/dagger.io/pulls?q=author%3Adagger-ci+is%3Apr+in%3Atitle+dgvs+" + strings.TrimPrefix(version, "v"),
+			Link: "https://github.com/" + githubOrgName + "/dagger.io/pulls?q=author%3Adagger-ci+is%3Apr+in%3Atitle+dgvs+" + strings.TrimPrefix(version, "v"),
 		})
 	}
 
-	if semver.IsValid(version) && discordWebhook != nil {
+	if tag != "" && discordWebhook != nil {
 		if err := report.notify(ctx, discordWebhook); err != nil {
 			report.Errors = append(report.Errors, dag.Error(err.Error()))
 		}
