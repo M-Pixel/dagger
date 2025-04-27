@@ -39,11 +39,22 @@ record OperationArgument
 
 	/// <summary>Format argument into GraphQL query format.</summary>
 	/// <example><c>foo:1</c></example>
-	public ValueTask SerializeSingle(StringBuilder queryOut)
+	public async Task SerializeSingle(StringBuilder queryOut)
 	{
 		queryOut.Append(Name);
 		queryOut.Append(':');
-		return Value.Serialize(queryOut);
+		try
+		{
+			await Value.Serialize(queryOut);
+		}
+		catch (Exception exception) when (exception is not ParameterSerializationFailureException)
+		{
+			throw new ParameterSerializationFailureException
+			(
+				$"Failed to serialize parameter '{Name}': {exception.Message}",
+				new ParameterSerializationFailureExceptionOptions(Name){ Cause = exception }
+			);
+		}
 	}
 }
 

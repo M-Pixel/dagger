@@ -67,7 +67,7 @@ static class SolvableMethod
 
 		AwaitExpressionSyntax awaitComputeExpression = AwaitExpression
 		(
-			InvocationExpression("ComputeQuery")
+			InvocationExpression("SolveMethod")
 				.AddArgumentListArguments
 				(
 					IdentifierName("_newQueryTree_"),

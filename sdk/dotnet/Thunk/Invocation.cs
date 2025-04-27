@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
@@ -23,8 +24,6 @@ class Invocation
 
 	public async Task Run(FunctionCall functionCall, string parentName, string moduleName)
 	{
-		Console.Write(parentName);
-		Console.Write('.');
 		Task<string> functionNameTask = functionCall.Name();
 		Task<JSON> parentJsonTask = functionCall.Parent();
 
@@ -47,12 +46,10 @@ class Invocation
 			nameTask =>
 			{
 				string functionName = nameTask.Result;
-				Console.Write(functionName);
-				Console.WriteLine("(...)");
-				FunctionSearchResult result;
 
 				if (parentType == null || parentType.IsAbstract)
 				{
+					FunctionSearchResult result;
 					BindingFlags staticBinding = BindingFlags.Public | BindingFlags.Static;
 					if (parentType != null)
 					{
@@ -135,43 +132,142 @@ class Invocation
 		{
 			foreach (Exception innerException in TraverseAggregateExceptions(aggregateException))
 			{
-				switch (innerException)
-				{
-					case ExecErrorException execException:
-						Console.Error.Write("Command failed (");
-						Console.Error.Write(execException.ExitCode);
-						Console.Error.Write("): ");
-						Console.Error.Write(string.Join('\u241f', execException.Command));
-						Console.Error.WriteLine("---------- stdout ----------");
-						Console.Error.WriteLine(execException.Stdout);
-						Console.Error.WriteLine("---------- stderr ----------");
-						Console.Error.WriteLine(execException.Stderr);
-						Environment.Exit((int)execException.Code);
-						return;
-
-					case GraphQLRequestErrorException requestException:
-						Console.Error.WriteLine("Query failed.");
-						Console.Error.WriteLine("---------- context ----------");
-						Console.Error.WriteLine(requestException.RequestContext);
-						Console.Error.WriteLine("---------- response ----------");
-						foreach (GraphQLError graphQLError in requestException.Response.Errors ?? [])
-						{
-							Console.Error.WriteLine(graphQLError.Message);
-							if (graphQLError.Path != null)
-							{
-								Console.Error.Write("\tPath: ");
-								Console.Error.WriteLine(string.Join(' ', graphQLError.Path.Select(o => o.ToString())));
-							}
-							if (graphQLError.Extensions != null)
-								foreach (KeyValuePair<string,object> extension in graphQLError.Extensions)
-									Console.Error.WriteLine($"\t{extension.Key}: {extension.Value}");
-						}
-						Environment.Exit((int)requestException.Code);
-						return;
-				}
+				Console.Error.WriteLine($"Module threw {innerException.GetType().FullName}: {innerException.Message}");
+				LogExceptionProperties(innerException);
+				Console.Error.WriteLine(innerException.StackTrace);
 			}
 
-			throw;
+			Environment.Exit(1);
+		}
+		catch (Exception exception)
+		{
+			Console.Error.WriteLine($"Module threw {exception.GetType().FullName}: {exception.Message}");
+			LogExceptionProperties(exception);
+			Console.Error.WriteLine(exception.StackTrace);
+
+			Environment.Exit(1);
+		}
+	}
+
+	/// <summary>
+	/// Checks if the given type has overridden ToString directly (not inherited from parent)
+	/// </summary>
+	private static bool HasCustomToStringMethod(Type type)
+	{
+		var method = type.GetMethod("ToString", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+		return method != null && method.DeclaringType == type;
+	}
+
+	/// <summary>
+	/// Determines if a value should be printed directly or recursively processed
+	/// </summary>
+	private static bool ShouldPrintDirectly(object? value)
+	{
+		if (value == null)
+			return true;
+
+		Type valueType = value.GetType();
+		return value is string || valueType.IsPrimitive || HasCustomToStringMethod(valueType);
+	}
+
+	/// <summary>
+	/// Recursively prints a property value with proper indentation based on depth
+	/// </summary>
+	private static void PrintPropertyValue(string propertyName, object? value, int depth, HashSet<object>? visited = null)
+	{
+		visited ??= new HashSet<object>();
+		string indent = new('\t', depth);
+
+		// Handle null values
+		if (value == null)
+		{
+			Console.Error.WriteLine($"{indent}{propertyName}: null");
+			return;
+		}
+
+		// If the value can be printed directly, do so now
+		if (ShouldPrintDirectly(value))
+		{
+			Console.Error.WriteLine($"{indent}{propertyName}: {value}");
+			return;
+		}
+
+		// Prevent infinite recursion
+		if (value is not ValueType && !visited.Add(value))
+		{
+			Console.Error.WriteLine($"{indent}{propertyName}: *");
+			return;
+		}
+
+		// Handle dictionary types specifically
+		if (value is IDictionary dictionary)
+		{
+			Console.Error.WriteLine($"{indent}{propertyName}:");
+			foreach (DictionaryEntry entry in dictionary)
+			{
+				string keyStr = entry.Key.ToString() ?? "null";
+				PrintPropertyValue(keyStr, entry.Value, depth + 1, visited);
+			}
+			return;
+		}
+
+		// Handle general collections
+		if (value is IEnumerable collection and not string)
+		{
+			Console.Error.WriteLine($"{indent}{propertyName}:");
+			int i = 0;
+			foreach (var item in collection)
+			{
+				PrintPropertyValue($"[{i++}]", item, depth + 1, visited);
+			}
+			return;
+		}
+
+		// By this point, the value is a complex object but not a collection
+		// Print its properties recursively
+		PropertyInfo[] valueProperties = value.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance);
+		if (valueProperties.Length > 0)
+		{
+			Console.Error.WriteLine($"{indent}{propertyName}:");
+			foreach (var valueProperty in valueProperties)
+			{
+				try
+				{
+					object? propValue = valueProperty.GetValue(value);
+					PrintPropertyValue(valueProperty.Name, propValue, depth + 1, visited);
+				}
+				catch (Exception)
+				{
+					// Ignore property access failures
+				}
+			}
+			return;
+		}
+
+		// For objects with no properties, just print the value
+		Console.Error.WriteLine($"{indent}{propertyName}: {value}");
+	}
+
+	private static void LogExceptionProperties(Exception exception)
+	{
+		// Exceptions often include useful information in additional properties.
+		Type exceptionType = exception.GetType();
+		PropertyInfo[] properties = exceptionType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
+		foreach (PropertyInfo property in properties)
+		{
+			try
+			{
+				if (property.Name is "Message" or "StackTrace" or "InnerExceptions")
+					continue;
+
+				object? value = property.GetValue(exception);
+				PrintPropertyValue(property.Name, value, 1);
+			}
+			catch (Exception)
+			{
+				// Ignore exception property access failures
+			}
 		}
 	}
 

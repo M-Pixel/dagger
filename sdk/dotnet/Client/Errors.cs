@@ -144,7 +144,29 @@ public class ExecErrorException : DaggerException
 		Stdout = options.Stdout;
 		Stderr = options.Stderr;
 	}
+}
 
+record ParameterSerializationFailureExceptionOptions
+(
+	string ParameterName
+)
+    : DaggerExceptionOptions;
+
+public class ParameterSerializationFailureException : DaggerException
+{
 	/// <inheritdoc />
-	public override string ToString() => $"{base.ToString()}\nStdout:\n{Stdout}\nStderr:\n{Stderr}";
+	public override ErrorCode Code => ErrorCode.GraphQLRequestError;
+
+	/// <summary>The name of the parameter that failed to serialize.</summary>
+	public string ParameterName { get; }
+
+	internal ParameterSerializationFailureException
+	(
+		string message,
+		ParameterSerializationFailureExceptionOptions options
+	)
+		: base(message, options)
+	{
+		ParameterName = options.ParameterName;
+	}
 }

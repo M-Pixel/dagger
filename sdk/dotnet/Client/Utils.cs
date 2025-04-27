@@ -38,12 +38,31 @@ static class APIUtils
 	}
 
 	/// <summary>Convert querytree into a Graphql query then compute it.</summary>
-	public static async Task<JsonElement> ComputeQuery(ImmutableList<Operation> queryTree, IGraphQLClient client)
+	internal static async Task<JsonElement> ComputeQuery(ImmutableList<Operation> queryTree, IGraphQLClient client)
 	{
 		queryTree.ComputeNestedQuery();
 		StringBuilder queryStringBuilder = new();
 		await BuildQuery(queryStringBuilder, queryTree);
 		return await Compute(queryStringBuilder.ToString(), client);
+	}
+
+	/// <summary>
+	/// 	Invokes <see cref="ComputeQuery" /> for a "top-level" (user invoked) query (called by
+	/// 	<c>Dagger.Generated</c> methods).
+	/// </summary>
+	public static async Task<JsonElement> SolveMethod(ImmutableList<Operation> queryTree, IGraphQLClient client)
+	{
+		try
+		{
+			return await ComputeQuery(queryTree, client);
+		}
+		// ReSharper disable once RedundantCatchClause because we want to reset the stack trace.  When it's a
+		// DaggerException, we expect that it is the fault of the user's code; including query system implementation
+		// details in the call stack just makes it harder for the user to hone in on what is important to them.
+		catch (DaggerException)
+		{
+			throw;
+		}
 	}
 
 	/// <summary>Return a Graphql query result flattened.</summary>
