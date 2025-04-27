@@ -4,7 +4,9 @@
 package main
 
 import (
+	"context"
 	"dagger/bootstrap/internal/dagger"
+	"fmt"
 )
 
 type Bootstrap struct {
@@ -15,12 +17,52 @@ const (
 	uid = "1654" // "1654 is 1000 + the ASCII values of each of the characters in dotnet"
 )
 
+// ExecPrintErrors executes a command and returns an error if it fails, because Dagger traces seem to exclude the stderr
+// of the actually failing exec when it occurs within an SDK module.
+func ExecPrintErrors(cmd []string) dagger.WithContainerFunc {
+	return func(container *dagger.Container) *dagger.Container {
+		return container.With(func(r *dagger.Container) *dagger.Container {
+			// Run the command with ReturnTypeAny to survive execution failures
+			container := r.WithExec(cmd, dagger.ContainerWithExecOpts{Expect: dagger.ReturnTypeAny})
+
+			// Get the exit code
+			exitCode, err := container.ExitCode(context.Background())
+			if err != nil {
+				// If we can't even get the exit code, return the original container
+				return r
+			}
+
+			// Check if the command succeeded
+			if exitCode != 0 {
+				// Command failed, get stdout and stderr
+				stdout, err := container.Stdout(context.Background())
+				if err != nil {
+					stdout = "<failed to get stdout>"
+				}
+
+				stderr, err := container.Stderr(context.Background())
+				if err != nil {
+					stderr = "<failed to get stderr>"
+				}
+
+				// Log the error
+				fmt.Printf("Command failed with exit code %d\nstdout: %s\nstderr: %s\n", exitCode, stdout, stderr)
+
+				return r.WithExec(cmd)
+			}
+
+			// Return the container regardless of success or failure
+			return container
+		})
+	}
+}
+
 func Build(source *dagger.Directory, name string) *dagger.Directory {
 	return dag.DotnetSDK().DotnetSDKContainer().
 		WithDirectory(".", source, dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithExec([]string{
+		With(ExecPrintErrors([]string{
 			"dotnet", "build", name, "--output=/Out", "--nologo", "--configuration=Release", "--os=linux",
-			"-property:ContinuousIntegrationBuild=true", "-maxCpuCount"}).
+			"-property:ContinuousIntegrationBuild=true", "-maxCpuCount"})).
 		Directory("/Out")
 }
 
@@ -73,13 +115,14 @@ func (sdk *Bootstrap) ClientLayer(source *dagger.Directory) *dagger.Container {
 func (sdk *Bootstrap) ClientPackages(source *dagger.Directory) *dagger.Directory {
 	return dag.DotnetSDK().DotnetSDKContainer().
 		WithDirectory(".", source, dagger.ContainerWithDirectoryOpts{Owner: uid}).
-		WithExec([]string{
+		With(ExecPrintErrors([]string{
 			"dotnet", "pack", ".", "--output=/Out", "--nologo", "-property:ContinuousIntegrationBuild=true",
-			"-maxCpuCount"}).
+			"-maxCpuCount"})).
 		Directory("/Out")
 }
 
 func (sdk *Bootstrap) ModuleRuntime(
+	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJSON *dagger.File,
 // +defaultPath="/sdk/dotnet"
@@ -97,6 +140,7 @@ func (sdk *Bootstrap) ModuleRuntime(
 }
 
 func (sdk *Bootstrap) Codegen(
+	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
 // +defaultPath="/sdk/dotnet"
