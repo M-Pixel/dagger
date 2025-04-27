@@ -134,7 +134,6 @@ func (sdk *DotnetSdk) ModuleRuntime(
 
 	version, _ := dag.Version(ctx)
 	// TODO: Is it beneficial for any of this to be async?
-	// TODO: Support compiling the module if it's not pre-compiled
 
 	if sdk.PrimerContainer == nil {
 		sdk.PrimerContainer = dag.Container().From(registry + "dagger-dotnet-primer:" + version)
@@ -273,7 +272,11 @@ func (sdk *DotnetSdk) Codegen(
 		csprojFullPath := path.Join(subPath, csprojPath)
 		csproj, err := modSource.ContextDirectory().File(csprojFullPath).Contents(ctx)
 		if err == nil {
-			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, "0.16.1")) // TODO: Don't hardcode this version
+			version, err := dag.Version(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("failed to retrieve module version for dotnet code generation: %w", err)
+			}
+			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, version))
 		}
 	} else if !hasDll {
 		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
