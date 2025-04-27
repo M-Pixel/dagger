@@ -20,7 +20,8 @@ func TestShell(t *testing.T) {
 
 func daggerShell(script string) dagger.WithContainerFunc {
 	return func(c *dagger.Container) *dagger.Container {
-		return c.WithExec([]string{"dagger", "shell", "-c", script}, dagger.ContainerWithExecOpts{
+		return c.WithExec([]string{"dagger"}, dagger.ContainerWithExecOpts{
+			Stdin:                         script,
 			ExperimentalPrivilegedNesting: true,
 		})
 	}
@@ -28,7 +29,8 @@ func daggerShell(script string) dagger.WithContainerFunc {
 
 func daggerShellNoMod(script string) dagger.WithContainerFunc {
 	return func(c *dagger.Container) *dagger.Container {
-		return c.WithExec([]string{"dagger", "shell", "--no-mod", "-c", script}, dagger.ContainerWithExecOpts{
+		return c.WithExec([]string{"dagger", "-n"}, dagger.ContainerWithExecOpts{
+			Stdin:                         script,
 			ExperimentalPrivilegedNesting: true,
 		})
 	}
@@ -265,7 +267,7 @@ func (Other) Version() string {
 			WithWorkdir("modules/git").
 			With(daggerShell("url")).
 			Sync(ctx)
-		requireErrOut(t, err, "constructor: missing 1 positional argument")
+		requireErrOut(t, err, "constructor: requires 1 positional argument(s), received 0")
 	})
 
 	t.Run("current module required constructor arg function", func(ctx context.Context, t *testctx.T) {
@@ -282,7 +284,7 @@ func (Other) Version() string {
 			With(daggerShell("dep")).
 			Stdout(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"version": "dep function"}`, out)
+		require.Regexp(t, `Dep@xxh3:[a-f0-9]{16}`, out)
 	})
 
 	t.Run("dep doc type", func(ctx context.Context, t *testctx.T) {
@@ -381,6 +383,26 @@ func (Other) Version() string {
 		require.Contains(t, out, "load-container-from-id <id>")
 		require.Contains(t, out, "RETURNS")
 	})
+
+	t.Run("types result", func(ctx context.Context, t *testctx.T) {
+		out, err := setup.
+			With(daggerShell(".types")).
+			Stdout(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "An OCI-compatible container")
+		require.Contains(t, out, "A directory")
+		require.Contains(t, out, "Test main object")
+	})
+
+	t.Run("doc Test type", func(ctx context.Context, t *testctx.T) {
+		out, err := setup.
+			With(daggerShell(".help Test")).
+			Stdout(ctx)
+		require.NoError(t, err)
+		require.Contains(t, out, "OBJECT")
+		require.Contains(t, out, "Test main object")
+		require.Contains(t, out, "Encouragement")
+	})
 }
 
 func (ShellSuite) TestNoModule(ctx context.Context, t *testctx.T) {
@@ -415,7 +437,7 @@ func (ShellSuite) TestNoLoadModule(ctx context.Context, t *testctx.T) {
 	t.Run("dynamically loaded", func(ctx context.Context, t *testctx.T) {
 		c := connect(ctx, t)
 		out, err := modInit(t, c, "go", "").
-			With(daggerShellNoMod(".use .; .help")).
+			With(daggerShellNoMod(".cd .; .help")).
 			Stdout(ctx)
 		require.NoError(t, err)
 		require.Contains(t, out, "container-echo")
@@ -471,7 +493,7 @@ type Foo struct{
 			With(daggerShell("foo")).
 			Stdout(ctx)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"bar": "foobar"}`, out)
+		require.Regexp(t, `Foo@xxh3:[a-f0-9]{16}`, out)
 	})
 
 	t.Run("stateful", func(ctx context.Context, t *testctx.T) {
@@ -479,7 +501,7 @@ type Foo struct{
 		out, err := modInit(t, c, "go", test).
 			With(daggerExec("init", "--sdk=go", "--source=foo", "foo")).
 			With(sdkSourceAt("foo", "go", foo)).
-			With(daggerShell(".use foo; bar")).
+			With(daggerShell(".cd foo; bar")).
 			Stdout(ctx)
 		require.NoError(t, err)
 		require.Contains(t, out, "foobar")
@@ -510,7 +532,7 @@ func (ShellSuite) TestNotExists(ctx context.Context, t *testctx.T) {
 	_, err := modInit(t, c, "go", "").
 		With(daggerShell("load-container-from-id")).
 		Sync(ctx)
-	requireErrOut(t, err, "not found")
+	requireErrOut(t, err, "\"load-container-from-id\" does not exist")
 }
 
 func (ShellSuite) TestIntegerArg(ctx context.Context, t *testctx.T) {
@@ -581,7 +603,7 @@ func (ShellSuite) TestStateCommand(ctx context.Context, t *testctx.T) {
 		c := connect(ctx, t)
 		out, err := daggerCliBase(t, c).With(daggerShell(script)).Stdout(ctx)
 		require.NoError(t, err)
-		require.Contains(t, out, "foo")
+		require.Regexp(t, `Directory@xxh3:[a-f0-9]{16}`, out)
 	})
 
 	t.Run("pipeline from state value", func(ctx context.Context, t *testctx.T) {
@@ -650,13 +672,68 @@ func (ShellSuite) TestSliceFlag(ctx context.Context, t *testctx.T) {
 	require.Equal(t, "passwd\nshadow\n", out)
 }
 
+func (ShellSuite) TestStateInterpolation(ctx context.Context, t *testctx.T) {
+	c := connect(ctx, t)
+	modGen := daggerCliBase(t, c)
+
+	for _, tc := range []struct {
+		name     string
+		prompt   string
+		expected string
+	}{
+		{
+			name:     "single state result",
+			prompt:   `$($FOO | name)`,
+			expected: "foo",
+		},
+		{
+			name:     "interpolated command",
+			prompt:   `.$($FOO | contents) hello`,
+			expected: "hello\n",
+		},
+		{
+			name:     "single state argument",
+			prompt:   `directory | with-new-file test $($FOO | name) | file test | contents`,
+			expected: "foo",
+		},
+		{
+			name:     "multiple state argument",
+			prompt:   `directory | with-new-file ./$($FOO | name)_$($BAR | name).txt foobar | entries`,
+			expected: "foo_bar.txt\n",
+		},
+		{
+			name:     "command argument",
+			prompt:   `.ls ./$($FOO | name)/$($BAR | name)`,
+			expected: "foobar.txt\n",
+		},
+		{
+			name:     "builtin argument",
+			prompt:   `_echo ./$($FOO | name)/$($BAR | name)/`,
+			expected: "./foo/bar/\n",
+		},
+	} {
+		t.Run(tc.name, func(ctx context.Context, t *testctx.T) {
+			script := []string{
+				"FOO=$(directory | with-new-file foo echo | file foo)",
+				"BAR=$(directory | with-new-file bar directory | file bar)",
+			}
+			out, err := modGen.
+				WithNewFile("foo/bar/foobar.txt", "foobar").
+				With(daggerShellNoMod(strings.Join(append(script, tc.prompt), "\n"))).
+				Stdout(ctx)
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, out)
+		})
+	}
+}
+
 func (ShellSuite) TestCommandStateArgs(ctx context.Context, t *testctx.T) {
 	c := connect(ctx, t)
 	script := fmt.Sprintf("FOO=$(container | from %s | with-exec -- echo -n foo | stdout); .help $FOO", alpineImage)
 	_, err := daggerCliBase(t, c).
 		With(daggerShell(script)).
 		Sync(ctx)
-	requireErrOut(t, err, `"foo" not found`)
+	requireErrOut(t, err, `"foo" does not exist`)
 }
 
 func (ShellSuite) TestExecStderr(ctx context.Context, t *testctx.T) {
@@ -697,7 +774,7 @@ directory | with-new-file test bar | file test | contents
 	t.Run("async", func(ctx context.Context, t *testctx.T) {
 		script := `
 directory | with-new-file test foo | file test | contents &
-directory | with-new-file test bar | file test | contents & _wait
+directory | with-new-file test bar | file test | contents & .wait
 `
 		c := connect(ctx, t)
 		out, err := daggerCliBase(t, c).
@@ -712,7 +789,7 @@ directory | with-new-file test bar | file test | contents & _wait
 }
 
 func (ShellSuite) TestInterpreterBuiltins(ctx context.Context, t *testctx.T) {
-	t.Run("builtin", func(ctx context.Context, t *testctx.T) {
+	t.Run("internal", func(ctx context.Context, t *testctx.T) {
 		c := connect(ctx, t)
 		out, err := daggerCliBase(t, c).
 			With(daggerShell(`_echo foobar`)).
@@ -721,7 +798,16 @@ func (ShellSuite) TestInterpreterBuiltins(ctx context.Context, t *testctx.T) {
 		require.Equal(t, "foobar\n", out)
 	})
 
-	t.Run("internal", func(ctx context.Context, t *testctx.T) {
+	t.Run("exposed", func(ctx context.Context, t *testctx.T) {
+		c := connect(ctx, t)
+		out, err := daggerCliBase(t, c).
+			With(daggerShell(`.echo foobar`)).
+			Stdout(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "foobar\n", out)
+	})
+
+	t.Run("reserved", func(ctx context.Context, t *testctx.T) {
 		c := connect(ctx, t)
 		_, err := daggerCliBase(t, c).
 			With(daggerShell(`__dag`)).

@@ -98,7 +98,7 @@ jobs:
   daggerverse-bump-dagger:
     needs: publish
     if: ${{ github.repository == 'dagger/dagger' && github.ref_name != 'main' }}
-    runs-on: dagger-g3-v0-16-1-4c
+    runs-on: dagger-g3-v0-16-2-4c
     steps:
       - uses: actions/checkout@v4
       - name: "Bump Dagger version in Daggerverse"

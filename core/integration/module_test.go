@@ -5396,6 +5396,28 @@ func daggerExec(args ...string) dagger.WithContainerFunc {
 	}
 }
 
+func daggerNonNestedExec(args ...string) dagger.WithContainerFunc {
+	return func(c *dagger.Container) *dagger.Container {
+		return c.WithExec(append([]string{"dagger"}, args...), dagger.ContainerWithExecOpts{
+			ExperimentalPrivilegedNesting: false,
+		})
+	}
+}
+
+func daggerNonNestedRun(args ...string) dagger.WithContainerFunc {
+	args = append([]string{"run"}, args...)
+
+	return daggerNonNestedExec(args...)
+}
+
+func daggerClientAdd(generator string) dagger.WithContainerFunc {
+	return daggerExec("client", "add", "--generator="+generator, "--dev")
+}
+
+func daggerClientAddAt(generator string, outputDirPath string) dagger.WithContainerFunc {
+	return daggerExec("client", "add", "--generator="+generator, "--dev", outputDirPath)
+}
+
 func daggerQuery(query string, args ...any) dagger.WithContainerFunc {
 	return daggerQueryAt("", query, args...)
 }
@@ -5458,7 +5480,7 @@ func privateRepoSetup(c *dagger.Client, t *testctx.T, tc vcsTestCase) (dagger.Wi
 				WithExec([]string{
 					"git", "config", "--global",
 					"credential.https://" + tc.expectedHost + ".helper",
-					`!f() { test "$1" = get && echo "password=` + token + `"; }; f`,
+					`!f() { test "$1" = get && echo -e "password=` + token + `\nusername=git"; }; f`,
 				})
 		}
 

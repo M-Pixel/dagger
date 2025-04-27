@@ -17,7 +17,6 @@ import (
 	"github.com/dagger/testctx"
 	"github.com/moby/buildkit/identity"
 	"github.com/stretchr/testify/require"
-	"github.com/tidwall/gjson"
 
 	"dagger.io/dagger"
 )
@@ -208,6 +207,16 @@ func (m *Minimal) Reads(ctx context.Context, files []dagger.File) (string, error
 
 	t.Run("directory arg inputs", func(ctx context.Context, t *testctx.T) {
 		t.Run("local dir", func(ctx context.Context, t *testctx.T) {
+			src := `package main
+
+import "dagger/test/internal/dagger"
+
+type Test struct {}
+
+func (m *Test) Fn(dir *dagger.Directory) *dagger.Directory {
+	return dir
+}`
+
 			t.Run("abs path", func(ctx context.Context, t *testctx.T) {
 				c := connect(ctx, t)
 
@@ -217,19 +226,7 @@ func (m *Minimal) Reads(ctx context.Context, files []dagger.File) (string, error
 					With(daggerExec("init", "--source=.", "--name=test", "--sdk=go")).
 					WithNewFile("/dir/subdir/foo.txt", "foo").
 					WithNewFile("/dir/subdir/bar.txt", "bar").
-					WithNewFile("main.go", `package main
-
-import (
-	"dagger/test/internal/dagger"
-)
-
-type Test struct {}
-
-func (m *Test) Fn(dir *dagger.Directory) *dagger.Directory {
-	return dir
-}
-	`,
-					)
+					WithNewFile("main.go", src)
 
 				out, err := modGen.With(daggerCall("fn", "--dir", "/dir/subdir", "entries")).Stdout(ctx)
 				require.NoError(t, err)
@@ -249,18 +246,7 @@ func (m *Test) Fn(dir *dagger.Directory) *dagger.Directory {
 					With(daggerExec("init", "--source=.", "--name=test", "--sdk=go")).
 					WithNewFile("/root/foo.txt", "foo").
 					WithNewFile("/root/subdir/bar.txt", "bar").
-					WithNewFile("main.go", `package main
-
-import (
-	"dagger/test/internal/dagger"
-)
-type Test struct {}
-
-func (m *Test) Fn(dir *dagger.Directory) *dagger.Directory {
-	return dir
-}
-`,
-					)
+					WithNewFile("main.go", src)
 
 				out, err := modGen.With(daggerCall("fn", "--dir", "~", "entries")).Stdout(ctx)
 				require.NoError(t, err)
@@ -281,17 +267,7 @@ func (m *Test) Fn(dir *dagger.Directory) *dagger.Directory {
 					WithNewFile("/work/otherdir/foo.txt", "foo").
 					WithNewFile("/work/otherdir/bar.txt", "bar").
 					WithNewFile("/work/dir/subdir/blah.txt", "blah").
-					WithNewFile("main.go", `package main
-import (
-	"dagger/test/internal/dagger"
-)
-type Test struct {}
-
-func (m *Test) Fn(dir *dagger.Directory) *dagger.Directory {
-	return dir
-}
-	`,
-					)
+					WithNewFile("main.go", src)
 
 				out, err := modGen.With(daggerCall("fn", "--dir", "../otherdir", "entries")).Stdout(ctx)
 				require.NoError(t, err)
@@ -375,6 +351,73 @@ func (m *Test) Fn(
 					require.NotContains(t, out, "v0.9.2.md")
 				})
 			}
+		})
+	})
+
+	t.Run("git arg inputs", func(ctx context.Context, t *testctx.T) {
+		src := `package main
+
+import "dagger/test/internal/dagger"
+
+type Test struct {}
+
+func (m *Test) FnRepo(repo *dagger.GitRepository) *dagger.Directory {
+	return repo.Head().Tree()
+}
+
+func (m *Test) FnRef(ref *dagger.GitRef) *dagger.Directory {
+	return ref.Tree()
+}`
+
+		t.Run("local dir", func(ctx context.Context, t *testctx.T) {
+			c := connect(ctx, t)
+
+			modGen := goGitBase(t, c).
+				With(daggerExec("init", "--source=.", "--name=test", "--sdk=go")).
+				WithExec([]string{"git", "add", "."}).
+				WithExec([]string{"git", "commit", "-m", "initial commit"}).
+				WithExec([]string{"git", "branch", "ye-olde"}).
+				WithNewFile("main.go", src).
+				WithExec([]string{"git", "add", "."}).
+				WithExec([]string{"git", "commit", "-m", "my content"})
+
+			mainSha, err := modGen.WithExec([]string{"git", "rev-parse", "HEAD"}).Stdout(ctx)
+			require.NoError(t, err)
+			require.Regexp(t, `^[a-f0-9]{40}$`, strings.TrimSpace(mainSha))
+			yeOldeSha, err := modGen.WithExec([]string{"git", "rev-parse", "ye-olde"}).Stdout(ctx)
+			require.NoError(t, err)
+			require.Regexp(t, `^[a-f0-9]{40}$`, strings.TrimSpace(yeOldeSha))
+
+			out, err := modGen.With(daggerCall("fn-repo", "--repo", ".git", "file", "--path=.git/HEAD", "contents")).Stdout(ctx)
+			require.NoError(t, err)
+			require.Equal(t, mainSha, out)
+
+			out, err = modGen.With(daggerCall("fn-ref", "--ref", ".git", "file", "--path=.git/HEAD", "contents")).Stdout(ctx)
+			require.NoError(t, err)
+			require.Equal(t, mainSha, out)
+			out, err = modGen.With(daggerCall("fn-ref", "--ref", ".git#ye-olde", "file", "--path=.git/HEAD", "contents")).Stdout(ctx)
+			require.NoError(t, err)
+			require.Equal(t, yeOldeSha, out)
+		})
+
+		t.Run("remote git", func(ctx context.Context, t *testctx.T) {
+			c := connect(ctx, t)
+
+			modGen := goGitBase(t, c).
+				With(daggerExec("init", "--source=.", "--name=test", "--sdk=go")).
+				WithNewFile("main.go", src)
+
+			remote := "https://github.com/dagger/dagger.git"
+			out, err := modGen.With(daggerCall("fn-repo", "--repo", remote, "file", "--path=.git/HEAD", "contents")).Stdout(ctx)
+			require.NoError(t, err)
+			require.Regexp(t, `^[a-f0-9]{40}$`, strings.TrimSpace(out))
+
+			out, err = modGen.With(daggerCall("fn-ref", "--ref", remote, "file", "--path=.git/HEAD", "contents")).Stdout(ctx)
+			require.NoError(t, err)
+			require.Regexp(t, `^[a-f0-9]{40}$`, strings.TrimSpace(out))
+			out, err = modGen.With(daggerCall("fn-ref", "--ref", remote+"#v0.16.2", "file", "--path=.git/HEAD", "contents")).Stdout(ctx)
+			require.NoError(t, err)
+			require.Equal(t, "b3e6f765a547b22edc61a24336177348b9f00d94", strings.TrimSpace(out))
 		})
 	})
 
@@ -1366,7 +1409,7 @@ func (m *Minimal) Fn() []*Foo {
 		t.Run("default", func(ctx context.Context, t *testctx.T) {
 			out, err := modGen.With(daggerCall("fn")).Stdout(ctx)
 			require.NoError(t, err)
-			require.JSONEq(t, expectedJSON, gjson.Get(out, "#.{bar}").Raw)
+			require.Regexp(t, strings.Repeat(`- MinimalFoo@xxh3:[a-f0-9]{16}\n`, 3), out)
 		})
 
 		t.Run("print", func(ctx context.Context, t *testctx.T) {
@@ -1428,10 +1471,7 @@ func (m *Test) Fail() *dagger.Container {
 		t.Run("default", func(ctx context.Context, t *testctx.T) {
 			out, err := modGen.With(daggerCall("ctr")).Stdout(ctx)
 			require.NoError(t, err)
-			require.JSONEq(t,
-				`["echo", "hello"]`,
-				gjson.Get(out, "[@this].#(_type==Container).defaultArgs").Raw,
-			)
+			require.Regexp(t, `Container@xxh3:[a-f0-9]{16}`, out)
 		})
 
 		t.Run("exec", func(ctx context.Context, t *testctx.T) {
@@ -1482,10 +1522,7 @@ type Test struct {
 		t.Run("default", func(ctx context.Context, t *testctx.T) {
 			out, err := modGen.With(daggerCall("dir")).Stdout(ctx)
 			require.NoError(t, err)
-			actual := gjson.Get(out, "[@this].#(_type==Directory).entries").Array()
-			require.Len(t, actual, 2)
-			require.Equal(t, "bar.txt", actual[0].String())
-			require.Equal(t, "foo.txt", actual[1].String())
+			require.Regexp(t, `Directory@xxh3:[a-f0-9]{16}`, out)
 		})
 
 		t.Run("output", func(ctx context.Context, t *testctx.T) {
@@ -1536,8 +1573,7 @@ type Test struct {
 		t.Run("default", func(ctx context.Context, t *testctx.T) {
 			out, err := modGen.With(daggerCall("file")).Stdout(ctx)
 			require.NoError(t, err)
-			actual := gjson.Get(out, "[@this].#(_type==File).name").String()
-			require.Equal(t, "foo.txt", actual)
+			require.Regexp(t, `File@xxh3:[a-f0-9]{16}`, out)
 		})
 
 		t.Run("output", func(ctx context.Context, t *testctx.T) {
@@ -1565,32 +1601,35 @@ func (*Test) Secret() *dagger.Secret {
     return dag.SetSecret("foo", "bar")
 }
 
+func (*Test) Secret2() *dagger.Secret {
+    return dag.SetSecret("fizz", "buzz")
+}
+
 func (m *Test) Secrets() []*dagger.Secret {
     return []*dagger.Secret{
         m.Secret(),
+        m.Secret2(),
     }
 }
 `,
 		)
 
-		t.Run("single", func(context.Context, *testctx.T) {
+		t.Run("single", func(ctx context.Context, t *testctx.T) {
 			out, err := modGen.
 				With(daggerCall("secret")).
 				Stdout(ctx)
 
 			require.NoError(t, err)
-			require.Contains(t, out, "foo")
-			require.NotContains(t, out, "bar")
+			require.Regexp(t, `Secret@xxh3:[a-f0-9]{16}`, out)
 		})
 
-		t.Run("multiple", func(context.Context, *testctx.T) {
+		t.Run("multiple", func(ctx context.Context, t *testctx.T) {
 			out, err := modGen.
 				With(daggerCall("secrets")).
 				Stdout(ctx)
 
 			require.NoError(t, err)
-			require.Contains(t, out, "foo")
-			require.NotContains(t, out, "bar")
+			require.Regexp(t, strings.Repeat(`- Secret@xxh3:[a-f0-9]{16}\n`, 2), out)
 		})
 	})
 
@@ -1787,27 +1826,19 @@ type Foo struct {
 	t.Run("main object", func(ctx context.Context, t *testctx.T) {
 		out, err := modGen.With(daggerCall()).Stdout(ctx)
 		require.NoError(t, err)
-		// Deploy function should not be included
-		require.JSONEq(t, fmt.Sprintf(`{"_type": "Test", "baseImage": "%s"}`, alpineImage), out)
+		require.Regexp(t, `Test@xxh3:[a-f0-9]{16}`, out)
 	})
 
 	t.Run("no scalars", func(ctx context.Context, t *testctx.T) {
 		out, err := modGen.With(daggerCall("foo")).Stdout(ctx)
 		require.NoError(t, err)
-		// At minimum should print the type of the object
-		require.JSONEq(t, `{"_type": "TestFoo"}`, out)
+		require.Regexp(t, `TestFoo@xxh3:[a-f0-9]{16}`, out)
 	})
 
 	t.Run("list of objects", func(ctx context.Context, t *testctx.T) {
-		expected := []string{"foo.txt", "bar.txt"}
 		out, err := modGen.With(daggerCall("files")).Stdout(ctx)
 		require.NoError(t, err)
-		actual := gjson.Get(out, "@this").Array()
-		require.Len(t, actual, len(expected))
-		for i, res := range actual {
-			require.Equal(t, "File", res.Get("_type").String())
-			require.Equal(t, expected[i], res.Get("name").String())
-		}
+		require.Regexp(t, strings.Repeat(`- File@xxh3:[a-f0-9]{16}\n`, 2), out)
 	})
 }
 
