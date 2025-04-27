@@ -50,6 +50,8 @@ type ObjectType interface {
 	// Object interface.
 	// cacheKeyFun is optional, if not set the default dagql ID cache key will be used.
 	Extend(spec FieldSpec, fun FieldFunc, cacheKeyFun FieldCacheKeyFunc)
+	// FieldSpec looks up a field spec by name.
+	FieldSpec(name string, views ...string) (FieldSpec, bool)
 }
 
 type IDType interface {
@@ -77,6 +79,8 @@ type IDable interface {
 type Object interface {
 	Typed
 	IDable
+	PostCallable
+
 	// ObjectType returns the type of the object.
 	ObjectType() ObjectType
 
@@ -95,6 +99,14 @@ type Object interface {
 	//
 	// Any Nullable values are automatically unwrapped.
 	Select(context.Context, *Server, Selector) (Typed, *call.ID, error)
+}
+
+// A type that has a callback attached that needs to always run before returned to a caller
+// whether or not the type is being returned from cache or not
+type PostCallable interface {
+	// Return the postcall func (or nil if not set) and the Typed value in case it was wrapped
+	// with a type used for attaching the postcall func
+	GetPostCall() (func(context.Context) error, Typed)
 }
 
 // ScalarType represents a GraphQL Scalar type.
@@ -130,6 +142,27 @@ type Setter interface {
 type InputDecoder interface {
 	// Decode converts a value to the Input type, if possible.
 	DecodeInput(any) (Input, error)
+}
+
+// Wrapper is an interface for types that wrap another type.
+type Wrapper interface {
+	Unwrap() Typed
+}
+
+// UnwrapAs attempts casting val to T, unwrapping as necessary.
+//
+// NOTE: the order of operations is important here - it's important to first
+// check compatibility with T before unwrapping, since sometimes T also
+// implements Wrapper.
+func UnwrapAs[T any](val any) (T, bool) {
+	t, ok := val.(T)
+	if ok {
+		return t, true
+	}
+	if wrapper, ok := val.(Wrapper); ok {
+		return UnwrapAs[T](wrapper.Unwrap())
+	}
+	return t, false
 }
 
 // Int is a GraphQL Int scalar.

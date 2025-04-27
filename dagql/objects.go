@@ -87,6 +87,14 @@ func (class Class[T]) Field(name string, views ...string) (Field[T], bool) {
 	return class.fieldLocked(name, views...)
 }
 
+func (class Class[T]) FieldSpec(name string, views ...string) (FieldSpec, bool) {
+	field, ok := class.Field(name, views...)
+	if !ok {
+		return FieldSpec{}, false
+	}
+	return field.Spec, true
+}
+
 func (class Class[T]) fieldLocked(name string, views ...string) (Field[T], bool) {
 	fields, ok := class.fields[name]
 	if !ok {
@@ -246,12 +254,31 @@ func (cls Class[T]) New(id *call.ID, val Typed) (Object, error) {
 }
 
 // Call calls a field on the class against an instance.
-func (cls Class[T]) Call(ctx context.Context, node Instance[T], fieldName string, view string, args map[string]Input) (Typed, error) {
+func (cls Class[T]) Call(
+	ctx context.Context,
+	node Instance[T],
+	fieldName string,
+	view string,
+	args map[string]Input,
+) (Typed, func(context.Context) error, error) {
 	field, ok := cls.Field(fieldName, view)
 	if !ok {
-		return nil, fmt.Errorf("Call: %s has no such field: %q", cls.inner.Type().Name(), fieldName)
+		return nil, nil, fmt.Errorf("Call: %s has no such field: %q", cls.inner.Type().Name(), fieldName)
 	}
-	return field.Func(ctx, node, args)
+
+	val, err := field.Func(ctx, node, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// field implementations can optionally return a wrapped Typed val that has
+	// a callback that should always run after the field is called
+	var postCall func(context.Context) error
+	if postCallable, ok := UnwrapAs[PostCallable](val); ok {
+		postCall, val = postCallable.GetPostCall()
+	}
+
+	return val, postCall, nil
 }
 
 // Instance is an instance of an Object type.
@@ -260,6 +287,7 @@ type Instance[T Typed] struct {
 	Self        T
 	Class       Class[T]
 	Module      *call.ID
+	postCall    func(context.Context) error
 }
 
 var _ Typed = Instance[Typed]{}
@@ -279,11 +307,6 @@ func (r Instance[T]) ObjectType() ObjectType {
 // ID returns the ID of the instance.
 func (r Instance[T]) ID() *call.ID {
 	return r.Constructor
-}
-
-// Wrapper is an interface for types that wrap another type.
-type Wrapper interface {
-	Unwrap() Typed
 }
 
 var _ Wrapper = Instance[Typed]{}
@@ -314,9 +337,18 @@ func (r Instance[T]) WithMetadata(customDigest digest.Digest, isPure bool) Insta
 	}
 }
 
+func (r Instance[T]) WithPostCall(fn func(context.Context) error) Instance[T] {
+	r.postCall = fn
+	return r
+}
+
+func (r Instance[T]) GetPostCall() (func(context.Context) error, Typed) {
+	return r.postCall, r
+}
+
 func NoopDone(res Typed, cached bool, rerr error) {}
 
-// Selects calls the field on the instance specified by the selector
+// Select calls the field on the instance specified by the selector
 func (r Instance[T]) Select(ctx context.Context, s *Server, sel Selector) (Typed, *call.ID, error) {
 	view := sel.View
 	field, ok := r.Class.Field(sel.Field, view)
@@ -441,56 +473,61 @@ func (r Instance[T]) call(
 	newID *call.ID,
 	inputArgs map[string]Input,
 ) (Typed, *call.ID, error) {
-	doCall := func(ctx context.Context) (innerVal Typed, innerErr error) {
+	doCall := func(ctx context.Context) (innerVal Typed, postCall func(context.Context) error, innerErr error) {
 		if s.telemetry != nil {
 			wrappedCtx, done := s.telemetry(ctx, r, newID)
 			defer func() { done(innerVal, false, innerErr) }()
 			ctx = wrappedCtx
 		}
 
-		innerVal, innerErr = r.Class.Call(ctx, r, newID.Field(), newID.View(), inputArgs)
+		innerVal, postCall, innerErr = r.Class.Call(ctx, r, newID.Field(), newID.View(), inputArgs)
 		if innerErr != nil {
-			return nil, innerErr
+			return nil, nil, innerErr
 		}
 
 		if n, ok := innerVal.(Derefable); ok {
 			innerVal, ok = n.Deref()
 			if !ok {
-				return nil, nil
+				return nil, nil, nil
 			}
 		}
 		nth := int(newID.Nth())
 		if nth != 0 {
 			enum, ok := innerVal.(Enumerable)
 			if !ok {
-				return nil, fmt.Errorf("cannot sub-select %dth item from %T", nth, innerVal)
+				return nil, nil, fmt.Errorf("cannot sub-select %dth item from %T", nth, innerVal)
 			}
 			innerVal, innerErr = enum.Nth(nth)
 			if innerErr != nil {
-				return nil, innerErr
+				return nil, nil, innerErr
 			}
 			if n, ok := innerVal.(Derefable); ok {
 				innerVal, ok = n.Deref()
 				if !ok {
-					return nil, nil
+					return nil, nil, nil
 				}
 			}
 		}
 
-		return innerVal, nil
+		return innerVal, postCall, nil
 	}
-
 	ctx = idToContext(ctx, newID)
 	dig := newID.Digest()
 	var val Typed
+	var postCall func(context.Context) error
 	var err error
 	if newID.IsTainted() {
-		val, err = doCall(ctx)
+		val, postCall, err = doCall(ctx)
 	} else {
-		val, _, err = s.Cache.GetOrInitialize(ctx, dig, doCall)
+		val, _, postCall, err = s.Cache.GetOrInitializeWithPostCall(ctx, dig, doCall)
 	}
 	if err != nil {
 		return nil, nil, err
+	}
+	if postCall != nil {
+		if err := postCall(ctx); err != nil {
+			return nil, nil, fmt.Errorf("post-call error: %w", err)
+		}
 	}
 
 	// If the returned val is IDable, is pure, and has a different digest than the original, then
@@ -522,6 +559,31 @@ func (r Instance[T]) call(
 	}
 
 	return val, newID, nil
+}
+
+// PostCallTyped wraps a Typed value with an additional callback that
+// needs to be called after any value is returned, whether the value was from
+// cache or not
+type PostCallTyped struct {
+	Typed
+	postCall func(context.Context) error
+}
+
+var _ PostCallable = PostCallTyped{}
+
+func NewPostCallTyped(t Typed, fn func(context.Context) error) PostCallTyped {
+	return PostCallTyped{
+		Typed:    t,
+		postCall: fn,
+	}
+}
+
+func (p PostCallTyped) GetPostCall() (func(context.Context) error, Typed) {
+	return p.postCall, p.Typed
+}
+
+func (p PostCallTyped) Unwrap() Typed {
+	return p.Typed
 }
 
 type View interface {
@@ -666,6 +728,9 @@ type FieldSpec struct {
 	Type Typed
 	// Meta indicates that the field has no impact on the field's result.
 	Meta bool
+	// Sensitive indicates that the value returned by this field is sensitive and
+	// should not be displayed in telemetry.
+	Sensitive bool
 	// ImpurityReason indicates that the field's result may change over time.
 	ImpurityReason string
 	// DeprecatedReason deprecates the field and provides a reason.
@@ -853,6 +918,11 @@ type Field[T Typed] struct {
 
 func (field Field[T]) Extend() Field[T] {
 	field.Spec.extend = true
+	return field
+}
+
+func (field Field[T]) Sensitive() Field[T] {
+	field.Spec.Sensitive = true
 	return field
 }
 

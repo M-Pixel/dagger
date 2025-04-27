@@ -287,6 +287,15 @@ func (iface *InterfaceType) Install(ctx context.Context, dag *dagql.Server) erro
 				if err != nil {
 					return nil, fmt.Errorf("failed to call interface function %s.%s: %w", ifaceName, fieldDef.Name, err)
 				}
+				if postCallRes, ok := dagql.UnwrapAs[dagql.PostCallable](res); ok {
+					var postCall func(context.Context) error
+					postCall, res = postCallRes.GetPostCall()
+					if postCall != nil {
+						if err := postCall(ctx); err != nil {
+							return nil, fmt.Errorf("failed to run post-call for %s.%s: %w", ifaceName, fieldDef.Name, err)
+						}
+					}
+				}
 
 				if fnTypeDef.ReturnType.Underlying().Kind != TypeDefKindInterface {
 					return res, nil

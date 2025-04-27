@@ -366,8 +366,7 @@ func (obj *ModuleObject) installConstructor(ctx context.Context, dag *dagql.Serv
 				Server:       dag,
 			})
 		},
-		// cache constructor calls per client; a given client will hit cache when making the same call repeatedly
-		CachePerClientObject,
+		nil,
 	)
 
 	return nil
@@ -476,11 +475,6 @@ func objFun(ctx context.Context, mod *Module, objDef *ObjectTypeDef, fun *Functi
 			})
 			return modFun.Call(ctx, opts)
 		},
-		// Cache calls per client; a given client will hit cache when making the same call repeatedly.
-		// We can't *quite* mark them as fully cached across clients in a session, since Call has special
-		// logic for transferring secrets between cached calls (covered by TestModule/TestSecretNested
-		// integ tests).
-		CacheKeyFunc: CachePerClient[*ModuleObject, map[string]dagql.Input],
 	}, nil
 }
 
@@ -495,7 +489,11 @@ func (f *CallableField) Call(ctx context.Context, opts *CallOpts) (dagql.Typed, 
 	if !ok {
 		return nil, fmt.Errorf("field %q not found on object %q", f.Field.Name, opts.ParentFields)
 	}
-	return f.Return.ConvertFromSDKResult(ctx, val)
+	typed, err := f.Return.ConvertFromSDKResult(ctx, val)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert field %q: %w", f.Field.Name, err)
+	}
+	return typed, nil
 }
 
 func (f *CallableField) ReturnType() (ModType, error) {
