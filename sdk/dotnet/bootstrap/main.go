@@ -6,7 +6,8 @@ package main
 import (
 	"context"
 	"dagger/bootstrap/internal/dagger"
-	"fmt"
+	"strconv"
+	"strings"
 )
 
 type Bootstrap struct {
@@ -45,13 +46,9 @@ func ExecPrintErrors(cmd []string) dagger.WithContainerFunc {
 					stderr = "<failed to get stderr>"
 				}
 
-				// Log the error
-				fmt.Printf("Command failed with exit code %d\nstdout: %s\nstderr: %s\n", exitCode, stdout, stderr)
-
-				return r.WithExec(cmd)
+				panic("Command `" + strings.Join(cmd, " ") + "` failed with exit code " + strconv.Itoa(exitCode) + "\nstdout: " + stdout + "\nstderr: " + stderr + "\n")
 			}
 
-			// Return the container regardless of success or failure
 			return container
 		})
 	}
