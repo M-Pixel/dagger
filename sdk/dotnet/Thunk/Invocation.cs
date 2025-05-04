@@ -185,7 +185,20 @@ class Invocation
 			return;
 		}
 
-		// If the value can be printed directly, do so now
+		// Handle KeyValuePair specifically
+		Type valueType = value.GetType();
+		if (valueType.IsGenericType && valueType.GetGenericTypeDefinition() == typeof(KeyValuePair<,>))
+		{
+			var keyProperty = valueType.GetProperty("Key")!;
+			var valueProperty = valueType.GetProperty("Value")!;
+			var key = keyProperty.GetValue(value)?.ToString() ?? "null";
+			var pairValue = valueProperty.GetValue(value);
+
+			Console.Error.WriteLine($"{indent}{propertyName}:");
+			PrintPropertyValue(key, pairValue, depth + 1, visited);
+			return;
+		}
+
 		if (ShouldPrintDirectly(value))
 		{
 			Console.Error.WriteLine($"{indent}{propertyName}: {value}");
