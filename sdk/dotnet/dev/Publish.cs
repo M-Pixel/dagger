@@ -101,7 +101,7 @@ public static partial class DevelopmentTimeTasks
 			.WithDirectory(".", packages)
 			.WithExec([
 				"sh", "-c",
-				"dotnet nuget push *.nupkg --source=https://api.nuget.org/v3/index.json --no-symbols --api-key=" +
+				"dotnet nuget push *.nupkg --source=https://api.nuget.org/v3/index.json --no-symbols --skip-duplicate --api-key=" +
 				await key.Plaintext()
 			])
 			.Stdout();
