@@ -133,6 +133,7 @@ func (sdk *DotnetSdk) ModuleRuntime(
 	}
 
 	version, _ := dag.Version(ctx)
+	version = version[1:] // trim v prefix
 	// TODO: Is it beneficial for any of this to be async?
 
 	if sdk.PrimerContainer == nil {
@@ -276,7 +277,7 @@ func (sdk *DotnetSdk) Codegen(
 			if err != nil {
 				return nil, fmt.Errorf("failed to retrieve module version for dotnet code generation: %w", err)
 			}
-			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, version))
+			buildDirectory = buildDirectory.WithNewFile(csprojPath, replaceVersion(csproj, version[1:])) // trim v pref.
 		}
 	} else if !hasDll {
 		csproj, err := os.ReadFile("/src/sdk/dotnet/module/Template.csproj")
@@ -302,6 +303,7 @@ func (sdk *DotnetSdk) CodegenImplementation(
 	noDebug bool,
 ) *dagger.Directory {
 	version, _ := dag.Version(ctx)
+	version = version[1:]
 
 	// buildDirectory composition doesn't use any parameters besides introspectionJSON, so if introspectionJSON is
 	// identical between modules, code generation is not re-run unnecessarily.

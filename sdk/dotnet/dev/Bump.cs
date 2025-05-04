@@ -6,7 +6,8 @@ using static Dagger.Alias;
 
 public static partial class DevelopmentTimeTasks
 {
-	private static Task<string> DaggerVerion => _daggerVersion ??= DAG.Version();
+	private static Task<string> DaggerVerion =>
+		_daggerVersion ??= DAG.Version().ContinueWith(versionTask => versionTask.Result[1..]); // Remove the "v" prefix
 	[JsonIgnore] private static Task<string>? _daggerVersion;
 
 	public static async Task<Directory> Bump
