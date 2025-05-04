@@ -13,8 +13,7 @@ using static Dagger.Alias;
 			"*",
 			"!Client/Client.csproj", "!dagger-icon.png", "!**/*.cs",
 			"!Primer/Primer.csproj", "!Primer/**/*.cs",
-			"!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs",
-			"!Thunk/Thunk.csproj", "!Thunk/**/*.cs"
+			"!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs"
 		]
 	)
 ]
@@ -34,7 +33,7 @@ public static partial class DevelopmentTimeTasks
 			PublishClient(source.SubDirectory("Client"), noSecret, dryRun: true, version),
 			PublishCodeGenerator(source, "no URL", "no user", noSecret, dryRun: true, version),
 			PublishPrimer(source, "no URL", "no user", noSecret, dryRun: true, version),
-			PublishThunk(source.SubDirectory("Thunk"), "no URL", "no user", noSecret, dryRun: true, version)
+			PublishThunk("no URL", "no user", noSecret, dryRun: true, version)
 		);
 	}
 
@@ -68,7 +67,6 @@ public static partial class DevelopmentTimeTasks
 			),
 			PublishThunk
 			(
-				source,
 				containerRegistryUrl, containerRegistryUsername, containerRegistryPassword,
 				dryRun: false,
 				version
@@ -155,8 +153,6 @@ public static partial class DevelopmentTimeTasks
 
 	public static async Task<string> PublishThunk
 	(
-		[DirectoryFromContext(Ignore = ["*", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs"])]
-		Directory source,
 		string url,
 		string user,
 		Secret secret,
@@ -166,7 +162,7 @@ public static partial class DevelopmentTimeTasks
 		=> await (await ContainerWithStaticAnnotations("dagger-dotnet-thunk"))
 			.WithAnnotation("org.opencontainers.image.title", "Dagger Dotnet SDK Thunk")
 			.WithAnnotation("org.opencontainers.image.description", "Introspects and invokes Dotnet Dagger modules.")
-			.WithDirectory("/", DAG.GetBootstrap().Thunk(source).Directory("/"))
+			.WithDirectory("/", DAG.GetBootstrap().Thunk().Directory("/"))
 			.WithDynamicAnnotations()
 			.WithRegistryAuth(url, user, secret)
 			.Publish($"{url}/dagger-dotnet-thunk:{version ?? await DaggerVerion}", dryRun);

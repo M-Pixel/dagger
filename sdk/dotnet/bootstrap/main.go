@@ -93,7 +93,20 @@ func (sdk *Bootstrap) CodeGenerator(source *dagger.Directory) *dagger.Container 
 				Exclude: []string{"Dagger.CodeGenerator.pdb"}})
 }
 
-func (sdk *Bootstrap) Thunk(source *dagger.Directory) *dagger.Container {
+func (sdk *Bootstrap) Thunk(
+	// +defaultPath="/sdk/dotnet"
+	// +ignore=["*", "!Client/Client.csproj", "!Client/**/*.cs", "!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs", "!Thunk/dagger.json", "!Primer/Primer.csproj", "!Primer/**/*.cs", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs", "!module/**"]
+	source *dagger.Directory,
+) *dagger.Container {
+	source = source.
+		WithDirectory(
+			"Thunk",
+			dag.Directory().
+				WithDirectory("sdk/dotnet", source).
+				WithDirectory("sdk/dotnet/bootstrap", dag.CurrentModule().Source()).
+				AsModuleSource(dagger.DirectoryAsModuleSourceOpts{SourceRootPath: "sdk/dotnet/Thunk"}).
+				GeneratedContextDirectory().
+				Directory("sdk/dotnet/Thunk"))
 	return dag.Container().
 		WithDirectory("/Thunk", Build(source, "Thunk"),
 			dagger.ContainerWithDirectoryOpts{
@@ -122,13 +135,12 @@ func (sdk *Bootstrap) ModuleRuntime(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJSON *dagger.File,
-// +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!*/*.csproj", "!Thunk/dagger.json", "!*/**/*.cs", "!Client/dagger-icon.png"]
+	// +defaultPath="/sdk/dotnet"
+	// +ignore=["*", "!Client/Client.csproj", "!Client/**/*.cs", "!Client/dagger-icon.png", "!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs", "!Primer/Primer.csproj", "!Primer/**/*.cs", "!Thunk/dagger.json", "!Thunk/Thunk.csproj", "!Thunk/**/*.cs", "!module/**"]
 	source *dagger.Directory,
 ) (*dagger.Container, error) {
 	// Thunk needs Dagger.Generated.csproj to compile.
 	implementation := dag.DotnetSDK().InjectCodegenDependencies(sdk.Primer(source), sdk.CodeGenerator(source))
-	source = source.WithDirectory("/Thunk", implementation.CodegenImplementation(introspectionJSON /* noDebug */, true))
 	return implementation.
 		InjectModuleRuntimeDependencies(
 			sdk.ClientLayer(source.Directory("/Client")),
@@ -140,8 +152,8 @@ func (sdk *Bootstrap) Codegen(
 	ctx context.Context,
 	modSource *dagger.ModuleSource,
 	introspectionJson *dagger.File,
-// +defaultPath="/sdk/dotnet"
-// +ignore=["*", "!*/*.csproj", "!Thunk/dagger.json", "!*/**/*.cs", "!Client/dagger-icon.png"]
+	// +defaultPath="/sdk/dotnet"
+	// +ignore=["*", "!Client/Client.csproj", "!Client/**/*.cs", "!CodeGenerator/CodeGenerator.csproj", "!CodeGenerator/**/*.cs", "!Primer/Primer.csproj", "!Primer/**/*.cs"]
 	source *dagger.Directory,
 ) (*dagger.GeneratedCode, error) {
 	return dag.DotnetSDK().
