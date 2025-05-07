@@ -371,7 +371,7 @@ func (r *Releaser) Publish(
 			eg.Go(func() error {
 				artifact := &ReleaseReportArtifact{
 					Name:   component.name,
-					Tag:    componentTag,
+					Tag:    component.tag,
 					Link:   component.link,
 					Notify: true,
 				}
@@ -382,8 +382,8 @@ func (r *Releaser) Publish(
 					return nil
 				}
 
-				notes := r.changeNotes(component.path, version)
-				if err := r.githubRelease(ctx, "https://github.com/"+githubOrgName+"/dagger", tag, componentTag, notes, githubToken, dryRun); err != nil {
+				notes := r.changeNotes(component.path, componentTag)
+				if err := r.githubRelease(ctx, "https://github.com/"+githubOrgName+"/dagger", componentTag, component.tag, notes, githubToken, dryRun); err != nil {
 					artifact.Errors = append(artifact.Errors, dag.Error(err.Error()))
 					return nil
 				}
